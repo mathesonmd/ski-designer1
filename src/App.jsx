@@ -314,13 +314,6 @@ const PRESETS=[
   makePreset("Twin Tip",{length:1720,tipWidth:118,waistWidth:90,tailWidth:118,tipLength:220,tailLength:220},rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:3,waistPosition:0.50}),
 ];
 // ══════════════ EXPORTS ══════════════
-function getFullOutlinePoints(ski){
-  const{right,left}=computeOutline(ski);
-  const pts=[];
-  right.forEach(p=>pts.push({x:p.x,y:p.y}));
-  for(let i=left.length-1;i>=0;i--)pts.push({x:left[i].x,y:left[i].y});
-  return pts;
-}
 function downloadFile(content,filename,mime){
   const blob=new Blob([content],{type:mime});const url=URL.createObjectURL(blob);
   const a=document.createElement("a");a.href=url;a.download=filename;
