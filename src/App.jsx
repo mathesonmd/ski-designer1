@@ -1,22 +1,49 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
+// ══════════════ BLACK CHAPEL THEME ══════════════
 const C = {
-  bg: "#060b14", grid: "#0e1525", gridMajor: "#141f35",
-  skiFill: "rgba(0, 200, 240, 0.04)", skiStroke: "#00ccee", skiGlow: "rgba(0, 204, 238, 0.25)",
-  control: "#ff6b35", controlHover: "#ffb800", controlActive: "#ff3060",
-  handle: "#886bff", handleLine: "rgba(136,107,255,0.35)",
-  dim: "rgba(255,255,255,0.3)", dimText: "rgba(255,255,255,0.7)",
-  center: "rgba(255,255,255,0.07)", panel: "#0b1120", panelBorder: "#1a2540",
-  inputBg: "#0f1829", inputBorder: "#1e2d4a", inputFocus: "#00ccee",
-  label: "#6b7fa0", value: "#e2e8f0", heading: "#00ccee",
-  snow: "rgba(255,255,255,0.15)", profileFill: "rgba(0, 200, 240, 0.06)",
-  coreFill: "rgba(255, 180, 80, 0.08)", coreStroke: "#ffb850", coreGlow: "rgba(255,184,80,0.25)",
-  coreNode: "#ffb850",
-  flexStroke: "#ff4080", flexFill: "rgba(255, 64, 128, 0.08)", flexGlow: "rgba(255,64,128,0.3)",
-  eiStroke: "#40ff80", eiFill: "rgba(64, 255, 128, 0.06)",
-  exportBtn: "#2a7fff",
+  bg:           "#3D3D3A",
+  bgDeep:       "#2A2A28",
+  bgLight:      "#4A4A47",
+  panel:        "#2F2F2D",
+  panelLight:   "#4A4A47",
+  panelBorder:  "#5A5A55",
+  gridLine:     "#4F4F4A",
+  gridMajor:    "#5A5A55",
+  center:       "rgba(200,147,90,0.20)",
+  snow:         "rgba(240,237,228,0.30)",
+  skiFill:      "rgba(240,237,228,0.08)",
+  skiStroke:    "#F0EDE4",
+  skiGlow:      "rgba(240,237,228,0.20)",
+  control:      "#D85A30",
+  controlHover: "#E87A55",
+  controlActive:"#FFD080",
+  handle:       "#C8935A",
+  handleLine:   "rgba(200,147,90,0.55)",
+  label:        "#A8A39A",
+  labelDim:     "#7A766E",
+  value:        "#F0EDE4",
+  heading:      "#C8935A",
+  dim:          "rgba(240,237,228,0.35)",
+  dimText:      "rgba(240,237,228,0.75)",
+  inputBg:      "#1F1F1D",
+  inputBorder:  "#5A5A55",
+  inputFocus:   "#C8935A",
+  profileFill:  "rgba(240,237,228,0.06)",
+  coreFill:     "rgba(200,147,90,0.10)",
+  coreStroke:   "#C8935A",
+  coreGlow:     "rgba(200,147,90,0.30)",
+  coreNode:     "#C8935A",
+  flexStroke:   "#D85A30",
+  flexFill:     "rgba(216,90,48,0.10)",
+  flexGlow:     "rgba(216,90,48,0.35)",
+  eiStroke:     "#F0EDE4",
+  eiFill:       "rgba(240,237,228,0.06)",
+  exportBtn:    "#C8935A",
+  zoomFrame:    "rgba(200,147,90,0.7)",
 };
 
+// ══════════════ MATERIALS ══════════════
 const WOODS = {
   paulownia:{name:"Paulownia",E:5000,density:280},poplar:{name:"Poplar",E:8800,density:420},
   aspen:{name:"Aspen",E:9000,density:385},ash:{name:"Ash",E:12000,density:650},
@@ -38,32 +65,60 @@ const CARBON = {
 const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=2,BASE_E=800,BASE_THICK=1.2;
 
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
-function bez(a,b,c,d,t){const u=1-t;return u*u*u*a+3*u*u*t*b+3*u*t*t*c+t*t*t*d;}
-function evalBezSeg(nodes,seg,lt){
-  const n0=nodes[seg],n1=nodes[seg+1];
-  const hx2=n0.hx2!==undefined?n0.hx2:n0.hx,hy2=n0.hy2!==undefined?n0.hy2:n0.hy;
-  return{x:bez(n0.x,n0.x+hx2,n1.x+n1.hx,n1.x,lt),y:bez(n0.y,n0.y+hy2,n1.y+n1.hy,n1.y,lt)};
+
+// ══════════════ BEZIER (2-node smooth shape) ══════════════
+// Convention: each shape (tip or tail) is a SINGLE cubic bezier segment with 2 endpoint nodes.
+// Each node has: x, y (in normalized [0,1] space) and a tangent vector (tx, ty).
+// The tangent vector is the handle direction & length emanating FROM the node toward the
+// interior of the curve. (So at node 0, tangent points "forward into segment"; at node 1, tangent
+// points "backward into segment.")
+//
+// For the tip:
+//   x = 0 means centerline, x = 1 means full sidecut width
+//   y = 0 means contact-point, y = 1 means nose-end
+// For the tail:
+//   x = 0 means centerline, x = 1 means full sidecut width
+//   y = 0 means contact-point, y = 1 means tail-end
+//
+// A 2-node shape is parameterized by exactly TWO tangent handles, which is much simpler than
+// the 3-node Illustrator-style approach and matches how skis are actually shaped in industry tools.
+function cubicBez(p0,p1,p2,p3,t){const u=1-t;return u*u*u*p0+3*u*u*t*p1+3*u*t*t*p2+t*t*t*p3;}
+function evalBez(n0, n1, t) {
+  // n0.tx, n0.ty: forward tangent at node 0 (from node 0 toward control point 1)
+  // n1.tx, n1.ty: backward tangent at node 1 (from node 1 toward control point 2)
+  const c1x = n0.x + n0.tx, c1y = n0.y + n0.ty;
+  const c2x = n1.x + n1.tx, c2y = n1.y + n1.ty;
+  return {
+    x: cubicBez(n0.x, c1x, c2x, n1.x, t),
+    y: cubicBez(n0.y, c1y, c2y, n1.y, t),
+  };
 }
-function makeRoundedTip(){return[
-  {x:1.0,y:0.0,hx:0,hy:0,hx2:0,hy2:0.3},{x:0.95,y:0.5,hx:0.02,hy:-0.15,hx2:-0.05,hy2:0.15},
-  {x:0.55,y:0.85,hx:0.12,hy:-0.03,hx2:-0.18,hy2:0.05},{x:0.0,y:1.0,hx:0.15,hy:0,hx2:0,hy2:0},
+
+// ══════════════ DEFAULT SHAPES ══════════════
+// Tip: 2 nodes — contact-point (1,0) with vertical out-tangent, and nose-end (0,1) with horizontal in-tangent.
+// This gives a clean shovel shape that:
+//   - has the same width as the sidecut at the contact point (true continuity with the sidecut)
+//   - widens slightly forward of contact (because the vertical tangent maintains width briefly)
+//   - rounds smoothly to a point at the nose centerline
+function makeRoundedTip() { return [
+  { x: 1.0, y: 0.0, tx: 0,    ty: 0.65 },  // contact: tangent points straight along ski
+  { x: 0.0, y: 1.0, tx: 0.45, ty: 0    },  // nose: tangent points laterally inward
 ];}
-function makeRoundedTail(){return[
-  {x:0.0,y:0.0,hx:0,hy:0,hx2:0.02,hy2:0.15},{x:0.55,y:0.15,hx:-0.12,hy:-0.05,hx2:0.18,hy2:0.05},
-  {x:0.95,y:0.5,hx:-0.1,hy:-0.12,hx2:0.02,hy2:0.15},{x:1.0,y:1.0,hx:0,hy:-0.3,hx2:0,hy2:0},
+function makeRoundedTail() { return [
+  // Node 0 = contact point at (1, 0): sidecut full width, at the start of the tail run.
+  //   Tangent points along the ski (toward the tail-end), magnitude 0.65 — same as tip.
+  // Node 1 = tail-end at (0, 1): centerline, at the back of the ski.
+  //   Tangent points laterally inward (back from tail-end), magnitude 0.45 — same as tip.
+  { x: 1.0, y: 0.0, tx: 0,    ty: 0.65 },  // contact: tangent along ski (toward end)
+  { x: 0.0, y: 1.0, tx: 0.45, ty: 0    },  // tail-end: tangent laterally inward
 ];}
-function makeSwallowTailR(){return[
-  {x:0.40,y:0.0,hx:0,hy:0,hx2:0.12,hy2:0.06},
-  {x:0.92,y:0.15,hx:-0.06,hy:-0.04,hx2:0.03,hy2:0.08},
-  {x:1.0,y:0.45,hx:0,hy:-0.1,hx2:0,hy2:0.15},
-  {x:1.0,y:1.0,hx:0,hy:-0.2,hx2:0,hy2:0},
+// Swallowtail fin: per-side curve from contact point (x=1, y=0) outward to notch at (x=0.40, y=1)
+function makeSwallowTailR() { return [
+  { x: 1.0,  y: 0.0, tx: 0,    ty: 0.50 },   // contact: vertical tangent, magnitude trimmed for stubbier fin
+  { x: 0.40, y: 1.0, tx: 0.35, ty:-0.05 },   // notch tip: lateral inward tangent
 ];}
-function makeSwallowTailL(){return[
-  {x:0.40,y:0.0,hx:0,hy:0,hx2:0.12,hy2:0.06},
-  {x:0.92,y:0.15,hx:-0.06,hy:-0.04,hx2:0.03,hy2:0.08},
-  {x:1.0,y:0.45,hx:0,hy:-0.1,hx2:0,hy2:0.15},
-  {x:1.0,y:1.0,hx:0,hy:-0.2,hx2:0,hy2:0},
-];}
+function makeSwallowTailL() { return makeSwallowTailR(); }
+
 function makeDefaultCore(){return[
   {pos:0.0,thick:2.0},{pos:0.10,thick:2.5},{pos:0.20,thick:6.0},
   {pos:0.35,thick:10.0},{pos:0.50,thick:11.5},{pos:0.65,thick:10.0},
@@ -73,16 +128,19 @@ const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,metal:"none",ca
 const DEFAULT_SKI={
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
+  waistPosition:0.48,
+  edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
+  coreInset:2.0,    // mm. Core top-profile width reduction per side for sidewall material.
   tipNodesR:makeRoundedTip(),tipNodesL:makeRoundedTip(),
   tailNodesR:makeRoundedTail(),tailNodesL:makeRoundedTail(),
   tipSymmetric:true,tailSymmetric:true,
   coreProfile:makeDefaultCore(),layup:{...DEFAULT_LAYUP},
 };
-
 // ══════════════ EI ENGINE ══════════════
 function getWidthAtPos(ski,pos){
   const L=ski.length,TL=ski.tipLength,TAIL=ski.tailLength;
-  const xmm=pos*L,tailC=TAIL,tipC=L-TL,waistPos=tailC+(tipC-tailC)*0.48;
+  const wp=ski.waistPosition!==undefined?ski.waistPosition:0.48;
+  const xmm=pos*L,tailC=TAIL,tipC=L-TL,waistPos=tailC+(tipC-tailC)*wp;
   if(xmm<=0)return ski.tailWidth;if(xmm>=L)return ski.tipWidth;
   if(xmm<=tailC)return ski.tailWidth;if(xmm>=tipC)return ski.tipWidth;
   if(xmm<=waistPos){const t=(xmm-tailC)/(waistPos-tailC);return ski.tailWidth+t*t*(3-2*t)*(ski.waistWidth-ski.tailWidth);}
@@ -117,7 +175,7 @@ function computeEIAtStation(skiWidth,coreThick,layup){
   return EI;
 }
 function computeFlexProfile(ski){
-  const N=100,stations=[];
+  const N=250,stations=[];
   for(let i=0;i<=N;i++){
     const pos=i/N,w=getWidthAtPos(ski,pos),ct=getCoreThickAt(ski.coreProfile,pos);
     const ei=computeEIAtStation(w,ct,ski.layup);
@@ -135,57 +193,127 @@ function computeFlexProfile(ski){
   return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei))};
 }
 function flexRating(k){
-  if(k<400)return{label:"Very Soft",color:"#4ecdc4"};if(k<550)return{label:"Soft",color:"#45b7d1"};
-  if(k<700)return{label:"Medium",color:"#f9ca24"};if(k<850)return{label:"Stiff",color:"#ff6b35"};
-  return{label:"Very Stiff",color:"#ff3060"};
+  if(k<400)return{label:"Very Soft",color:"#9FB8A8"};if(k<550)return{label:"Soft",color:"#B8C8B0"};
+  if(k<700)return{label:"Medium",color:"#C8935A"};if(k<850)return{label:"Stiff",color:"#D85A30"};
+  return{label:"Very Stiff",color:"#B83A20"};
 }
 
 // ══════════════ GEOMETRY ══════════════
-function sampleShapeNodes(nodes,nPts){
-  const pts=[];for(let seg=0;seg<nodes.length-1;seg++)
-    for(let i=(seg===0?0:1);i<=nPts;i++)pts.push(evalBezSeg(nodes,seg,i/nPts));return pts;
+// Sample a 2-node bezier shape into a sequence of points in normalized [0,1]² space.
+function sampleShape(nodes, nPts) {
+  const pts = [];
+  for (let i = 0; i <= nPts; i++) pts.push(evalBez(nodes[0], nodes[1], i / nPts));
+  return pts;
 }
-function computeOutline(ski){
-  const{length:L,tipWidth:TW,waistWidth:WW,tailWidth:TAW,tipLength:TL,tailLength:TAIL}=ski;
-  const tipContactY=L-TL,tailContactY=TAIL,waistY=tailContactY+(tipContactY-tailContactY)*0.48;
-  const nSC=50,nSH=24;
-  const rTP=sampleShapeNodes(ski.tailNodesR,nSH),rTiP=sampleShapeNodes(ski.tipNodesR,nSH);
-  const lTP=ski.tailSymmetric?rTP:sampleShapeNodes(ski.tailNodesL,nSH);
-  const lTiP=ski.tipSymmetric?rTiP:sampleShapeNodes(ski.tipNodesL,nSH);
-  const buildSide=(tailPts,tipPts,sign)=>{
-    const side=[],tw2=TAW/2,ww2=WW/2,tipw2=TW/2;
-    tailPts.forEach(pt=>side.push({x:sign*pt.x*tw2,y:pt.y*TAIL}));
-    const tailLen=waistY-tailContactY;
-    for(let i=1;i<=nSC;i++){const t=i/nSC,b=t*t*(3-2*t);side.push({x:sign*(tw2+b*(ww2-tw2)),y:tailContactY+t*tailLen});}
-    const tipLen=tipContactY-waistY;
-    for(let i=1;i<=nSC;i++){const t=i/nSC,b=t*t*(3-2*t);side.push({x:sign*(ww2+b*(tipw2-ww2)),y:waistY+t*tipLen});}
-    tipPts.forEach(pt=>side.push({x:sign*pt.x*tipw2,y:tipContactY+pt.y*TL}));return side;
+
+// Compute the full outline in REAL MM coordinates.
+// Coordinates:
+//   skiX = lateral mm, 0 = centerline, positive = "right" side
+//   skiY = along-ski mm, 0 = tail end, ski.length = tip end (nose)
+function computeOutline(ski) {
+  const { length: L, tipWidth: TW, waistWidth: WW, tailWidth: TAW, tipLength: TL, tailLength: TAIL } = ski;
+  const tipContactY = L - TL, tailContactY = TAIL;
+  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+  const waistY = tailContactY + (tipContactY - tailContactY) * wp;
+  const nSamplesSidecut = 60, nSamplesShape = 60;
+
+  const tipR = sampleShape(ski.tipNodesR, nSamplesShape);
+  const tipL = ski.tipSymmetric ? tipR : sampleShape(ski.tipNodesL, nSamplesShape);
+  const tailR = sampleShape(ski.tailNodesR, nSamplesShape);
+  const tailL = ski.tailSymmetric ? tailR : sampleShape(ski.tailNodesL, nSamplesShape);
+
+  const buildSide = (tailPtsNorm, tipPtsNorm, sign) => {
+    const side = [];
+    const tw2 = TAW / 2, ww2 = WW / 2, tipw2 = TW / 2;
+    // Tail curve: same convention as tip — node 0 (pt.y=0) is the contact point, node 1 (pt.y=1) is the tail-end.
+    //   pt.y=0 ↔ skiY=tailContactY,  pt.y=1 ↔ skiY=0
+    // We need to draw the outline from skiY=0 (tail-end) UP to skiY=tailContactY (contact), so
+    // we iterate the sampled curve points from LAST to FIRST.
+    for (let i = tailPtsNorm.length - 1; i >= 0; i--) {
+      const pt = tailPtsNorm[i];
+      side.push({
+        x: sign * pt.x * tw2,
+        y: (1 - pt.y) * tailContactY,
+      });
+    }
+    // Sidecut: tail-contact (width=TAW) → waist (width=WW)
+    const tailRunLen = waistY - tailContactY;
+    for (let i = 1; i <= nSamplesSidecut; i++) {
+      const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
+      side.push({
+        x: sign * (tw2 + b * (ww2 - tw2)),
+        y: tailContactY + t * tailRunLen,
+      });
+    }
+    // Sidecut: waist → tip-contact (width=TW)
+    const tipRunLen = tipContactY - waistY;
+    for (let i = 1; i <= nSamplesSidecut; i++) {
+      const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
+      side.push({
+        x: sign * (ww2 + b * (tipw2 - ww2)),
+        y: waistY + t * tipRunLen,
+      });
+    }
+    // Tip curve: y=0 is tip-contact (skiY=tipContactY), y=1 is nose-end (skiY=ski.length)
+    tipPtsNorm.forEach(pt => {
+      side.push({
+        x: sign * pt.x * tipw2,
+        y: tipContactY + pt.y * TL,
+      });
+    });
+    return side;
   };
-  return{right:buildSide(rTP,rTiP,1),left:buildSide(lTP,lTiP,-1),waistY,tipContactY,tailContactY};
+
+  return {
+    right: buildSide(tailR, tipR,  1),
+    left:  buildSide(tailL, tipL, -1),
+    waistY, tipContactY, tailContactY,
+  };
 }
+
 function computeDerived(ski){
   const ee=ski.length-ski.tipLength-ski.tailLength,avg=(ski.tipWidth+ski.tailWidth)/2;
   const depth=(avg-ski.waistWidth)/2,radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
   return{effectiveEdge:ee,sidecutRadius:radius};
 }
+
+// Side-profile rocker curve. Real ski tips/tails follow a smooth parabolic rise —
+// they begin curving immediately at the contact point and continue accelerating gradually
+// to the very end. NO leveling off, NO acute "hockey-stick" bend.
+//
+// Formula: y(s) = totalHeight * s²
+//   s = 0 at the contact point  → y = 0 (smooth join with snow)
+//   s = 1 at the tip/tail end   → y = totalHeight
+//
+// Slope at s=0: 0 (curve just barely starts rising — smooth tangent to snow line)
+// Slope at s=1: 2*totalHeight (positive, finite — curve keeps rising, never levels off)
+//
+// This gives the gentle, even, parabolic curve seen on real skis, matches the shape used
+// in commercial CNC ski-core molds, and exports cleanly to CAM software.
+function rockerHeight(s, totalHeight) {
+  return totalHeight * s * s;
+}
+
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
-  return{name,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
+  return{name,waistPosition:0.48,edgeInset:2.0,coreInset:2.0,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
     tipSymmetric:tipSym!==false,tailSymmetric:tailSym!==false,...profile,
     coreProfile:core||makeDefaultCore(),layup:layup||{...DEFAULT_LAYUP}};
 }
 const rT=makeRoundedTip(),rTa=makeRoundedTail();
-const spatulaTip=[{x:1.0,y:0.0,hx:0,hy:0,hx2:0,hy2:0.25},{x:1.0,y:0.4,hx:0,hy:-0.1,hx2:0,hy2:0.15},
-  {x:0.85,y:0.7,hx:0.05,hy:-0.08,hx2:-0.15,hy2:0.08},{x:0.0,y:1.0,hx:0.2,hy:0,hx2:0,hy2:0}];
+// Spatula: extra-long forward tangent → curve stays wide for most of tip length, tightens fast at end
+const spatulaTip = [
+  { x: 1.0, y: 0.0, tx: 0,    ty: 0.85 },
+  { x: 0.0, y: 1.0, tx: 0.55, ty: 0    },
+];
 const PRESETS=[
   makePreset("All-Mtn",{length:1780,tipWidth:131,waistWidth:98,tailWidth:119,tipLength:230,tailLength:160},rT,null,rTa,null,true,true,{tipHeight:42,tailHeight:28,camberHeight:3}),
   makePreset("Powder",{length:1860,tipWidth:142,waistWidth:112,tailWidth:128,tipLength:310,tailLength:200},rT,null,rTa,null,true,true,{tipHeight:55,tailHeight:35,camberHeight:2}),
   makePreset("Spatula",{length:1800,tipWidth:138,waistWidth:100,tailWidth:118,tipLength:280,tailLength:160},spatulaTip,null,rTa,null,true,true,{tipHeight:50,tailHeight:28,camberHeight:3}),
   makePreset("Swallow",{length:1760,tipWidth:126,waistWidth:100,tailWidth:130,tipLength:240,tailLength:260},
     rT,null,makeSwallowTailR(),makeSwallowTailL(),true,false,{tipHeight:45,tailHeight:25,camberHeight:3}),
-  makePreset("Twin Tip",{length:1720,tipWidth:118,waistWidth:90,tailWidth:118,tipLength:220,tailLength:220},rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:3}),
+  makePreset("Twin Tip",{length:1720,tipWidth:118,waistWidth:90,tailWidth:118,tipLength:220,tailLength:220},rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:3,waistPosition:0.50}),
 ];
-
-// ══════════════ EXPORT ══════════════
+// ══════════════ EXPORTS ══════════════
 function getFullOutlinePoints(ski){
   const{right,left}=computeOutline(ski);
   const pts=[];
@@ -198,486 +326,1552 @@ function downloadFile(content,filename,mime){
   const a=document.createElement("a");a.href=url;a.download=filename;
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
-function exportPlanSVG(ski){
-  const pts=getFullOutlinePoints(ski);const pad=10;
-  const minX=Math.min(...pts.map(p=>p.x))-pad,maxX=Math.max(...pts.map(p=>p.x))+pad;
-  const minY=Math.min(...pts.map(p=>p.y))-pad,maxY=Math.max(...pts.map(p=>p.y))+pad;
-  const w=maxX-minX,h=maxY-minY;
-  const pathD=pts.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(2)},${(maxY-p.y+minY).toFixed(2)}`).join(' ')+' Z';
-  const marks=ski.coreProfile.map(cp=>{
-    const xmm=cp.pos*ski.length,wh=getWidthAtPos(ski,cp.pos)/2,cy=maxY-xmm+minY;
-    return `<line x1="${(-wh).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${wh.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#ff8800" stroke-width="0.3" stroke-dasharray="2,2"/>
-    <text x="${(wh+3).toFixed(2)}" y="${(cy+1).toFixed(2)}" font-size="3" fill="#ff8800">${cp.thick.toFixed(1)}mm</text>`;
-  }).join('\n    ');
-  const svg=`<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
-  <title>Ski Plan - ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
-  <g id="outline"><path d="${pathD}" fill="none" stroke="#000" stroke-width="0.5"/></g>
-  <g id="centerline"><line x1="0" y1="${minY.toFixed(2)}" x2="0" y2="${maxY.toFixed(2)}" stroke="#0088ff" stroke-width="0.2" stroke-dasharray="4,4"/></g>
-  <g id="core-stations">${marks}</g>
-</svg>`;
-  downloadFile(svg,`ski-plan-${ski.length}mm.svg`,"image/svg+xml");
-}
-function exportPlanDXF(ski){
-  const pts=getFullOutlinePoints(ski);
-  let dxf=`0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n`;
-  dxf+=`0\nLAYER\n2\nOUTLINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;
-  dxf+=`0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCONTINUOUS\n`;
-  dxf+=`0\nLAYER\n2\nCORE_STATIONS\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf+=`0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
-  dxf+=`0\nLWPOLYLINE\n8\nOUTLINE\n90\n${pts.length}\n70\n1\n`;
-  pts.forEach(p=>{dxf+=`10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`;});
-  dxf+=`0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
-  ski.coreProfile.forEach(cp=>{
-    const xmm=cp.pos*ski.length,wh=getWidthAtPos(ski,cp.pos)/2;
-    dxf+=`0\nLINE\n8\nCORE_STATIONS\n10\n${(-wh).toFixed(3)}\n20\n${xmm.toFixed(3)}\n11\n${wh.toFixed(3)}\n21\n${xmm.toFixed(3)}\n`;
-  });
-  dxf+=`0\nENDSEC\n0\nEOF\n`;
-  downloadFile(dxf,`ski-plan-${ski.length}mm.dxf`,"application/dxf");
-}
-function exportCoreDXF(ski){
-  const N=80;const cl=[];const cs=[];
-  for(let i=0;i<=N;i++){
-    const pos=i/N,xmm=pos*ski.length,w=getWidthAtPos(ski,pos),t=getCoreThickAt(ski.coreProfile,pos);
-    cl.push({x:xmm,z:t});cs.push({xmm,hw:w/2,t});
+
+// ══════════════ POLYGON INSET (for base cut line) ══════════════
+// Given a closed CCW polygon `pts`, returns a new polygon offset INWARD by `dist` mm.
+// Uses per-vertex angle bisectors for the offset direction. Works well for smooth ski outlines.
+// For self-intersection prevention at very tight concave corners, we clamp the offset to never
+// cross the centerline (x=0). The ski outline is smooth so this shouldn't trigger in practice.
+function offsetPolygonInward(pts, dist) {
+  const n = pts.length;
+  if (n < 3 || dist <= 0) return pts.slice();
+  // Determine winding (signed area). If negative, polygon is CW; flip the offset direction.
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i+1) % n];
+    area += (a.x * b.y - b.x * a.y);
   }
-  let dxf=`0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n4\n`;
-  dxf+=`0\nLAYER\n2\nCORE_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf+=`0\nLAYER\n2\nBASELINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;
-  dxf+=`0\nLAYER\n2\nCROSS_SECTIONS\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf+=`0\nLAYER\n2\nSURFACE_RIBS\n70\n0\n62\n5\n6\nCONTINUOUS\n`;
-  dxf+=`0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
-  // Side profile top curve
-  dxf+=`0\nLWPOLYLINE\n8\nCORE_PROFILE\n90\n${cl.length}\n70\n0\n`;
-  cl.forEach(p=>{dxf+=`10\n${p.x.toFixed(3)}\n20\n${p.z.toFixed(3)}\n`;});
-  dxf+=`0\nLINE\n8\nBASELINE\n10\n0\n20\n0\n11\n${ski.length.toFixed(3)}\n21\n0\n`;
-  // Cross-section rectangles at each core station (3D: X=pos, Y=width, Z=thickness)
-  ski.coreProfile.forEach(cp=>{
-    const xmm=cp.pos*ski.length,hw=getWidthAtPos(ski,cp.pos)/2,t=cp.thick;
-    dxf+=`0\nLINE\n8\nCROSS_SECTIONS\n10\n${xmm.toFixed(3)}\n20\n${(-hw).toFixed(3)}\n30\n0\n11\n${xmm.toFixed(3)}\n21\n${hw.toFixed(3)}\n31\n0\n`;
-    dxf+=`0\nLINE\n8\nCROSS_SECTIONS\n10\n${xmm.toFixed(3)}\n20\n${hw.toFixed(3)}\n30\n0\n11\n${xmm.toFixed(3)}\n21\n${hw.toFixed(3)}\n31\n${t.toFixed(3)}\n`;
-    dxf+=`0\nLINE\n8\nCROSS_SECTIONS\n10\n${xmm.toFixed(3)}\n20\n${hw.toFixed(3)}\n30\n${t.toFixed(3)}\n11\n${xmm.toFixed(3)}\n21\n${(-hw).toFixed(3)}\n31\n${t.toFixed(3)}\n`;
-    dxf+=`0\nLINE\n8\nCROSS_SECTIONS\n10\n${xmm.toFixed(3)}\n20\n${(-hw).toFixed(3)}\n30\n${t.toFixed(3)}\n11\n${xmm.toFixed(3)}\n21\n${(-hw).toFixed(3)}\n31\n0\n`;
-  });
-  // 3D surface ribs at 0%, 25%, 50%, 75%, 100% width
-  [0,0.25,0.5,0.75,1.0].forEach(wf=>{
-    for(let i=0;i<cs.length-1;i++){
-      const a=cs[i],b=cs[i+1];
-      dxf+=`0\nLINE\n8\nSURFACE_RIBS\n10\n${a.xmm.toFixed(3)}\n20\n${(a.hw*wf).toFixed(3)}\n30\n${a.t.toFixed(3)}\n11\n${b.xmm.toFixed(3)}\n21\n${(b.hw*wf).toFixed(3)}\n31\n${b.t.toFixed(3)}\n`;
-      if(wf>0)dxf+=`0\nLINE\n8\nSURFACE_RIBS\n10\n${a.xmm.toFixed(3)}\n20\n${(-a.hw*wf).toFixed(3)}\n30\n${a.t.toFixed(3)}\n11\n${b.xmm.toFixed(3)}\n21\n${(-b.hw*wf).toFixed(3)}\n31\n${b.t.toFixed(3)}\n`;
+  const sign = area > 0 ? 1 : -1;  // CCW => positive area => offset normal points "left" of edge direction
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n];
+    const curr = pts[i];
+    const next = pts[(i + 1) % n];
+    // Edge directions (incoming and outgoing)
+    const d1x = curr.x - prev.x, d1y = curr.y - prev.y;
+    const d2x = next.x - curr.x, d2y = next.y - curr.y;
+    const l1 = Math.hypot(d1x, d1y) || 1;
+    const l2 = Math.hypot(d2x, d2y) || 1;
+    // For a CCW polygon, the LEFT normal of each edge (rotate +90°) points INWARD.
+    // `sign` is +1 for CCW (no flip), -1 for CW (flip to get inward direction).
+    const n1x = -d1y / l1 * sign, n1y = d1x / l1 * sign;
+    const n2x = -d2y / l2 * sign, n2y = d2x / l2 * sign;
+    // Bisector points along the average of the two inward normals — already inward.
+    let bx = (n1x + n2x), by = (n1y + n2y);
+    const blen = Math.hypot(bx, by);
+    if (blen < 1e-6) {
+      bx = n1x; by = n1y;
+    } else {
+      bx /= blen; by /= blen;
     }
-  });
-  dxf+=`0\nENDSEC\n0\nEOF\n`;
-  downloadFile(dxf,`ski-core-3d-${ski.length}mm.dxf`,"application/dxf");
+    // Compute the scaling factor for the bisector length.
+    // At a vertex with interior angle α, moving both adjacent edges inward by `dist` and finding
+    // the new vertex along the bisector requires scale = dist / sin(α/2).
+    // With inward unit normals n1, n2, the angle BETWEEN them is β = π - α, so cos(β) = n1·n2.
+    // Therefore sin(α/2) = cos(β/2) = sqrt((1 + cos(β))/2) = sqrt((1 + n1·n2)/2).
+    const dot = (n1x * n2x + n1y * n2y);
+    const halfAngleCos = Math.sqrt(Math.max(0.0001, (1 + dot) / 2));
+    const scale = dist / halfAngleCos;
+    out.push({ x: curr.x + bx * scale, y: curr.y + by * scale });
+  }
+  return out;
 }
-function exportCoreSVG(ski){
-  const N=80;const cl=[];
-  for(let i=0;i<=N;i++){const pos=i/N;cl.push({x:pos*ski.length,z:getCoreThickAt(ski.coreProfile,pos)});}
-  const maxT=Math.max(...cl.map(p=>p.z)),L=ski.length,pad=10,sz=8;
-  const w=L+pad*2,h=maxT*sz+pad*2;
-  const topPath=cl.map((p,i)=>`${i===0?'M':'L'}${(p.x+pad).toFixed(2)},${(pad+(maxT-p.z)*sz).toFixed(2)}`).join(' ');
-  const fillPath=topPath+` L${L+pad},${pad+maxT*sz} L${pad},${pad+maxT*sz} Z`;
-  const marks=ski.coreProfile.map(cp=>{
-    const x=cp.pos*L+pad,yt=pad+(maxT-cp.thick)*sz,yb=pad+maxT*sz;
-    return `<line x1="${x.toFixed(1)}" y1="${yt.toFixed(1)}" x2="${x.toFixed(1)}" y2="${yb.toFixed(1)}" stroke="#ff8800" stroke-width="0.3" stroke-dasharray="2,2"/>
-    <text x="${(x+2).toFixed(1)}" y="${(yt-2).toFixed(1)}" font-size="4" fill="#ff8800">${cp.thick.toFixed(1)}</text>`;
-  }).join('\n    ');
-  const svg=`<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
-  <title>Core Profile - ${ski.length}mm</title>
-  <desc>Thickness profile. X=position(mm), Y=thickness(${sz}x scale). Max: ${maxT.toFixed(1)}mm</desc>
-  <g id="profile"><path d="${fillPath}" fill="rgba(255,180,80,0.15)" stroke="#ff8800" stroke-width="0.5"/>
-    <line x1="${pad}" y1="${pad+maxT*sz}" x2="${L+pad}" y2="${pad+maxT*sz}" stroke="#000" stroke-width="0.3"/></g>
-  <g id="stations">${marks}</g>
+
+function getFullOutlinePoints(ski){
+  const{right,left}=computeOutline(ski);
+  const pts=[];
+  right.forEach(p=>pts.push({x:p.x,y:p.y}));
+  for(let i=left.length-1;i>=0;i--)pts.push({x:left[i].x,y:left[i].y});
+  return pts;
+}
+
+// Build a list of registration marks (cross-section transverse lines) at meaningful positions:
+// tail contact, waist (configurable), tip contact, plus the centerline. Each entry returns
+// the skiY position and an optional label.
+function getRegistrationMarks(ski) {
+  const tailC = ski.tailLength;
+  const tipC = ski.length - ski.tipLength;
+  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+  const waistY = tailC + (tipC - tailC) * wp;
+  return [
+    { skiY: tailC,  label: "TAIL CONTACT", halfWidthAt: getWidthAtPos(ski, tailC / ski.length) / 2 + 6 },
+    { skiY: waistY, label: "WAIST",         halfWidthAt: getWidthAtPos(ski, waistY / ski.length) / 2 + 6 },
+    { skiY: tipC,   label: "TIP CONTACT",  halfWidthAt: getWidthAtPos(ski, tipC / ski.length) / 2 + 6 },
+  ];
+}
+
+// ══════════════ PLAN SVG EXPORT ══════════════
+function exportPlanSVG(ski){
+  const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+  const pts = getFullOutlinePoints(ski);
+  const insetPts = edgeInset > 0 ? offsetPolygonInward(pts, edgeInset) : null;
+  const marks = getRegistrationMarks(ski);
+
+  // SVG bounds — encompass outer outline plus a small margin
+  const pad = 10;
+  const minX = Math.min(...pts.map(p=>p.x)) - pad;
+  const maxX = Math.max(...pts.map(p=>p.x)) + pad;
+  const minY = Math.min(...pts.map(p=>p.y)) - pad;
+  const maxY = Math.max(...pts.map(p=>p.y)) + pad;
+  const w = maxX - minX, h = maxY - minY;
+
+  // In SVG, Y increases downward. We flip so that ski Y (which goes tail-to-tip) is shown vertically.
+  const toSvgY = y => (maxY - y + minY);
+
+  const outerPath = pts.map((p,i) =>
+    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+  ).join(' ') + ' Z';
+
+  const insetPath = insetPts ? (insetPts.map((p,i) =>
+    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+  ).join(' ') + ' Z') : '';
+
+  // Registration marks: transverse lines at each station
+  const regMarks = marks.map(m => {
+    const halfW = m.halfWidthAt;
+    const cy = toSvgY(m.skiY);
+    return `    <line x1="${(-halfW).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${halfW.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    <text x="${(halfW + 4).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+  }).join('\n');
+
+  // Centerline (full length)
+  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.3" stroke-dasharray="6,3"/>`;
+
+  // Core thickness station markers
+  const coreMarks = ski.coreProfile.map(cp => {
+    const xmm = cp.pos * ski.length, wh = getWidthAtPos(ski, cp.pos) / 2;
+    const cy = toSvgY(xmm);
+    return `    <line x1="${(-wh).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${wh.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#C8935A" stroke-width="0.2" stroke-dasharray="1.5,1.5" opacity="0.6"/>
+    <text x="${(wh + 3).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="3" fill="#C8935A" font-family="monospace">${cp.thick.toFixed(1)}</text>`;
+  }).join('\n');
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
+  <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
+  <desc>Outer line = true outline (edge cut). Inset line = base cut (${edgeInset}mm inset). Red dashed = registration. Units: mm.</desc>
+  <g id="outline" stroke="#000" stroke-width="0.6" fill="none">
+    <path d="${outerPath}"/>
+  </g>
+  ${insetPts ? `<g id="base_cut" stroke="#005000" stroke-width="0.4" stroke-dasharray="2,1.5" fill="none">
+    <path d="${insetPath}"/>
+  </g>` : ''}
+  <g id="centerline">${centerline}</g>
+  <g id="registration">
+${regMarks}
+  </g>
+  <g id="core_stations">
+${coreMarks}
+  </g>
 </svg>`;
-  downloadFile(svg,`ski-core-profile-${ski.length}mm.svg`,"image/svg+xml");
+  downloadFile(svg, `bcs-ski-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
 
+// ══════════════ PLAN DXF EXPORT ══════════════
+function exportPlanDXF(ski){
+  const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+  const pts = getFullOutlinePoints(ski);
+  const insetPts = edgeInset > 0 ? offsetPolygonInward(pts, edgeInset) : null;
+  const marks = getRegistrationMarks(ski);
 
+  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n6\n`;
+  dxf += `0\nLAYER\n2\nOUTLINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;          // white/black
+  dxf += `0\nLAYER\n2\nBASE_CUT\n70\n0\n62\n3\n6\nDASHED\n`;             // green dashed
+  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;           // blue
+  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;     // red
+  dxf += `0\nLAYER\n2\nCORE_STATIONS\n70\n0\n62\n8\n6\nCONTINUOUS\n`;    // dark grey
+  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;             // red
+  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+
+  // Outer outline (LWPOLYLINE, closed)
+  dxf += `0\nLWPOLYLINE\n8\nOUTLINE\n90\n${pts.length}\n70\n1\n`;
+  pts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+
+  // Inset base-cut line (LWPOLYLINE, closed)
+  if (insetPts) {
+    dxf += `0\nLWPOLYLINE\n8\nBASE_CUT\n90\n${insetPts.length}\n70\n1\n`;
+    insetPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  }
+
+  // Centerline
+  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
+
+  // Registration marks — transverse lines at tail contact, waist, tip contact
+  marks.forEach(m => {
+    const hw = m.halfWidthAt;
+    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
+    // Text label at the right of the line
+    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+  });
+
+  // Core station marks (faint)
+  ski.coreProfile.forEach(cp => {
+    const xmm = cp.pos * ski.length;
+    const wh = getWidthAtPos(ski, cp.pos) / 2;
+    dxf += `0\nLINE\n8\nCORE_STATIONS\n10\n${(-wh).toFixed(3)}\n20\n${xmm.toFixed(3)}\n11\n${wh.toFixed(3)}\n21\n${xmm.toFixed(3)}\n`;
+  });
+
+  dxf += `0\nENDSEC\n0\nEOF\n`;
+  downloadFile(dxf, `bcs-ski-plan-${ski.length}mm.dxf`, "application/dxf");
+}
+
+// ══════════════ CORE TOP-PROFILE EXPORT (for flat-bed CNC milling) ══════════════
+// Closed extrudable shape with:
+//   • Flat bottom (at z=0) — the wood blank rests on the CNC bed
+//   • Thickness profile on top — the milled top surface
+// Width at each station is the SKI width minus 2× coreInset (sidewall material compensation).
+// Registration marks are included as transverse lines at tail contact, waist, tip contact,
+// so this profile can be aligned with the plan view in CAD.
+function exportCoreTopDXF(ski){
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const N = 200;
+  // Build top profile points (side view, X = position along ski, Y = thickness above flat base)
+  const topPts = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    topPts.push({ x: pos * ski.length, y: getCoreThickAt(ski.coreProfile, pos) });
+  }
+  // Build plan-view points for the core (top-down outline narrowed by coreInset on each side)
+  // Build it from the ski outline, then shrink laterally by coreInset on each side, station by station.
+  const planPts = [];  // CCW: right side from tail to tip, then left side back from tip to tail
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    const xmm = pos * ski.length;
+    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    planPts.push({ x: halfW, y: xmm });
+  }
+  for (let i = N; i >= 0; i--) {
+    const pos = i / N;
+    const xmm = pos * ski.length;
+    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    planPts.push({ x: -halfW, y: xmm });
+  }
+
+  const marks = getRegistrationMarks(ski);
+
+  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n5\n`;
+  dxf += `0\nLAYER\n2\nCORE_TOP_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nCORE_TOP_PLAN\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;
+  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+
+  // Side profile (closed shape: flat bottom + thickness curve on top)
+  const nClosed = topPts.length + 2;
+  dxf += `0\nLWPOLYLINE\n8\nCORE_TOP_PROFILE\n90\n${nClosed}\n70\n1\n`;
+  // Bottom-left corner of side profile
+  dxf += `10\n0\n20\n0\n`;
+  // Top curve
+  topPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Bottom-right corner (close the shape)
+  dxf += `10\n${ski.length.toFixed(3)}\n20\n0\n`;
+
+  // Plan-view outline of the core (closed)
+  dxf += `0\nLWPOLYLINE\n8\nCORE_TOP_PLAN\n90\n${planPts.length}\n70\n1\n`;
+  planPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+
+  // Centerline (plan view) — runs the length of the ski
+  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
+
+  // Registration: transverse lines at tail contact, waist, tip contact
+  // These appear in BOTH side-profile coords AND plan-view coords so the user can align them.
+  marks.forEach(m => {
+    // Plan-view transverse mark
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 6;
+    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
+    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+    // Side-profile vertical line at the same X position
+    const maxT = Math.max(...topPts.map(p => p.y)) + 4;
+    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${m.skiY.toFixed(3)}\n20\n0\n11\n${m.skiY.toFixed(3)}\n21\n${maxT.toFixed(3)}\n`;
+  });
+
+  dxf += `0\nENDSEC\n0\nEOF\n`;
+  downloadFile(dxf, `bcs-ski-core-top-${ski.length}mm.dxf`, "application/dxf");
+}
+
+function exportCoreTopSVG(ski){
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const N = 200;
+  const topPts = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    topPts.push({ x: pos * ski.length, y: getCoreThickAt(ski.coreProfile, pos) });
+  }
+  const maxT = Math.max(...topPts.map(p => p.y));
+  const L = ski.length, pad = 10, sz = 8;
+  const w = L + pad * 2, h = maxT * sz + pad * 2;
+  const topPath = topPts.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${(p.x + pad).toFixed(2)},${(pad + (maxT - p.y) * sz).toFixed(2)}`
+  ).join(' ');
+  const fillPath = topPath + ` L${L + pad},${pad + maxT * sz} L${pad},${pad + maxT * sz} Z`;
+  const marks = getRegistrationMarks(ski);
+  const regLines = marks.map(m => {
+    const x = pad + m.skiY;
+    return `<line x1="${x.toFixed(2)}" y1="${pad}" x2="${x.toFixed(2)}" y2="${(pad + maxT * sz).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    <text x="${(x + 2).toFixed(2)}" y="${(pad + 5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+  }).join('\n    ');
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
+  <title>Black Chapel Studios — Core Top Profile ${ski.length}mm</title>
+  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Width inset ${coreInset}mm/side. Y scale ${sz}x.</desc>
+  <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
+  <g id="registration">${regLines}</g>
+</svg>`;
+  downloadFile(svg, `bcs-ski-core-top-${ski.length}mm.svg`, "image/svg+xml");
+}
+
+// ══════════════ ROCKER (mold) PROFILE EXPORT ══════════════
+// Simple line representing the side-view rocker shape — feeds directly into the ski press mold.
+// Includes registration marks (vertical lines at tail contact, waist, tip contact) and a baseline.
+function exportRockerDXF(ski){
+  const N = 400;
+  const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const xmm = (i / N) * ski.length;
+    let ymm;
+    if (xmm <= tailC)        { const s = 1 - (xmm / tailC); ymm = rockerHeight(s, ski.tailHeight); }
+    else if (xmm >= tipC)    { const s = (xmm - tipC) / ski.tipLength; ymm = rockerHeight(s, ski.tipHeight); }
+    else                     { const t = (xmm - tailC) / (tipC - tailC); ymm = ski.camberHeight * 4 * t * (1 - t); }
+    pts.push({ x: xmm, y: ymm });
+  }
+  const marks = getRegistrationMarks(ski);
+  const maxY = Math.max(...pts.map(p => p.y));
+
+  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n4\n`;
+  dxf += `0\nLAYER\n2\nROCKER_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nBASELINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+
+  // Rocker curve as an open polyline (it's just a line, not a closed shape)
+  dxf += `0\nLWPOLYLINE\n8\nROCKER_PROFILE\n90\n${pts.length}\n70\n0\n`;
+  pts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+
+  // Baseline (snow line)
+  dxf += `0\nLINE\n8\nBASELINE\n10\n0\n20\n0\n11\n${ski.length.toFixed(3)}\n21\n0\n`;
+
+  // Registration: vertical lines at tail contact, waist, tip contact
+  marks.forEach(m => {
+    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${m.skiY.toFixed(3)}\n20\n${(-3).toFixed(3)}\n11\n${m.skiY.toFixed(3)}\n21\n${(maxY + 4).toFixed(3)}\n`;
+    dxf += `0\nTEXT\n8\nTEXT\n10\n${(m.skiY + 2).toFixed(3)}\n20\n${(maxY + 5).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+  });
+
+  dxf += `0\nENDSEC\n0\nEOF\n`;
+  downloadFile(dxf, `bcs-ski-rocker-${ski.length}mm.dxf`, "application/dxf");
+}
+
+function exportRockerSVG(ski){
+  const N = 400;
+  const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const xmm = (i / N) * ski.length;
+    let ymm;
+    if (xmm <= tailC)        { const s = 1 - (xmm / tailC); ymm = rockerHeight(s, ski.tailHeight); }
+    else if (xmm >= tipC)    { const s = (xmm - tipC) / ski.tipLength; ymm = rockerHeight(s, ski.tipHeight); }
+    else                     { const t = (xmm - tailC) / (tipC - tailC); ymm = ski.camberHeight * 4 * t * (1 - t); }
+    pts.push({ x: xmm, y: ymm });
+  }
+  const maxY = Math.max(...pts.map(p => p.y));
+  const L = ski.length, pad = 10;
+  const w = L + pad * 2, h = maxY + pad * 2 + 6;  // small extra space for labels
+  const toSY = y => (pad + (maxY - y));
+  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x + pad).toFixed(2)},${toSY(p.y).toFixed(2)}`).join(' ');
+  const marks = getRegistrationMarks(ski);
+  const regLines = marks.map(m => {
+    const x = pad + m.skiY;
+    return `<line x1="${x.toFixed(2)}" y1="${(toSY(maxY) - 2).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(toSY(0) + 2).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    <text x="${(x + 2).toFixed(2)}" y="${(toSY(maxY) - 3).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+  }).join('\n    ');
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
+  <title>Black Chapel Studios — Rocker/Mold Profile ${ski.length}mm</title>
+  <desc>Side-view rocker line for press mold. Units: mm, true 1:1 scale.</desc>
+  <g id="rocker"><path d="${pathD}" fill="none" stroke="#000" stroke-width="0.6"/></g>
+  <g id="baseline"><line x1="${pad}" y1="${toSY(0).toFixed(2)}" x2="${(L + pad).toFixed(2)}" y2="${toSY(0).toFixed(2)}" stroke="#888" stroke-width="0.3"/></g>
+  <g id="registration">${regLines}</g>
+</svg>`;
+  downloadFile(svg, `bcs-ski-rocker-${ski.length}mm.svg`, "image/svg+xml");
+}
 // ══════════════ PLAN VIEW ══════════════
-function PlanView({ski,setSki,width,height}){
-  const canvasRef=useRef(null);const[hovered,setHovered]=useState(null);
-  const[dragging,setDragging]=useState(null);const[dragStart,setDragStart]=useState(null);
-  const{right,left,waistY,tipContactY,tailContactY}=useMemo(()=>computeOutline(ski),[ski]);
-  const pad=55,maxW=Math.max(ski.tipWidth,ski.tailWidth)+40;
-  const scale=Math.min((width-pad*2)/maxW,(height-pad*2)/ski.length);
-  const cx=width/2,cy=height/2;
-  const toC=useCallback((sx,sy)=>({x:cx+sx*scale,y:cy+(ski.length/2-sy)*scale}),[cx,cy,scale,ski.length]);
-  const buildCPs=useCallback(()=>{
-    const cps=[];
-    cps.push({id:"tw_r",sx:ski.tipWidth/2,sy:tipContactY,type:"width",param:"tipWidth",mult:2});
-    cps.push({id:"ww_r",sx:ski.waistWidth/2,sy:waistY,type:"width",param:"waistWidth",mult:2});
-    cps.push({id:"taw_r",sx:ski.tailWidth/2,sy:tailContactY,type:"width",param:"tailWidth",mult:2});
-    cps.push({id:"tw_l",sx:-ski.tipWidth/2,sy:tipContactY,type:"width",param:"tipWidth",mult:-2});
-    cps.push({id:"ww_l",sx:-ski.waistWidth/2,sy:waistY,type:"width",param:"waistWidth",mult:-2});
-    cps.push({id:"taw_l",sx:-ski.tailWidth/2,sy:tailContactY,type:"width",param:"tailWidth",mult:-2});
-    const addSh=(nodes,prefix,wHalf,baseY,riseH)=>{nodes.forEach((n,i)=>{
-      cps.push({id:`${prefix}_n${i}`,sx:n.x*wHalf,sy:baseY+n.y*riseH,type:`${prefix}Node`,idx:i});
-      cps.push({id:`${prefix}_h${i}`,sx:(n.x+n.hx)*wHalf,sy:baseY+(n.y+n.hy)*riseH,type:`${prefix}Handle`,idx:i});
-      if(n.hx2!==undefined&&(i>0||n.hx2!==0||n.hy2!==0))
-        cps.push({id:`${prefix}_h2_${i}`,sx:(n.x+n.hx2)*wHalf,sy:baseY+(n.y+n.hy2)*riseH,type:`${prefix}Handle2`,idx:i});
-    });};
-    addSh(ski.tipNodesR,"tipR",ski.tipWidth/2,tipContactY,ski.tipLength);
-    if(!ski.tipSymmetric)addSh(ski.tipNodesL,"tipL",-ski.tipWidth/2,tipContactY,ski.tipLength);
-    addSh(ski.tailNodesR,"tailR",ski.tailWidth/2,0,ski.tailLength);
-    if(!ski.tailSymmetric)addSh(ski.tailNodesL,"tailL",-ski.tailWidth/2,0,ski.tailLength);
-    return cps;
-  },[ski,tipContactY,tailContactY,waistY]);
-  const cps=useMemo(buildCPs,[buildCPs]);
-  useEffect(()=>{
-    const canvas=canvasRef.current;if(!canvas)return;
-    const ctx=canvas.getContext("2d");const dpr=window.devicePixelRatio||1;
-    canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle=C.bg;ctx.fillRect(0,0,width,height);
-    const gp=50*scale;
-    if(gp>6){ctx.strokeStyle=C.grid;ctx.lineWidth=0.5;
-      for(let x=cx%gp;x<width;x+=gp){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
-      for(let y=cy%gp;y<height;y+=gp){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
-    }
-    ctx.strokeStyle=C.center;ctx.lineWidth=1;ctx.setLineDash([8,6]);
-    const ct2=toC(0,ski.length),cb2=toC(0,0);ctx.beginPath();ctx.moveTo(ct2.x,ct2.y);ctx.lineTo(cb2.x,cb2.y);ctx.stroke();ctx.setLineDash([]);
-    ctx.save();ctx.shadowColor=C.skiGlow;ctx.shadowBlur=14;ctx.beginPath();
-    right.forEach((p,i)=>{const c=toC(p.x,p.y);i===0?ctx.moveTo(c.x,c.y):ctx.lineTo(c.x,c.y);});
-    for(let i=left.length-1;i>=0;i--){const c=toC(left[i].x,left[i].y);ctx.lineTo(c.x,c.y);}
-    ctx.closePath();ctx.fillStyle=C.skiFill;ctx.fill();ctx.strokeStyle=C.skiStroke;ctx.lineWidth=1.6;ctx.stroke();ctx.restore();
-    const drawHL=(nodes,wHalf,baseY,riseH,sign)=>{nodes.forEach(n=>{
-      const nc=toC(sign*n.x*wHalf,baseY+n.y*riseH),h1=toC(sign*(n.x+n.hx)*wHalf,baseY+(n.y+n.hy)*riseH);
-      ctx.strokeStyle=C.handleLine;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(nc.x,nc.y);ctx.lineTo(h1.x,h1.y);ctx.stroke();
-      if(n.hx2!==undefined){const h2=toC(sign*(n.x+n.hx2)*wHalf,baseY+(n.y+n.hy2)*riseH);ctx.beginPath();ctx.moveTo(nc.x,nc.y);ctx.lineTo(h2.x,h2.y);ctx.stroke();}
-    });};
-    drawHL(ski.tipNodesR,ski.tipWidth/2,tipContactY,ski.tipLength,1);
-    if(!ski.tipSymmetric)drawHL(ski.tipNodesL,ski.tipWidth/2,tipContactY,ski.tipLength,-1);
-    drawHL(ski.tailNodesR,ski.tailWidth/2,0,ski.tailLength,1);
-    if(!ski.tailSymmetric)drawHL(ski.tailNodesL,ski.tailWidth/2,0,ski.tailLength,-1);
-    cps.forEach(cp=>{const c=toC(cp.sx,cp.sy);const isH=hovered===cp.id,isD=dragging===cp.id,isHdl=cp.type.includes("Handle");
-      const r=isD?7:isH?6:isHdl?3.5:5;
-      if(isH||isD){ctx.beginPath();ctx.arc(c.x,c.y,r+5,0,Math.PI*2);ctx.fillStyle=isHdl?"rgba(136,107,255,0.2)":"rgba(255,107,53,0.2)";ctx.fill();}
-      ctx.beginPath();ctx.arc(c.x,c.y,r,0,Math.PI*2);ctx.fillStyle=isD?C.controlActive:isH?C.controlHover:isHdl?C.handle:C.control;
-      ctx.fill();ctx.strokeStyle="rgba(0,0,0,0.5)";ctx.lineWidth=1;ctx.stroke();
-    });
-    ctx.fillStyle=C.dimText;ctx.font="11px 'JetBrains Mono',monospace";ctx.textAlign="left";ctx.textBaseline="middle";
-    [[tipContactY,ski.tipWidth],[waistY,ski.waistWidth],[tailContactY,ski.tailWidth]].forEach(([yy,w])=>{const p=toC(w/2+28,yy);ctx.fillText(`${Math.round(w)}`,p.x,p.y);});
-    const lx=maxW/2+45,lt2=toC(lx,ski.length),lb2=toC(lx,0);
-    ctx.strokeStyle=C.dim;ctx.lineWidth=0.7;ctx.beginPath();ctx.moveTo(lt2.x,lt2.y);ctx.lineTo(lb2.x,lb2.y);ctx.stroke();
-    ctx.save();ctx.translate(lt2.x+10,(lt2.y+lb2.y)/2);ctx.rotate(-Math.PI/2);ctx.fillStyle=C.dimText;ctx.font="11px 'JetBrains Mono',monospace";ctx.textAlign="center";ctx.fillText(`${ski.length} mm`,0,0);ctx.restore();
-  },[ski,width,height,right,left,waistY,tipContactY,tailContactY,cps,hovered,dragging,toC,scale,cx,cy,maxW]);
-  const findCP=useCallback((mx,my)=>{
-    const sorted=[...cps].sort((a,b)=>(a.type.includes("Handle")?0:1)-(b.type.includes("Handle")?0:1));
-    for(const cp of sorted){const c=toC(cp.sx,cp.sy);if(Math.sqrt((mx-c.x)**2+(my-c.y)**2)<12)return cp.id;}return null;
-  },[cps,toC]);
-  const handleDown=useCallback(e=>{const rect=canvasRef.current.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-    const id=findCP(mx,my);if(id){setDragging(id);setDragStart({mx,my,ski:JSON.parse(JSON.stringify(ski))});}
-  },[findCP,ski]);
-  const handleMove=useCallback(e=>{const rect=canvasRef.current.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-    if(dragging&&dragStart){const cp=cps.find(c=>c.id===dragging);if(!cp)return;
-      const dxS=(mx-dragStart.mx)/scale,dyS=-(my-dragStart.my)/scale;
-      if(cp.type==="width"){setSki(s=>({...s,[cp.param]:clamp(Math.round(dragStart.ski[cp.param]+dxS*cp.mult),50,200)}));return;}
-      let arrKey,nodes,wHalf,riseH,sign=1;
-      const t=cp.type.replace("Node","").replace("Handle2","").replace("Handle","");
-      if(t==="tipR"){arrKey="tipNodesR";nodes=dragStart.ski.tipNodesR;wHalf=dragStart.ski.tipWidth/2;riseH=dragStart.ski.tipLength;}
-      else if(t==="tipL"){arrKey="tipNodesL";nodes=dragStart.ski.tipNodesL;wHalf=dragStart.ski.tipWidth/2;riseH=dragStart.ski.tipLength;sign=-1;}
-      else if(t==="tailR"){arrKey="tailNodesR";nodes=dragStart.ski.tailNodesR;wHalf=dragStart.ski.tailWidth/2;riseH=dragStart.ski.tailLength;}
-      else if(t==="tailL"){arrKey="tailNodesL";nodes=dragStart.ski.tailNodesL;wHalf=dragStart.ski.tailWidth/2;riseH=dragStart.ski.tailLength;sign=-1;}
-      if(!nodes)return;const newN=JSON.parse(JSON.stringify(nodes));const dxN=(dxS*sign)/wHalf,dyN=dyS/riseH;
-      if(cp.type.includes("Node")){newN[cp.idx].x=clamp(nodes[cp.idx].x+dxN,-0.05,1.15);newN[cp.idx].y=clamp(nodes[cp.idx].y+dyN,-0.05,1.15);}
-      else if(cp.type.includes("Handle2")){newN[cp.idx].hx2=nodes[cp.idx].hx2+dxN;newN[cp.idx].hy2=nodes[cp.idx].hy2+dyN;}
-      else{newN[cp.idx].hx=nodes[cp.idx].hx+dxN;newN[cp.idx].hy=nodes[cp.idx].hy+dyN;}
-      const updates={[arrKey]:newN};
-      if(arrKey==="tipNodesR"&&dragStart.ski.tipSymmetric)updates.tipNodesL=JSON.parse(JSON.stringify(newN));
-      if(arrKey==="tailNodesR"&&dragStart.ski.tailSymmetric)updates.tailNodesL=JSON.parse(JSON.stringify(newN));
-      setSki(s=>({...s,...updates}));
-    }else{setHovered(findCP(mx,my));}
-  },[dragging,dragStart,cps,scale,findCP,setSki]);
-  const handleUp=useCallback(()=>{setDragging(null);setDragStart(null);},[]);
-  return (<canvas ref={canvasRef} style={{width,height,cursor:hovered?(dragging?"grabbing":"grab"):"crosshair",display:"block"}}
-    onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp} onMouseLeave={()=>{handleUp();setHovered(null);}}/>);
-}
+// Layout:
+//   ROW 1 (top, ~38% of height): Full ski plan at TRUE aspect ratio. Long and thin.
+//                                Only NODES are draggable here (no handle clutter).
+//   ROW 2 (bottom, ~62% of height): Two side-by-side zoom panels — tail (left) | tip (right).
+//                                   Lots of headroom so handle dragging doesn't hit the edge.
+//                                   This is where bezier handles are edited.
+function PlanView({ ski, setSki, width, height }) {
+  const canvasRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const [dragStart, setDragStart] = useState(null);
+  const { right, left, waistY, tipContactY, tailContactY } = useMemo(() => computeOutline(ski), [ski]);
 
-// ══════════════ PROFILE VIEW ══════════════
-function ProfileView({ski,width,height}){
-  const canvasRef=useRef(null);
-  const{tipLength:TL,tailLength:TAIL,tipHeight:TH,tailHeight:TAH,camberHeight:CH,length:L}=ski;
-  useEffect(()=>{
-    const canvas=canvasRef.current;if(!canvas)return;const ctx=canvas.getContext("2d");const dpr=window.devicePixelRatio||1;
-    canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=C.bg;ctx.fillRect(0,0,width,height);
-    const padL=45,padR=25,padT=15,padB=20,plotW=width-padL-padR,plotH=height-padT-padB;
-    const maxH=Math.max(TH,TAH,CH)*1.4+5;
-    const toC2=(xmm,ymm)=>({x:padL+(xmm/L)*plotW,y:padT+plotH-(ymm/maxH)*plotH});
-    ctx.strokeStyle=C.snow;ctx.lineWidth=1.5;const sl=toC2(0,0),sr=toC2(L,0);ctx.beginPath();ctx.moveTo(sl.x,sl.y);ctx.lineTo(sr.x,sr.y);ctx.stroke();
-    const tailC=TAIL,tipC=L-TL,runL=tipC-tailC;const pts=[];const n=200;
-    for(let i=0;i<=n;i++){const xmm=(i/n)*L;let ymm;
-      if(xmm<=tailC){const t=xmm/tailC;ymm=TAH*(1-t)*(1-t);}
-      else if(xmm>=tipC){const t=(xmm-tipC)/TL;ymm=TH*t*t;}
-      else{const t=(xmm-tailC)/runL;ymm=CH*4*t*(1-t);}pts.push(toC2(xmm,ymm));}
-    ctx.beginPath();pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
-    ctx.lineTo(toC2(L,0).x,toC2(L,0).y);ctx.lineTo(toC2(0,0).x,toC2(0,0).y);ctx.closePath();ctx.fillStyle=C.profileFill;ctx.fill();
-    ctx.beginPath();pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
-    ctx.save();ctx.shadowColor=C.skiGlow;ctx.shadowBlur=6;ctx.strokeStyle=C.skiStroke;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
-    const drawV=(xmm,ymm,align)=>{const top=toC2(xmm,ymm);ctx.fillStyle=C.controlHover;ctx.font="bold 9px 'JetBrains Mono',monospace";ctx.textAlign=align;
-      ctx.fillText(`${ymm}mm`,top.x+(align==="left"?5:align==="right"?-5:0),top.y-5);};
-    drawV(0,TAH,"left");drawV(L,TH,"right");if(CH>0)drawV(tailC+runL/2,CH,"center");
-  },[ski,width,height,TL,TAIL,TH,TAH,CH,L]);
-  return (<canvas ref={canvasRef} style={{width,height,cursor:"default",display:"block"}}/>);
+  // ── Layout regions ──────────────────────────────────────────────
+  const rowGap = 8;
+  const mainRowH = Math.floor(height * 0.38);
+  const mainRowY = 0;
+  const zoomRowY = mainRowH + rowGap;
+  const zoomRowH = height - mainRowY - mainRowH - rowGap;
+
+  const mainPadX = 24;
+  const mainPadY = 8;
+  const mainPlotW = width - mainPadX * 2;
+  const mainPlotH = mainRowH - mainPadY * 2;
+  // TRUE aspect ratio: same mm-to-pixel scale for both axes.
+  const mainScale = Math.min(
+    mainPlotW / ski.length,
+    mainPlotH / (Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8)  // tiny breathing room
+  );
+  const mainCenterY = mainRowY + mainPadY + mainPlotH / 2;
+  const mainOriginX = mainPadX + (mainPlotW - ski.length * mainScale) / 2;
+  const toMain = (skiX, skiY) => ({
+    x: mainOriginX + skiY * mainScale,
+    y: mainCenterY + skiX * mainScale,
+  });
+
+  // ── Zoom row: two panels side by side, generous size ─────────
+  const panelGap = 12;
+  const zoomPanelW = Math.floor((width - panelGap * 3) / 2);
+  const zoomPanelH = zoomRowH;
+  const tailZoomX = panelGap;
+  const tipZoomX = panelGap * 2 + zoomPanelW;
+
+  // Each zoom panel shows MUCH more area than just the tip/tail. The bezier handles can extend
+  // outside the curve they shape — give 1.5× the tip/tail length and 2× the width so the
+  // user always has room.
+  // For the tail: skiY range = [-tailLength*0.4, tailLength*1.4]; this is roughly skiY range
+  // [-tailLength*0.4, tailContactY*1.4] = covers from beyond tail-end to past contact.
+  const tailViewSpanY = ski.tailLength * 1.8;          // along-ski extent shown
+  const tailViewSpanX = Math.max(ski.tailWidth, ski.waistWidth) * 2.0;  // lateral extent shown
+  const tailViewMinY = -ski.tailLength * 0.4;          // start before the tail end
+  const tailPadInner = 16;
+  const tailPlotW = zoomPanelW - tailPadInner * 2;
+  const tailPlotH = zoomPanelH - 30;  // leave room for label at top
+  const tailScale = Math.min(tailPlotW / tailViewSpanY, tailPlotH / tailViewSpanX);
+  const tailOriginX = tailZoomX + tailPadInner + (tailPlotW - tailViewSpanY * tailScale) / 2;
+  const tailCenterY = zoomRowY + 24 + tailPlotH / 2;
+  const toTail = (skiX, skiY) => ({
+    x: tailOriginX + (skiY - tailViewMinY) * tailScale,
+    y: tailCenterY + skiX * tailScale,
+  });
+
+  // Tip: span = [length - tipLength*1.4, length + tipLength*0.4]
+  const tipViewSpanY = ski.tipLength * 1.8;
+  const tipViewSpanX = Math.max(ski.tipWidth, ski.waistWidth) * 2.0;
+  const tipViewMinY = ski.length - ski.tipLength * 1.4;
+  const tipPadInner = 16;
+  const tipPlotW = zoomPanelW - tipPadInner * 2;
+  const tipPlotH = zoomPanelH - 30;
+  const tipScale = Math.min(tipPlotW / tipViewSpanY, tipPlotH / tipViewSpanX);
+  const tipOriginX = tipZoomX + tipPadInner + (tipPlotW - tipViewSpanY * tipScale) / 2;
+  const tipCenterY = zoomRowY + 24 + tipPlotH / 2;
+  const toTip = (skiX, skiY) => ({
+    x: tipOriginX + (skiY - tipViewMinY) * tipScale,
+    y: tipCenterY + skiX * tipScale,
+  });
+
+  // ── Build control points ──────────────────────────────────────
+  const buildCPs = useCallback(() => {
+    const cps = [];
+    // Note: dedicated tip/tail width handles were removed — the bezier contact-nodes (idx 0)
+    // now handle dimension edits (along-ski drag → tipLength/tailLength; lateral → tipWidth/tailWidth),
+    // so separate width handles were redundant at contact points.
+    // Waist dots are KEPT and editable — the `"width"` type drag handler responds only to lateral
+    // motion (it uses dSkiX, ignoring dSkiY), so the waist position stays fixed fore/aft. Width
+    // changes via these dots OR via the sidebar input — either way only waistWidth changes.
+    cps.push({ id:"ww_r",  skiX: ski.waistWidth/2, skiY: waistY, type:"width", param:"waistWidth", mult:2,  frames:["main"] });
+    cps.push({ id:"ww_l",  skiX:-ski.waistWidth/2, skiY: waistY, type:"width", param:"waistWidth", mult:-2, frames:["main"] });
+
+    // Bezier nodes and tangent handles — handles ONLY appear in zoom panels (not main view)
+    // to keep the main view uncluttered.
+    const addShape = (nodes, prefix, isTip, sign, zoomFrame) => {
+      const wHalf = isTip ? ski.tipWidth/2 : ski.tailWidth/2;
+      const yBase = isTip ? tipContactY : tailContactY;
+      const ySpan = isTip ? ski.tipLength : -tailContactY;  // tail uses negative span
+
+      nodes.forEach((n, i) => {
+        const nodeSkiX = sign * n.x * wHalf;
+        const nodeSkiY = yBase + n.y * ySpan;
+        cps.push({
+          id: `${prefix}_n${i}`,
+          skiX: nodeSkiX, skiY: nodeSkiY,
+          type: `${prefix}Node`, idx: i, sign, isTip,
+          frames: ["main", zoomFrame],  // nodes in both
+        });
+        // Tangent handle — only in zoom frame
+        if (n.tx !== 0 || n.ty !== 0) {
+          const hSkiX = sign * (n.x + n.tx) * wHalf;
+          const hSkiY = yBase + (n.y + n.ty) * ySpan;
+          cps.push({
+            id: `${prefix}_t${i}`,
+            skiX: hSkiX, skiY: hSkiY,
+            type: `${prefix}Tangent`, idx: i, sign, isTip,
+            frames: [zoomFrame],  // ONLY in zoom — keeps main uncluttered
+            parentNodeIdx: i,
+          });
+        }
+      });
+    };
+    addShape(ski.tipNodesR, "tipR", true, 1, "tip");
+    if (!ski.tipSymmetric) addShape(ski.tipNodesL, "tipL", true, -1, "tip");
+    addShape(ski.tailNodesR, "tailR", false, 1, "tail");
+    if (!ski.tailSymmetric) addShape(ski.tailNodesL, "tailL", false, -1, "tail");
+    return cps;
+  }, [ski, tipContactY, tailContactY, waistY]);
+  const cps = useMemo(buildCPs, [buildCPs]);
+
+  // ── Render ────────────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
+
+    // ── Main view (top row) ─────────────────────────────────────
+    // Centerline
+    ctx.strokeStyle = C.center; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(toMain(0, 0).x, mainCenterY);
+    ctx.lineTo(toMain(0, ski.length).x, mainCenterY);
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // Ski outline
+    ctx.save();
+    ctx.shadowColor = C.skiGlow; ctx.shadowBlur = 8;
+    ctx.beginPath();
+    right.forEach((p, i) => {
+      const s = toMain(p.x, p.y);
+      if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+    });
+    for (let i = left.length - 1; i >= 0; i--) {
+      const s = toMain(left[i].x, left[i].y);
+      ctx.lineTo(s.x, s.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = C.skiFill; ctx.fill();
+    ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.restore();
+
+    // TAIL/TIP labels and length
+    ctx.fillStyle = C.dimText;
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("TAIL", toMain(0, 0).x - 4, mainCenterY - 16);
+    ctx.textAlign = "right";
+    ctx.fillText("TIP", toMain(0, ski.length).x + 4, mainCenterY - 16);
+    ctx.textAlign = "center";
+    ctx.font = "11px 'JetBrains Mono', monospace";
+    ctx.fillText(`${ski.length} mm`, mainOriginX + (ski.length * mainScale) / 2, mainRowY + mainRowH - 4);
+
+    // Width values
+    ctx.fillStyle = C.heading;
+    ctx.font = "bold 9px 'JetBrains Mono', monospace";
+    [
+      { skiY: tailContactY, w: ski.tailWidth },
+      { skiY: waistY,       w: ski.waistWidth },
+      { skiY: tipContactY,  w: ski.tipWidth },
+    ].forEach(d => {
+      const s = toMain(d.w/2 + 2, d.skiY);
+      ctx.textAlign = "center";
+      ctx.fillText(`${Math.round(d.w)}`, s.x, s.y + 10);
+    });
+
+    // ── Divider between rows ────────────────────────────────────
+    ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, mainRowH + rowGap / 2);
+    ctx.lineTo(width, mainRowH + rowGap / 2);
+    ctx.stroke();
+
+    // ── Zoom panels (bottom row) ─────────────────────────────────
+    const drawZoomPanel = (panelX, panelW, label, toFrame, viewMinY, viewSpanY) => {
+      // Background and border
+      ctx.fillStyle = C.bgDeep;
+      ctx.fillRect(panelX, zoomRowY, panelW, zoomPanelH);
+      ctx.strokeStyle = C.zoomFrame; ctx.lineWidth = 1;
+      ctx.strokeRect(panelX + 0.5, zoomRowY + 0.5, panelW - 1, zoomPanelH - 1);
+
+      // Label
+      ctx.fillStyle = C.heading;
+      ctx.font = "bold 9px 'JetBrains Mono', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(label, panelX + 10, zoomRowY + 16);
+
+      // Clip rest to inside panel
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(panelX + 3, zoomRowY + 22, panelW - 6, zoomPanelH - 26);
+      ctx.clip();
+
+      // Centerline inside panel
+      const cL = toFrame(0, viewMinY);
+      const cR = toFrame(0, viewMinY + viewSpanY);
+      ctx.strokeStyle = C.center; ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(cL.x, cL.y);
+      ctx.lineTo(cR.x, cR.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw outline within panel (the ski sidecut + tip/tail curve)
+      ctx.save();
+      ctx.shadowColor = C.skiGlow; ctx.shadowBlur = 6;
+      ctx.beginPath();
+      right.forEach((p, i) => {
+        const s = toFrame(p.x, p.y);
+        if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+      });
+      for (let i = left.length - 1; i >= 0; i--) {
+        const s = toFrame(left[i].x, left[i].y);
+        ctx.lineTo(s.x, s.y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = C.skiFill; ctx.fill();
+      ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+      ctx.restore();
+
+      ctx.restore();  // outer clip
+    };
+    drawZoomPanel(tailZoomX, zoomPanelW, "TAIL — ZOOM", toTail, tailViewMinY, tailViewSpanY);
+    drawZoomPanel(tipZoomX, zoomPanelW, "TIP — ZOOM", toTip, tipViewMinY, tipViewSpanY);
+
+    // ── Tangent handle lines (only in zoom panels) ───────────────
+    const drawTangents = (toFrame, nodes, isTip, sign, clipRect) => {
+      const wHalf = isTip ? ski.tipWidth/2 : ski.tailWidth/2;
+      const yBase = isTip ? tipContactY : tailContactY;
+      const ySpan = isTip ? ski.tipLength : -tailContactY;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+      ctx.clip();
+      ctx.strokeStyle = C.handleLine; ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      nodes.forEach(n => {
+        if (n.tx === 0 && n.ty === 0) return;
+        const nodeS = toFrame(sign * n.x * wHalf, yBase + n.y * ySpan);
+        const handS = toFrame(sign * (n.x + n.tx) * wHalf, yBase + (n.y + n.ty) * ySpan);
+        ctx.beginPath();
+        ctx.moveTo(nodeS.x, nodeS.y);
+        ctx.lineTo(handS.x, handS.y);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
+    const tailClip = { x: tailZoomX + 3, y: zoomRowY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
+    const tipClip  = { x: tipZoomX  + 3, y: zoomRowY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
+    drawTangents(toTip, ski.tipNodesR, true, 1, tipClip);
+    if (!ski.tipSymmetric) drawTangents(toTip, ski.tipNodesL, true, -1, tipClip);
+    drawTangents(toTail, ski.tailNodesR, false, 1, tailClip);
+    if (!ski.tailSymmetric) drawTangents(toTail, ski.tailNodesL, false, -1, tailClip);
+
+    // ── Draw control points ─────────────────────────────────────
+    const drawCP = (cp, screenPos, scaleMul, doClip) => {
+      if (doClip) ctx.save();
+      if (doClip) {
+        ctx.beginPath();
+        ctx.rect(doClip.x, doClip.y, doClip.w, doClip.h);
+        ctx.clip();
+      }
+      const isHovered = hovered === cp.id;
+      const isDragged = dragging === cp.id;
+      const isHandle = cp.type.includes("Tangent");
+      let r = isHandle ? 5.5 : 6.5;
+      r *= scaleMul;
+      if (isDragged) r += 2;
+      else if (isHovered) r += 1.4;
+
+      if (isHovered || isDragged) {
+        ctx.beginPath();
+        ctx.arc(screenPos.x, screenPos.y, r + 5, 0, Math.PI * 2);
+        ctx.fillStyle = isHandle ? "rgba(200,147,90,0.30)" : "rgba(216,90,48,0.30)";
+        ctx.fill();
+      }
+      ctx.beginPath();
+      if (isHandle) {
+        const d = r;
+        ctx.moveTo(screenPos.x, screenPos.y - d);
+        ctx.lineTo(screenPos.x + d, screenPos.y);
+        ctx.lineTo(screenPos.x, screenPos.y + d);
+        ctx.lineTo(screenPos.x - d, screenPos.y);
+        ctx.closePath();
+      } else {
+        ctx.arc(screenPos.x, screenPos.y, r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = isDragged ? C.controlActive : isHovered ? C.controlHover : isHandle ? C.handle : C.control;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (doClip) ctx.restore();
+    };
+
+    cps.forEach(cp => {
+      if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, null);
+      if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
+      if (cp.frames.includes("tail"))  drawCP(cp, toTail(cp.skiX, cp.skiY), 1.0, tailClip);
+    });
+  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging,
+      mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
+      tailScale, tailOriginX, tailCenterY, tailZoomX, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
+      tipScale, tipOriginX, tipCenterY, tipZoomX, tipViewMinY, tipViewSpanY]);
+
+  // ── Hit testing ──────────────────────────────────────────────
+  const findCP = useCallback((mx, my) => {
+    // Determine which region the cursor is in
+    if (my >= zoomRowY) {
+      // In zoom row — figure out which panel
+      if (mx >= tipZoomX) {
+        // Tip zoom panel
+        const sorted = [...cps].filter(cp => cp.frames.includes("tip"))
+          .sort((a, b) => (a.type.includes("Tangent") ? 0 : 1) - (b.type.includes("Tangent") ? 0 : 1));
+        for (const cp of sorted) {
+          const s = toTip(cp.skiX, cp.skiY);
+          if (Math.hypot(mx - s.x, my - s.y) < 14) return cp.id;
+        }
+      } else if (mx >= tailZoomX && mx < tipZoomX) {
+        // Tail zoom panel
+        const sorted = [...cps].filter(cp => cp.frames.includes("tail"))
+          .sort((a, b) => (a.type.includes("Tangent") ? 0 : 1) - (b.type.includes("Tangent") ? 0 : 1));
+        for (const cp of sorted) {
+          const s = toTail(cp.skiX, cp.skiY);
+          if (Math.hypot(mx - s.x, my - s.y) < 14) return cp.id;
+        }
+      }
+    } else {
+      // Main view
+      const sorted = [...cps].filter(cp => cp.frames.includes("main"));
+      for (const cp of sorted) {
+        const s = toMain(cp.skiX, cp.skiY);
+        if (Math.hypot(mx - s.x, my - s.y) < 9) return cp.id;
+      }
+    }
+    return null;
+  }, [cps, zoomRowY, tipZoomX, tailZoomX, toTip, toTail, toMain]);
+
+  const findDragFrame = useCallback((mx, my) => {
+    if (my < zoomRowY) return "main";
+    if (mx >= tipZoomX) return "tip";
+    return "tail";
+  }, [zoomRowY, tipZoomX]);
+
+  const handleDown = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const id = findCP(mx, my);
+    if (id) {
+      setDragging(id);
+      setDragStart({
+        mx, my,
+        frame: findDragFrame(mx, my),
+        ski: JSON.parse(JSON.stringify(ski)),
+      });
+    }
+  }, [findCP, findDragFrame, ski]);
+
+  const handleMove = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+    if (dragging && dragStart) {
+      const cp = cps.find(c => c.id === dragging); if (!cp) return;
+
+      // Pixel-to-mm conversion (same scale for both axes within each frame, true aspect)
+      let scalePx;
+      if (dragStart.frame === "tip")  scalePx = tipScale;
+      else if (dragStart.frame === "tail") scalePx = tailScale;
+      else scalePx = mainScale;
+
+      const dSkiY = (mx - dragStart.mx) / scalePx;
+      const dSkiX = (my - dragStart.my) / scalePx;
+
+      if (cp.type === "width") {
+        setSki(s => ({ ...s, [cp.param]: clamp(Math.round(dragStart.ski[cp.param] + dSkiX * cp.mult), 50, 220) }));
+        return;
+      }
+
+      // Determine which node array we're editing
+      let arrKey, nodes, wHalf, ySpan, sign = 1, isTip = false;
+      const t = cp.type.replace(/Node|Tangent/, "");
+      if (t === "tipR")       { arrKey="tipNodesR";  nodes=dragStart.ski.tipNodesR;  wHalf=dragStart.ski.tipWidth/2;  ySpan=dragStart.ski.tipLength;  isTip=true; }
+      else if (t === "tipL")  { arrKey="tipNodesL";  nodes=dragStart.ski.tipNodesL;  wHalf=dragStart.ski.tipWidth/2;  ySpan=dragStart.ski.tipLength;  isTip=true;  sign=-1; }
+      else if (t === "tailR") { arrKey="tailNodesR"; nodes=dragStart.ski.tailNodesR; wHalf=dragStart.ski.tailWidth/2; ySpan=-dragStart.ski.tailLength; isTip=false; }
+      else if (t === "tailL") { arrKey="tailNodesL"; nodes=dragStart.ski.tailNodesL; wHalf=dragStart.ski.tailWidth/2; ySpan=-dragStart.ski.tailLength; isTip=false; sign=-1; }
+      if (!nodes) return;
+
+      const dNx = (dSkiX * sign) / wHalf;
+      const dNy = dSkiY / ySpan;
+
+      const newNodes = JSON.parse(JSON.stringify(nodes));
+      if (cp.type.includes("Tangent")) {
+        // Tangent handle drag — pure bezier shape edit, no dimension changes
+        newNodes[cp.idx].tx = nodes[cp.idx].tx + dNx;
+        newNodes[cp.idx].ty = nodes[cp.idx].ty + dNy;
+        const updates = { [arrKey]: newNodes };
+        if (arrKey === "tipNodesR"  && dragStart.ski.tipSymmetric)  updates.tipNodesL  = JSON.parse(JSON.stringify(newNodes));
+        if (arrKey === "tailNodesR" && dragStart.ski.tailSymmetric) updates.tailNodesL = JSON.parse(JSON.stringify(newNodes));
+        setSki(s => ({ ...s, ...updates }));
+        return;
+      }
+
+      // Bezier NODE drag — update ski dimensions so the node follows the mouse and the
+      // dimensions panel stays in sync. Mapping:
+      //   • Tip contact-node (idx=0): along-ski → tipLength (contact slides, nose stays).
+      //                                lateral  → tipWidth.
+      //   • Tip end-node    (idx=last): along-ski → ski.length (nose moves with mouse, contact stays put).
+      //                                  lateral  → bezier node.x (asymmetric nose).
+      //   • Tail contact-node (idx=0):  along-ski → tailLength (contact slides, tail-end stays at skiY=0).
+      //                                  lateral  → tailWidth.
+      //   • Tail end-node   (idx=last): along-ski → ski.length AND tailLength change equally
+      //                                  (tail-end tracks mouse; contact-point absolute position unchanged).
+      //                                  lateral  → bezier node.x (asymmetric tail).
+      //   • Interior nodes (only for multi-node shapes like swallowtail): pure shape edit.
+
+      const isEndNode = (cp.idx === nodes.length - 1);
+      const isContactNode = (cp.idx === 0);
+      const updates = {};
+
+      if (isContactNode) {
+        // Along-ski drag of CONTACT node:
+        //   Tip: contact at skiY = ski.length - tipLength. Drag right (+dSkiY) moves toward tip → tipLength shrinks.
+        //   Tail: contact at skiY = tailLength. Drag right (+dSkiY) moves toward tip → tailLength grows.
+        if (isTip) {
+          updates.tipLength = clamp(Math.round(dragStart.ski.tipLength - dSkiY), 80, 500);
+        } else {
+          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength + dSkiY), 60, 400);
+        }
+        // Lateral drag of CONTACT node: change tip/tail width.
+        // The contact point is at skiX = sign·wHalf. Moving FURTHER from centerline grows the width.
+        // For right side (sign=+1): positive dSkiX moves outward; for left (sign=-1): negative dSkiX moves outward.
+        const widthParam = isTip ? "tipWidth" : "tailWidth";
+        updates[widthParam] = clamp(Math.round(dragStart.ski[widthParam] + dSkiX * sign * 2), 50, 220);
+        // Bezier normalized coords for the contact node stay locked at (1, 0).
+      } else if (isEndNode) {
+        if (isTip) {
+          // Tip end-node along-ski: the nose is at skiY = ski.length. Drag right grows ski.length.
+          const newSkiLen = clamp(Math.round(dragStart.ski.length + dSkiY), 1200, 2200);
+          updates.length = newSkiLen;
+        } else {
+          // Tail end-node along-ski: the tail-end is at skiY = 0. Dragging right (+dSkiY) makes
+          // the tail-end move forward (closer to tip), which means the ski gets shorter from the
+          // back. To keep the contact point at the same ABSOLUTE position, ski.length and
+          // tailLength must change by the same amount.
+          const delta = dSkiY;  // mm by which the back of the ski moves forward
+          const newSkiLen = clamp(Math.round(dragStart.ski.length - delta), 1200, 2200);
+          const actualDelta = dragStart.ski.length - newSkiLen;  // actually applied delta after clamping
+          const newTailLen = clamp(Math.round(dragStart.ski.tailLength - actualDelta), 60, 400);
+          updates.length = newSkiLen;
+          updates.tailLength = newTailLen;
+        }
+        // Lateral drag of END node → change bezier node.x for off-centerline asymmetric ends.
+        // Clamp to [0, 0.50] so the node can never cross the centerline. Stored x is a positive
+        // normalized half-width offset; the left side's mirror multiplies by sign=-1 at render.
+        // Without the lower bound, dragging past x=0 would put both sides on the wrong half,
+        // producing self-crossing outlines that CAM software rejects. The upper bound of 0.50
+        // accommodates wide-notch tails like the swallowtail preset (which starts at x=0.40).
+        newNodes[cp.idx].x = clamp(nodes[cp.idx].x + dNx, 0, 0.50);
+        // Keep bezier normalized y at its original value (1.0).
+        updates[arrKey] = newNodes;
+      } else {
+        // Interior node (3+ node shapes like future swallowtail extensions). Pure shape edit.
+        // Same centerline rule applies — stored x is positive, can't cross centerline.
+        newNodes[cp.idx].x = clamp(nodes[cp.idx].x + dNx, 0, 1.30);
+        newNodes[cp.idx].y = clamp(nodes[cp.idx].y + dNy, -0.10, 1.30);
+        updates[arrKey] = newNodes;
+      }
+
+      // Mirror to opposite side if symmetric
+      if (arrKey === "tipNodesR"  && dragStart.ski.tipSymmetric  && updates[arrKey])  updates.tipNodesL  = JSON.parse(JSON.stringify(updates[arrKey]));
+      if (arrKey === "tailNodesR" && dragStart.ski.tailSymmetric && updates[arrKey]) updates.tailNodesL = JSON.parse(JSON.stringify(updates[arrKey]));
+      setSki(s => ({ ...s, ...updates }));
+    } else {
+      setHovered(findCP(mx, my));
+    }
+  }, [dragging, dragStart, cps, mainScale, tailScale, tipScale, findCP, setSki]);
+
+  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "default", display: "block" }}
+      onMouseDown={handleDown}
+      onMouseMove={handleMove}
+      onMouseUp={handleUp}
+      onMouseLeave={() => { handleUp(); setHovered(null); }}
+    />
+  );
+}
+// ══════════════ PROFILE VIEW (smooth continuous rise — no level-off at tips) ══════════════
+function ProfileView({ ski, width, height }) {
+  const canvasRef = useRef(null);
+  const { tipLength: TL, tailLength: TAIL, tipHeight: TH, tailHeight: TAH, camberHeight: CH, length: L } = ski;
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
+
+    const padX = 12, padTop = 18, padBot = 22;
+    const plotW = width - padX * 2;
+    const plotH = height - padTop - padBot;
+    const xScale = plotW / L;
+    // Profile heights are tiny vs length → apply mild Y exaggeration (3-6×).
+    const maxH = Math.max(TH, TAH, CH) + 5;
+    const trueHpx = maxH * xScale;
+    const idealHpx = plotH * 0.75;
+    let yExagg = 1.0, yScale = xScale;
+    if (trueHpx < idealHpx) {
+      yExagg = Math.min(8.0, idealHpx / trueHpx);
+      yScale = xScale * yExagg;
+    }
+    const baseY = padTop + plotH * 0.92;
+    const toC = (xmm, ymm) => ({ x: padX + xmm * xScale, y: baseY - ymm * yScale });
+
+    // Snow line
+    ctx.strokeStyle = C.snow; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padX, baseY);
+    ctx.lineTo(padX + plotW, baseY);
+    ctx.stroke();
+
+    // Build the profile points using the new rockerHeight() formula which gives a continuous,
+    // upward-curving rise (no leveling off at the very ends).
+    const tailC = TAIL, tipC = L - TL, runL = tipC - tailC;
+    const pts = [];
+    const n = 400;
+    for (let i = 0; i <= n; i++) {
+      const xmm = (i / n) * L;
+      let ymm;
+      if (xmm <= tailC) {
+        // Tail rocker: rise from 0 at the contact (xmm=tailC) up to TAH at the tail-end (xmm=0).
+        // Define s so that s=0 at contact and s=1 at tail-end — same convention as the tip.
+        const s = 1 - (xmm / tailC);
+        ymm = rockerHeight(s, TAH);
+      } else if (xmm >= tipC) {
+        // Tip rocker: from 0 at xmm=tipC up to tipHeight at xmm=L.
+        const s = (xmm - tipC) / TL;  // s=0 at contact, s=1 at tip-end
+        ymm = rockerHeight(s, TH);
+      } else {
+        // Camber arch in the middle
+        const t = (xmm - tailC) / runL;
+        ymm = CH * 4 * t * (1 - t);
+      }
+      pts.push(toC(xmm, ymm));
+    }
+
+    // Fill profile
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i].x + pts[i+1].x) / 2;
+      const yc = (pts[i].y + pts[i+1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.quadraticCurveTo(pts[pts.length-2].x, pts[pts.length-2].y, pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.lineTo(pts[pts.length-1].x, baseY);
+    ctx.lineTo(pts[0].x, baseY);
+    ctx.closePath();
+    ctx.fillStyle = C.profileFill; ctx.fill();
+
+    // Stroke top curve only
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i].x + pts[i+1].x) / 2;
+      const yc = (pts[i].y + pts[i+1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.quadraticCurveTo(pts[pts.length-2].x, pts[pts.length-2].y, pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.save();
+    ctx.shadowColor = C.skiGlow; ctx.shadowBlur = 5;
+    ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8;
+    ctx.stroke();
+    ctx.restore();
+
+    // Height value labels
+    ctx.fillStyle = C.heading;
+    ctx.font = "bold 10px 'JetBrains Mono', monospace";
+    const drawV = (xmm, ymm, align) => {
+      const top = toC(xmm, ymm);
+      ctx.textAlign = align;
+      ctx.fillText(`${ymm}mm`, top.x + (align === "left" ? 6 : align === "right" ? -6 : 0), top.y - 6);
+    };
+    drawV(0, TAH, "left");
+    drawV(L, TH, "right");
+    if (CH > 0) drawV(tailC + runL/2, CH, "center");
+
+    ctx.fillStyle = C.dimText;
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padX + 6, padTop + 10);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padX + plotW - 6, padTop + 10);
+
+    if (yExagg > 1.05) {
+      ctx.fillStyle = C.labelDim;
+      ctx.font = "8px 'JetBrains Mono', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`Y-scale: ${yExagg.toFixed(1)}\u00D7 exaggerated for readability`, padX + 6, height - 6);
+    }
+  }, [ski, width, height, TL, TAIL, TH, TAH, CH, L]);
+  return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
 }
 
 // ══════════════ CORE VIEW ══════════════
-function CoreView({ski,setSki,width,height}){
-  const canvasRef=useRef(null);const[hovered,setHovered]=useState(null);
-  const[dragging,setDragging]=useState(null);const[dragStart,setDragStart]=useState(null);
-  const cp=ski.coreProfile;
-  const padL=45,padR=25,padT=15,padB=20,plotW=width-padL-padR,plotH=height-padT-padB,maxThick=16;
-  const toC2=useCallback((pos,thick)=>({x:padL+pos*plotW,y:padT+plotH-(thick/maxThick)*plotH}),[plotW,plotH]);
-  const baseY=padT+plotH;
-  const fromC2=useCallback((cx2,cy2)=>({pos:(cx2-padL)/plotW,thick:((baseY-cy2)/plotH)*maxThick}),[plotW,plotH,baseY]);
-  const getThickAt=useCallback((pos)=>{
-    if(pos<=cp[0].pos)return cp[0].thick;if(pos>=cp[cp.length-1].pos)return cp[cp.length-1].thick;
-    for(let i=0;i<cp.length-1;i++){if(pos>=cp[i].pos&&pos<=cp[i+1].pos){
-      const t=(pos-cp[i].pos)/(cp[i+1].pos-cp[i].pos);return cp[i].thick+t*t*(3-2*t)*(cp[i+1].thick-cp[i].thick);}}return 0;
-  },[cp]);
-  const cps=useMemo(()=>cp.map((n,i)=>{const c=toC2(n.pos,n.thick);return{id:`core_${i}`,cx:c.x,cy:c.y,idx:i};}),[cp,toC2]);
-  useEffect(()=>{
-    const canvas=canvasRef.current;if(!canvas)return;const ctx=canvas.getContext("2d");const dpr=window.devicePixelRatio||1;
-    canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=C.bg;ctx.fillRect(0,0,width,height);
-    ctx.strokeStyle=C.grid;ctx.lineWidth=0.5;
-    for(let mm=0;mm<=maxThick;mm+=2){const p=toC2(0,mm);ctx.beginPath();ctx.moveTo(padL,p.y);ctx.lineTo(padL+plotW,p.y);ctx.stroke();}
-    ctx.strokeStyle=C.snow;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(padL,baseY);ctx.lineTo(padL+plotW,baseY);ctx.stroke();
-    ctx.fillStyle=C.dim;ctx.font="8px 'JetBrains Mono',monospace";ctx.textAlign="right";
-    for(let mm=0;mm<=maxThick;mm+=4){const p=toC2(0,mm);ctx.fillText(`${mm}`,padL-4,p.y+3);}
-    const nPts=150;ctx.beginPath();ctx.moveTo(padL,baseY);
-    for(let i=0;i<=nPts;i++){const pos=i/nPts;const p=toC2(pos,getThickAt(pos));ctx.lineTo(p.x,p.y);}
-    ctx.lineTo(padL+plotW,baseY);ctx.closePath();ctx.fillStyle=C.coreFill;ctx.fill();
-    ctx.beginPath();for(let i=0;i<=nPts;i++){const pos=i/nPts;const p=toC2(pos,getThickAt(pos));i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);}
-    ctx.save();ctx.shadowColor=C.coreGlow;ctx.shadowBlur=4;ctx.strokeStyle=C.coreStroke;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
-    cps.forEach(cpObj=>{const isH=hovered===cpObj.id,isD=dragging===cpObj.id;const r=isD?7:isH?6:4;
-      if(isH||isD){ctx.beginPath();ctx.arc(cpObj.cx,cpObj.cy,r+4,0,Math.PI*2);ctx.fillStyle="rgba(255,184,80,0.2)";ctx.fill();}
-      ctx.beginPath();ctx.arc(cpObj.cx,cpObj.cy,r,0,Math.PI*2);
-      ctx.fillStyle=isD?C.controlActive:isH?C.controlHover:C.coreNode;ctx.fill();ctx.strokeStyle="rgba(0,0,0,0.4)";ctx.lineWidth=1;ctx.stroke();
-      ctx.fillStyle=C.coreStroke;ctx.font="8px 'JetBrains Mono',monospace";ctx.textAlign="center";
-      ctx.fillText(`${cp[cpObj.idx].thick.toFixed(1)}`,cpObj.cx,cpObj.cy-10);
+function CoreView({ ski, setSki, width, height }) {
+  const canvasRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const [dragStart, setDragStart] = useState(null);
+  const cp = ski.coreProfile;
+
+  const padL = 30, padR = 14, padT = 18, padB = 22;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+  const maxThick = 16;
+  const toC2 = useCallback((pos, thick) => ({
+    x: padL + pos * plotW,
+    y: padT + plotH - (thick / maxThick) * plotH,
+  }), [plotW, plotH]);
+  const baseY = padT + plotH;
+  const fromC2 = useCallback((cx2, cy2) => ({
+    pos: (cx2 - padL) / plotW,
+    thick: ((baseY - cy2) / plotH) * maxThick,
+  }), [plotW, plotH, baseY]);
+
+  const getThickAt = useCallback((pos) => {
+    if (pos <= cp[0].pos) return cp[0].thick;
+    if (pos >= cp[cp.length - 1].pos) return cp[cp.length - 1].thick;
+    for (let i = 0; i < cp.length - 1; i++) {
+      if (pos >= cp[i].pos && pos <= cp[i+1].pos) {
+        const t = (pos - cp[i].pos) / (cp[i+1].pos - cp[i].pos);
+        const s = t * t * t * (t * (t * 6 - 15) + 10);  // smootherstep
+        return cp[i].thick + s * (cp[i+1].thick - cp[i].thick);
+      }
+    }
+    return 0;
+  }, [cp]);
+
+  const cps = useMemo(() => cp.map((n, i) => {
+    const c = toC2(n.pos, n.thick);
+    return { id: `core_${i}`, cx: c.x, cy: c.y, idx: i };
+  }), [cp, toC2]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
+
+    // Gridlines
+    ctx.strokeStyle = C.gridLine; ctx.lineWidth = 0.5;
+    for (let mm = 0; mm <= maxThick; mm += 4) {
+      const p = toC2(0, mm);
+      ctx.beginPath(); ctx.moveTo(padL, p.y); ctx.lineTo(padL + plotW, p.y); ctx.stroke();
+    }
+    ctx.strokeStyle = C.snow; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(padL, baseY); ctx.lineTo(padL + plotW, baseY); ctx.stroke();
+    ctx.fillStyle = C.labelDim; ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.textAlign = "right";
+    for (let mm = 0; mm <= maxThick; mm += 4) {
+      const p = toC2(0, mm);
+      ctx.fillText(`${mm}`, padL - 4, p.y + 3);
+    }
+
+    // Smooth profile
+    const nPts = 400;
+    const pts = [];
+    for (let i = 0; i <= nPts; i++) {
+      const pos = i / nPts;
+      pts.push(toC2(pos, getThickAt(pos)));
+    }
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(padL, baseY);
+    ctx.lineTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i].x + pts[i+1].x) / 2;
+      const yc = (pts[i].y + pts[i+1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.lineTo(padL + plotW, baseY);
+    ctx.closePath();
+    ctx.fillStyle = C.coreFill; ctx.fill();
+    // Stroke
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i].x + pts[i+1].x) / 2;
+      const yc = (pts[i].y + pts[i+1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+    ctx.save();
+    ctx.shadowColor = C.coreGlow; ctx.shadowBlur = 4;
+    ctx.strokeStyle = C.coreStroke; ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    cps.forEach(cpObj => {
+      const isH = hovered === cpObj.id, isD = dragging === cpObj.id;
+      const r = isD ? 7 : isH ? 6 : 4.5;
+      if (isH || isD) {
+        ctx.beginPath();
+        ctx.arc(cpObj.cx, cpObj.cy, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(200,147,90,0.30)";
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(cpObj.cx, cpObj.cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = isD ? C.controlActive : isH ? C.controlHover : C.coreNode;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = C.heading;
+      ctx.font = "8px 'JetBrains Mono', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${cp[cpObj.idx].thick.toFixed(1)}`, cpObj.cx, cpObj.cy - 10);
     });
-  },[ski,width,height,cp,cps,hovered,dragging,toC2,baseY,plotW,plotH,getThickAt]);
-  const findCP3=useCallback((mx,my)=>{for(const c of cps)if(Math.sqrt((mx-c.cx)**2+(my-c.cy)**2)<14)return c.id;return null;},[cps]);
-  const handleDown=useCallback(e=>{const rect=canvasRef.current.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-    const id=findCP3(mx,my);if(id){setDragging(id);setDragStart({mx,my,core:JSON.parse(JSON.stringify(cp))});}
-  },[findCP3,cp]);
-  const handleMove=useCallback(e=>{const rect=canvasRef.current.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-    if(dragging&&dragStart){const cpObj=cps.find(c=>c.id===dragging);if(!cpObj)return;
-      const cur=fromC2(mx,my),start=fromC2(dragStart.mx,dragStart.my);
-      const dy=cur.thick-start.thick;const newCore=JSON.parse(JSON.stringify(dragStart.core));
-      newCore[cpObj.idx].thick=clamp(dragStart.core[cpObj.idx].thick+dy,0.5,15);
-      if(cpObj.idx>0&&cpObj.idx<newCore.length-1){const dx=cur.pos-start.pos;
-        newCore[cpObj.idx].pos=clamp(dragStart.core[cpObj.idx].pos+dx,newCore[cpObj.idx-1].pos+0.02,newCore[cpObj.idx+1].pos-0.02);}
-      setSki(s=>({...s,coreProfile:newCore}));
-    }else{setHovered(findCP3(mx,my));}
-  },[dragging,dragStart,cps,fromC2,findCP3,setSki]);
-  const handleUp=useCallback(()=>{setDragging(null);setDragStart(null);},[]);
-  return (<canvas ref={canvasRef} style={{width,height,cursor:hovered?(dragging?"grabbing":"grab"):"crosshair",display:"block"}}
-    onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp} onMouseLeave={()=>{handleUp();setHovered(null);}}/>);
+
+    ctx.fillStyle = C.dimText;
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 2, padT + 10);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 2, padT + 10);
+  }, [ski, width, height, cp, cps, hovered, dragging, toC2, baseY, plotW, plotH, padL, padT, getThickAt]);
+
+  const findCP3 = useCallback((mx, my) => {
+    for (const c of cps) if (Math.hypot(mx - c.cx, my - c.cy) < 14) return c.id;
+    return null;
+  }, [cps]);
+  const handleDown = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const id = findCP3(mx, my);
+    if (id) { setDragging(id); setDragStart({ mx, my, core: JSON.parse(JSON.stringify(cp)) }); }
+  }, [findCP3, cp]);
+  const handleMove = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (dragging && dragStart) {
+      const cpObj = cps.find(c => c.id === dragging); if (!cpObj) return;
+      const cur = fromC2(mx, my), start = fromC2(dragStart.mx, dragStart.my);
+      const dy = cur.thick - start.thick;
+      const newCore = JSON.parse(JSON.stringify(dragStart.core));
+      newCore[cpObj.idx].thick = clamp(dragStart.core[cpObj.idx].thick + dy, 0.5, 15);
+      if (cpObj.idx > 0 && cpObj.idx < newCore.length - 1) {
+        const dx = cur.pos - start.pos;
+        newCore[cpObj.idx].pos = clamp(
+          dragStart.core[cpObj.idx].pos + dx,
+          newCore[cpObj.idx - 1].pos + 0.02,
+          newCore[cpObj.idx + 1].pos - 0.02
+        );
+      }
+      setSki(s => ({ ...s, coreProfile: newCore }));
+    } else {
+      setHovered(findCP3(mx, my));
+    }
+  }, [dragging, dragStart, cps, fromC2, findCP3, setSki]);
+  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); }, []);
+
+  return (
+    <canvas ref={canvasRef}
+      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "crosshair", display: "block" }}
+      onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp}
+      onMouseLeave={() => { handleUp(); setHovered(null); }} />
+  );
 }
 
-// ══════════════ FLEX VIEW ══════════════
-function FlexView({ski,flex,width,height}){
-  const canvasRef=useRef(null);
-  useEffect(()=>{
-    const canvas=canvasRef.current;if(!canvas||!flex)return;
-    const ctx=canvas.getContext("2d");const dpr=window.devicePixelRatio||1;
-    canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle=C.bg;ctx.fillRect(0,0,width,height);
-    const padL=55,padR=55,padT=18,padB=22,plotW=width-padL-padR,plotH=height-padT-padB;
-    const st=flex.stations,maxK=Math.max(...st.map(s=>s.kCant))*1.15,maxEI=Math.max(...st.map(s=>s.ei))*1.15;
-    const toC3=(pos,val,mv)=>({x:padL+pos*plotW,y:padT+plotH-(val/mv)*plotH});
-    ctx.strokeStyle=C.grid;ctx.lineWidth=0.5;
-    for(let i=0;i<=4;i++){const y=padT+(plotH/4)*i;ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(padL+plotW,y);ctx.stroke();}
-    ctx.strokeStyle=C.snow;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(padL,padT+plotH);ctx.lineTo(padL+plotW,padT+plotH);ctx.stroke();
-    ctx.beginPath();st.forEach((s,i)=>{const p=toC3(s.pos,s.ei,maxEI);i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);});
-    ctx.lineTo(padL+plotW,padT+plotH);ctx.lineTo(padL,padT+plotH);ctx.closePath();ctx.fillStyle=C.eiFill;ctx.fill();
-    ctx.beginPath();st.forEach((s,i)=>{const p=toC3(s.pos,s.ei,maxEI);i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);});
-    ctx.strokeStyle=C.eiStroke;ctx.lineWidth=1.5;ctx.stroke();
-    ctx.beginPath();st.forEach((s,i)=>{const p=toC3(s.pos,s.kCant,maxK);i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);});
-    ctx.lineTo(padL+plotW,padT+plotH);ctx.lineTo(padL,padT+plotH);ctx.closePath();ctx.fillStyle=C.flexFill;ctx.fill();
-    ctx.beginPath();st.forEach((s,i)=>{const p=toC3(s.pos,s.kCant,maxK);i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);});
-    ctx.save();ctx.shadowColor=C.flexGlow;ctx.shadowBlur=4;ctx.strokeStyle=C.flexStroke;ctx.lineWidth=2;ctx.stroke();ctx.restore();
-    ctx.fillStyle=C.flexStroke;ctx.font="8px 'JetBrains Mono',monospace";ctx.textAlign="right";
-    for(let i=0;i<=4;i++){ctx.fillText(`${Math.round(maxK*i/4)}`,padL-4,padT+plotH-(i/4)*plotH+3);}
-    ctx.fillStyle=C.eiStroke;ctx.textAlign="left";
-    for(let i=0;i<=4;i++){ctx.fillText(`${(maxEI*i/4/1e6).toFixed(0)}`,padL+plotW+4,padT+plotH-(i/4)*plotH+3);}
-    ctx.fillStyle=C.flexStroke;ctx.save();ctx.translate(10,padT+plotH/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";ctx.font="8px 'JetBrains Mono',monospace";ctx.fillText("N/mm",0,0);ctx.restore();
-    ctx.fillStyle=C.eiStroke;ctx.save();ctx.translate(width-6,padT+plotH/2);ctx.rotate(Math.PI/2);ctx.textAlign="center";ctx.fillText("N\u00B7m\u00B2",0,0);ctx.restore();
-    ctx.fillStyle=C.dim;ctx.textAlign="center";ctx.font="8px 'JetBrains Mono',monospace";
-    ctx.fillText("TAIL",toC3(0,0,1).x,padT+plotH+14);ctx.fillText("TIP",toC3(1,0,1).x,padT+plotH+14);
-    ctx.fillStyle=C.flexStroke;ctx.fillRect(padL+6,padT+4,12,2);ctx.textAlign="left";ctx.fillText("Stiffness",padL+22,padT+7);
-    ctx.fillStyle=C.eiStroke;ctx.fillRect(padL+6,padT+14,12,2);ctx.fillText("EI",padL+22,padT+17);
-    const pk=st.reduce((a,b)=>b.kCant>a.kCant?b:a);const pp=toC3(pk.pos,pk.kCant,maxK);
-    ctx.beginPath();ctx.arc(pp.x,pp.y,3,0,Math.PI*2);ctx.fillStyle=C.flexStroke;ctx.fill();
-    ctx.fillStyle=C.controlHover;ctx.font="bold 9px 'JetBrains Mono',monospace";ctx.textAlign="center";
-    ctx.fillText(`${Math.round(pk.kCant)}`,pp.x,pp.y-8);
-  },[flex,width,height]);
-  return (<canvas ref={canvasRef} style={{width,height,cursor:"default",display:"block"}}/>);
-}
+// ══════════════ FLEX VIEW (smooth curves) ══════════════
+function FlexView({ ski, flex, width, height }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas || !flex) return;
+    const ctx = canvas.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr; canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
 
+    const padL = 42, padR = 42, padT = 18, padB = 22;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const st = flex.stations;
+    const maxK = Math.max(...st.map(s => s.kCant)) * 1.15;
+    const maxEI = Math.max(...st.map(s => s.ei)) * 1.15;
+    const toC3 = (pos, val, mv) => ({
+      x: padL + pos * plotW,
+      y: padT + plotH - (val / mv) * plotH,
+    });
+
+    ctx.strokeStyle = C.gridLine; ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (plotH / 4) * i;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+    }
+    ctx.strokeStyle = C.snow; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
+
+    const drawSmoothCurve = (points, fillStyle, strokeStyle, lineWidth, glow) => {
+      // Fill
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length - 1; i++) {
+        const xc = (points[i].x + points[i+1].x) / 2;
+        const yc = (points[i].y + points[i+1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+      }
+      ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+      ctx.lineTo(padL + plotW, padT + plotH);
+      ctx.lineTo(padL, padT + plotH);
+      ctx.closePath();
+      ctx.fillStyle = fillStyle; ctx.fill();
+      // Stroke
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length - 1; i++) {
+        const xc = (points[i].x + points[i+1].x) / 2;
+        const yc = (points[i].y + points[i+1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+      }
+      ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+      if (glow) { ctx.save(); ctx.shadowColor = glow; ctx.shadowBlur = 4; }
+      ctx.strokeStyle = strokeStyle; ctx.lineWidth = lineWidth; ctx.stroke();
+      if (glow) ctx.restore();
+    };
+
+    const eiPts = st.map(s => toC3(s.pos, s.ei, maxEI));
+    drawSmoothCurve(eiPts, C.eiFill, C.eiStroke, 1.5, null);
+    const kPts = st.map(s => toC3(s.pos, s.kCant, maxK));
+    drawSmoothCurve(kPts, C.flexFill, C.flexStroke, 2, C.flexGlow);
+
+    ctx.fillStyle = C.flexStroke; ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.textAlign = "right";
+    for (let i = 0; i <= 4; i++) {
+      ctx.fillText(`${Math.round(maxK * i / 4)}`, padL - 4, padT + plotH - (i / 4) * plotH + 3);
+    }
+    ctx.fillStyle = C.eiStroke; ctx.textAlign = "left";
+    for (let i = 0; i <= 4; i++) {
+      ctx.fillText(`${(maxEI * i / 4 / 1e6).toFixed(0)}`, padL + plotW + 4, padT + plotH - (i / 4) * plotH + 3);
+    }
+    ctx.fillStyle = C.flexStroke;
+    ctx.save();
+    ctx.translate(10, padT + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center"; ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.fillText("N/mm", 0, 0);
+    ctx.restore();
+    ctx.fillStyle = C.eiStroke;
+    ctx.save();
+    ctx.translate(width - 6, padT + plotH / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText("N\u00B7m\u00B2", 0, 0);
+    ctx.restore();
+
+    ctx.fillStyle = C.dimText; ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 2, padT + 10);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 2, padT + 10);
+
+    ctx.fillStyle = C.flexStroke;
+    ctx.fillRect(padL + 6, padT + plotH - 32, 12, 2);
+    ctx.fillStyle = C.dimText; ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left"; ctx.fillText("Stiffness", padL + 22, padT + plotH - 29);
+    ctx.fillStyle = C.eiStroke;
+    ctx.fillRect(padL + 6, padT + plotH - 20, 12, 2);
+    ctx.fillStyle = C.dimText; ctx.fillText("EI", padL + 22, padT + plotH - 17);
+
+    const pk = st.reduce((a, b) => b.kCant > a.kCant ? b : a);
+    const pp = toC3(pk.pos, pk.kCant, maxK);
+    ctx.beginPath(); ctx.arc(pp.x, pp.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = C.flexStroke; ctx.fill();
+    ctx.fillStyle = C.controlActive; ctx.font = "bold 9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`${Math.round(pk.kCant)}`, pp.x, pp.y - 8);
+  }, [flex, width, height]);
+  return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
+}
 // ══════════════ MAIN ══════════════
-export default function App(){
-  const[ski,setSki]=useState(DEFAULT_SKI);
-  const[activeView,setActiveView]=useState("all");
-  const containerRef=useRef(null);
-  const[size,setSize]=useState({w:900,h:700});
-  const derived=useMemo(()=>computeDerived(ski),[ski]);
-  const flex=useMemo(()=>computeFlexProfile(ski),[ski]);
+export default function App() {
+  const [ski, setSki] = useState(DEFAULT_SKI);
+  const [activeView, setActiveView] = useState("all");
+  const containerRef = useRef(null);
+  const [size, setSize] = useState({ w: 1200, h: 800 });
+  const derived = useMemo(() => computeDerived(ski), [ski]);
+  const flex = useMemo(() => computeFlexProfile(ski), [ski]);
 
-  useEffect(()=>{const el=containerRef.current;if(!el)return;
-    const ro=new ResizeObserver(entries=>{const{width,height}=entries[0].contentRect;setSize({w:Math.floor(width),h:Math.floor(height)});});
-    ro.observe(el);return ()=>ro.disconnect();
-  },[]);
+  useEffect(() => {
+    const el = containerRef.current; if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      setSize({ w: Math.floor(width), h: Math.floor(height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const panelW=250,canvasW=size.w-panelW;
-  let planH=0,profH=0,coreH=0,flexH=0;
-  if(activeView==="plan")planH=size.h;
-  else if(activeView==="profile")profH=size.h;
-  else if(activeView==="core")coreH=size.h;
-  else if(activeView==="flex")flexH=size.h;
-  else{planH=Math.floor(size.h*0.36);profH=Math.floor(size.h*0.18);coreH=Math.floor(size.h*0.22);flexH=size.h-planH-profH-coreH;}
+  const panelW = 270;
+  const canvasW = size.w - panelW;
+  let planH = 0, profH = 0, coreH = 0, flexH = 0;
+  if (activeView === "plan")    planH = size.h;
+  else if (activeView === "profile") profH = size.h;
+  else if (activeView === "core")    coreH = size.h;
+  else if (activeView === "flex")    flexH = size.h;
+  else {
+    // Plan gets more height because it now has 2 rows internally
+    planH = Math.floor(size.h * 0.48);
+    profH = Math.floor(size.h * 0.16);
+    coreH = Math.floor(size.h * 0.18);
+    flexH = size.h - planH - profH - coreH;
+  }
 
-  const setLayup=(key,val)=>setSki(s=>({...s,layup:{...s.layup,[key]:val}}));
+  const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
 
-  const inputField=(label,param,min,max,step)=>(
-    <div style={{marginBottom:4}}>
-      <div style={{color:C.label,fontSize:9,marginBottom:1,fontFamily:"'JetBrains Mono',monospace"}}>{label}</div>
-      <input type="number" value={ski[param]} min={min} max={max} step={step||1}
-        onChange={e=>setSki(s=>({...s,[param]:parseFloat(e.target.value)||0}))}
-        style={{width:"100%",background:C.inputBg,border:`1px solid ${C.inputBorder}`,borderRadius:3,padding:"3px 6px",color:C.value,fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none",boxSizing:"border-box"}}
-        onFocus={e=>e.target.style.borderColor=C.inputFocus} onBlur={e=>e.target.style.borderColor=C.inputBorder}/>
-    </div>);
-  const selectField=(label,value,options,onChange)=>(
-    <div style={{marginBottom:4}}>
-      <div style={{color:C.label,fontSize:9,marginBottom:1,fontFamily:"'JetBrains Mono',monospace"}}>{label}</div>
-      <select value={value} onChange={e=>onChange(e.target.value)}
-        style={{width:"100%",background:C.inputBg,border:`1px solid ${C.inputBorder}`,borderRadius:3,padding:"3px 4px",color:C.value,fontSize:10,fontFamily:"'JetBrains Mono',monospace",outline:"none",boxSizing:"border-box",cursor:"pointer"}}>
-        {Object.entries(options).map(([k,v])=>(<option key={k} value={k}>{v.name}{v.E>0?` (${(v.E/1000).toFixed(v.E>50000?0:1)}GPa)`:""}</option>))}
+  const inputField = (label, param, min, max, step) => (
+    <div style={{ marginBottom: 5 }}>
+      <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
+      <input
+        type="number" value={ski[param]} min={min} max={max} step={step || 1}
+        onChange={e => setSki(s => ({ ...s, [param]: parseFloat(e.target.value) || 0 }))}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
+        onFocus={e => e.target.style.borderColor = C.inputFocus}
+        onBlur={e => e.target.style.borderColor = C.inputBorder}
+      />
+    </div>
+  );
+  const selectField = (label, value, options, onChange) => (
+    <div style={{ marginBottom: 5 }}>
+      <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 5px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
+        {Object.entries(options).map(([k, v]) => (
+          <option key={k} value={k}>
+            {v.name}{v.E > 0 ? ` (${(v.E / 1000).toFixed(v.E > 50000 ? 0 : 1)}GPa)` : ""}
+          </option>
+        ))}
       </select>
-    </div>);
-  const stat=(label,value,color)=>(<div style={{display:"flex",justifyContent:"space-between",padding:"2px 0",borderBottom:`1px solid ${C.panelBorder}`}}>
-    <span style={{color:C.label,fontSize:9,fontFamily:"'JetBrains Mono',monospace"}}>{label}</span>
-    <span style={{color:color||C.heading,fontSize:10,fontFamily:"'JetBrains Mono',monospace",fontWeight:600}}>{value}</span></div>);
-  const viewBtn=(label,val)=>(<button onClick={()=>setActiveView(val)} style={{
-    flex:1,padding:"3px 0",fontSize:7,fontFamily:"'JetBrains Mono',monospace",
-    background:activeView===val?C.heading:C.inputBg,color:activeView===val?C.bg:C.label,
-    border:`1px solid ${activeView===val?C.heading:C.inputBorder}`,borderRadius:3,cursor:"pointer",
-    fontWeight:activeView===val?700:400,textTransform:"uppercase"}}>{label}</button>);
-  const toggleBtn=(label,key)=>(<div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}>
-    <button onClick={()=>{const nv=!ski[key];const u={[key]:nv};
-      if(nv){if(key==="tipSymmetric")u.tipNodesL=JSON.parse(JSON.stringify(ski.tipNodesR));if(key==="tailSymmetric")u.tailNodesL=JSON.parse(JSON.stringify(ski.tailNodesR));}
-      setSki(s=>({...s,...u}));}} style={{width:30,height:14,borderRadius:7,border:"none",cursor:"pointer",position:"relative",background:ski[key]?C.heading:C.inputBorder}}>
-      <div style={{width:10,height:10,borderRadius:5,background:"#fff",position:"absolute",top:2,left:ski[key]?18:2,transition:"left 0.2s"}}/></button>
-    <span style={{color:C.label,fontSize:8,fontFamily:"'JetBrains Mono',monospace"}}>{label}</span></div>);
+    </div>
+  );
+  const stat = (label, value, color) => (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: `1px solid ${C.panelBorder}` }}>
+      <span style={{ color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
+      <span style={{ color: color || C.heading, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{value}</span>
+    </div>
+  );
+  const viewBtn = (label, val) => (
+    <button onClick={() => setActiveView(val)} style={{
+      flex: 1, padding: "4px 0", fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+      background: activeView === val ? C.heading : C.inputBg,
+      color: activeView === val ? C.bgDeep : C.label,
+      border: `1px solid ${activeView === val ? C.heading : C.inputBorder}`,
+      borderRadius: 3, cursor: "pointer",
+      fontWeight: activeView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.5
+    }}>{label}</button>
+  );
+  const toggleBtn = (label, key) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+      <button onClick={() => {
+        const nv = !ski[key]; const u = { [key]: nv };
+        if (nv) {
+          if (key === "tipSymmetric")  u.tipNodesL  = JSON.parse(JSON.stringify(ski.tipNodesR));
+          if (key === "tailSymmetric") u.tailNodesL = JSON.parse(JSON.stringify(ski.tailNodesR));
+        }
+        setSki(s => ({ ...s, ...u }));
+      }} style={{ width: 30, height: 14, borderRadius: 7, border: "none", cursor: "pointer", position: "relative", background: ski[key] ? C.heading : C.inputBorder }}>
+        <div style={{ width: 10, height: 10, borderRadius: 5, background: "#F0EDE4", position: "absolute", top: 2, left: ski[key] ? 18 : 2, transition: "left 0.2s" }} />
+      </button>
+      <span style={{ color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>{label}</span>
+    </div>
+  );
 
-  const expBtn={background:C.exportBtn,border:"none",borderRadius:3,padding:"4px 0",color:"#fff",fontSize:8,
-    fontFamily:"'JetBrains Mono',monospace",cursor:"pointer",fontWeight:600,letterSpacing:0.5,width:"100%"};
-  const rating=flexRating(flex.underfootK);
+  const expBtn = {
+    background: C.exportBtn, border: "none", borderRadius: 3, padding: "5px 0",
+    color: C.bgDeep, fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+    cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%"
+  };
+  const rating = flexRating(flex.underfootK);
 
-  return(
-    <div ref={containerRef} style={{display:"flex",height:"100vh",width:"100vw",background:C.bg,fontFamily:"'Segoe UI',sans-serif",overflow:"hidden"}}>
-      <div style={{width:panelW,minWidth:panelW,background:C.panel,borderRight:`1px solid ${C.panelBorder}`,display:"flex",flexDirection:"column",overflowY:"auto"}}>
-        <div style={{padding:"8px 10px 4px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.value,fontSize:12,fontWeight:700,letterSpacing:1.2,textTransform:"uppercase"}}>Ski Designer</div>
-          <span style={{color:C.label,fontSize:7}}>SHAPE + PROFILE + CORE + FLEX + CNC</span>
+  const viewLabelChip = (text) => (
+    <div style={{
+      position: "absolute", top: 6, left: 8,
+      color: C.heading, fontSize: 8, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
+      background: "rgba(31,31,29,0.85)", padding: "2px 8px", borderRadius: 2,
+      border: `1px solid ${C.panelBorder}`, textTransform: "uppercase", letterSpacing: 1, pointerEvents: "none",
+    }}>{text}</div>
+  );
+
+  return (
+    <div ref={containerRef} style={{
+      display: "flex", height: "100vh", width: "100vw",
+      background: C.bg, fontFamily: "'Segoe UI', sans-serif", overflow: "hidden"
+    }}>
+      <div style={{
+        width: panelW, minWidth: panelW, background: C.panel,
+        borderRight: `1px solid ${C.panelBorder}`,
+        display: "flex", flexDirection: "column", overflowY: "auto"
+      }}>
+        <div style={{ padding: "10px 12px 6px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL</div>
+          <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`,display:"flex",gap:2}}>
-          {viewBtn("Plan","plan")}{viewBtn("Prof","profile")}{viewBtn("Core","core")}{viewBtn("Flex","flex")}{viewBtn("All","all")}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", gap: 3 }}>
+          {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
-            {PRESETS.map(p=>(<button key={p.name} onClick={()=>setSki({...p,layup:ski.layup})} style={{background:C.inputBg,border:`1px solid ${C.inputBorder}`,borderRadius:3,padding:"1px 5px",color:C.label,fontSize:8,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}
-              onMouseOver={e=>{e.target.style.borderColor=C.heading;e.target.style.color=C.heading}} onMouseOut={e=>{e.target.style.borderColor=C.inputBorder;e.target.style.color=C.label}}>{p.name}</button>))}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.label, fontSize: 8, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Presets</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+            {PRESETS.map(p => (
+              <button key={p.name} onClick={() => setSki({ ...p, layup: ski.layup })}
+                style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "2px 7px", color: C.label, fontSize: 9, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
+                onMouseOver={e => { e.currentTarget.style.borderColor = C.heading; e.currentTarget.style.color = C.heading; }}
+                onMouseOut={e => { e.currentTarget.style.borderColor = C.inputBorder; e.currentTarget.style.color = C.label; }}
+              >{p.name}</button>
+            ))}
           </div>
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.label,fontSize:8,marginBottom:2,textTransform:"uppercase",letterSpacing:0.8}}>Dimensions (mm)</div>
-          {inputField("Length","length",1200,2200)}{inputField("Tip W","tipWidth",60,200)}{inputField("Waist","waistWidth",50,180)}{inputField("Tail W","tailWidth",60,200)}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.label, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1 }}>Dimensions (mm)</div>
+          {inputField("Length", "length", 1200, 2200)}
+          {inputField("Tip W", "tipWidth", 60, 200)}
+          {inputField("Waist", "waistWidth", 50, 180)}
+          {inputField("Tail W", "tailWidth", 60, 200)}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          {inputField("Tip Len","tipLength",80,500)}{inputField("Tail Len","tailLength",60,400)}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          {inputField("Tip Len", "tipLength", 80, 500)}
+          {inputField("Tail Len", "tailLength", 60, 400)}
+          {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.label,fontSize:8,marginBottom:2,textTransform:"uppercase",letterSpacing:0.8}}>Side Profile</div>
-          {inputField("Tip Rise","tipHeight",5,80)}{inputField("Tail Rise","tailHeight",5,60)}{inputField("Camber","camberHeight",0,10,0.5)}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.label, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1 }}>Side Profile</div>
+          {inputField("Tip Rise", "tipHeight", 5, 80)}
+          {inputField("Tail Rise", "tailHeight", 5, 60)}
+          {inputField("Camber", "camberHeight", 0, 10, 0.5)}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          {toggleBtn("Tip Symmetric","tipSymmetric")}{toggleBtn("Tail Symmetric","tailSymmetric")}
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          {toggleBtn("Tip Symmetric", "tipSymmetric")}
+          {toggleBtn("Tail Symmetric", "tailSymmetric")}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.flexStroke,fontSize:8,marginBottom:2,textTransform:"uppercase",letterSpacing:0.8,fontWeight:700}}>Layup / Materials</div>
-          {selectField("Wood Core",ski.layup.wood,WOODS,v=>setLayup("wood",v))}
-          {selectField("Fiberglass",ski.layup.glass,GLASS,v=>setLayup("glass",v))}
-          <div style={{marginBottom:4}}>
-            <div style={{color:C.label,fontSize:9,marginBottom:1,fontFamily:"'JetBrains Mono',monospace"}}>Glass Layers (each side)</div>
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.heading, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Layup / Materials</div>
+          {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
+          {selectField("Fiberglass", ski.layup.glass, GLASS, v => setLayup("glass", v))}
+          <div style={{ marginBottom: 5 }}>
+            <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Glass Layers / side</div>
             <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
-              onChange={e=>setLayup("glassLayers",parseInt(e.target.value)||1)}
-              style={{width:"100%",background:C.inputBg,border:`1px solid ${C.inputBorder}`,borderRadius:3,padding:"3px 6px",color:C.value,fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none",boxSizing:"border-box"}}/>
+              onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
           </div>
-          {selectField("Metal",ski.layup.metal,METALS,v=>setLayup("metal",v))}
-          {selectField("Carbon",ski.layup.carbon,CARBON,v=>setLayup("carbon",v))}
-          {ski.layup.carbon!=="none"&&(
-            <div style={{marginBottom:4}}>
-              <div style={{color:C.label,fontSize:9,marginBottom:1,fontFamily:"'JetBrains Mono',monospace"}}>Carbon Layers</div>
+          {selectField("Metal", ski.layup.metal, METALS, v => setLayup("metal", v))}
+          {selectField("Carbon", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
+          {ski.layup.carbon !== "none" && (
+            <div style={{ marginBottom: 5 }}>
+              <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Carbon Layers</div>
               <input type="number" value={ski.layup.carbonLayers} min={1} max={4} step={1}
-                onChange={e=>setLayup("carbonLayers",parseInt(e.target.value)||1)}
-                style={{width:"100%",background:C.inputBg,border:`1px solid ${C.inputBorder}`,borderRadius:3,padding:"3px 6px",color:C.value,fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none",boxSizing:"border-box"}}/>
+                onChange={e => setLayup("carbonLayers", parseInt(e.target.value) || 1)}
+                style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             </div>
           )}
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.flexStroke,fontSize:8,marginBottom:2,textTransform:"uppercase",letterSpacing:0.8,fontWeight:700}}>Flex Analysis</div>
-          <div style={{background:rating.color+"18",border:`1px solid ${rating.color}55`,borderRadius:4,padding:"3px 6px",marginBottom:4,textAlign:"center"}}>
-            <div style={{color:rating.color,fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{rating.label}</div>
-            <div style={{color:C.label,fontSize:7}}>Underfoot flex rating</div>
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.heading, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Flex Analysis</div>
+          <div style={{ background: rating.color + "20", border: `1px solid ${rating.color}66`, borderRadius: 4, padding: "4px 7px", marginBottom: 5, textAlign: "center" }}>
+            <div style={{ color: rating.color, fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{rating.label}</div>
+            <div style={{ color: C.labelDim, fontSize: 7 }}>Underfoot flex rating</div>
           </div>
-          {stat("Underfoot",`${Math.round(flex.underfootK)} N/mm`,C.flexStroke)}
-          {stat("Peak",`${Math.round(flex.peakK)} N/mm`,C.flexStroke)}
-          {stat("3pt Bend",`${flex.k3pt.toFixed(2)} N/mm`,C.flexStroke)}
-          {stat("Peak EI",`${(flex.peakEI/1e6).toFixed(0)} N\u00B7m\u00B2`,C.eiStroke)}
-          {stat("Dims",`${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
-          {stat("Eff Edge",`${Math.round(derived.effectiveEdge)} mm`)}
-          {stat("Sidecut R",derived.sidecutRadius<999?`${derived.sidecutRadius.toFixed(1)} m`:"--")}
+          {stat("Underfoot", `${Math.round(flex.underfootK)} N/mm`, C.flexStroke)}
+          {stat("Peak", `${Math.round(flex.peakK)} N/mm`, C.flexStroke)}
+          {stat("3pt Bend", `${flex.k3pt.toFixed(2)} N/mm`, C.flexStroke)}
+          {stat("Peak EI", `${(flex.peakEI / 1e6).toFixed(0)} N\u00B7m\u00B2`, C.eiStroke)}
+          {stat("Dims", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
+          {stat("Eff Edge", `${Math.round(derived.effectiveEdge)} mm`)}
+          {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
         </div>
-        <div style={{padding:"4px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.exportBtn,fontSize:8,marginBottom:4,textTransform:"uppercase",letterSpacing:0.8,fontWeight:700}}>CNC Export</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,marginBottom:4}}>
-            <button onClick={()=>exportPlanDXF(ski)} style={expBtn}>Plan DXF</button>
-            <button onClick={()=>exportPlanSVG(ski)} style={expBtn}>Plan SVG</button>
-            <button onClick={()=>exportCoreDXF(ski)} style={expBtn}>Core 3D DXF</button>
-            <button onClick={()=>exportCoreSVG(ski)} style={expBtn}>Core SVG</button>
+
+        <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.heading, fontSize: 8, marginBottom: 5, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>CNC Export</div>
+          {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
+          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.3, marginBottom: 6 }}>
+            Edge inset: P-Tex base cut offset (leaves room for metal edges).<br/>
+            Core inset: width reduction per side for sidewall material on core blank.
           </div>
-          <div style={{color:C.label,fontSize:7,lineHeight:1.2,opacity:0.5}}>
-            Plan: closed outline for blank/base cutting. Core 3D: cross-sections + surface ribs for CNC thickness profiling. All units mm.
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 5 }}>
+            <button onClick={() => exportPlanDXF(ski)} style={expBtn}>Plan DXF</button>
+            <button onClick={() => exportPlanSVG(ski)} style={expBtn}>Plan SVG</button>
+            <button onClick={() => exportCoreTopDXF(ski)} style={expBtn}>Core Top DXF</button>
+            <button onClick={() => exportCoreTopSVG(ski)} style={expBtn}>Core Top SVG</button>
+            <button onClick={() => exportRockerDXF(ski)} style={expBtn}>Rocker DXF</button>
+            <button onClick={() => exportRockerSVG(ski)} style={expBtn}>Rocker SVG</button>
+          </div>
+          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.3 }}>
+            <b style={{color: C.label}}>Plan</b>: outer edge line + inset base-cut line.<br/>
+            <b style={{color: C.label}}>Core Top</b>: flat-bottom closed shape (CNC mill on flat bed).<br/>
+            <b style={{color: C.label}}>Rocker</b>: side-view line for press mold.<br/>
+            All include registration marks at tail/waist/tip contact.
           </div>
         </div>
-        <div style={{padding:"3px 10px",borderBottom:`1px solid ${C.panelBorder}`}}>
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.4, marginBottom: 4 }}>
+            <b style={{color: C.label}}>Edit tips:</b><br/>
+            • Top row: full ski at true aspect. Drag nodes (circles) to reshape.<br/>
+            • Bottom row: tail &amp; tip zoom panels. Drag tangent handles (diamonds) for fine bezier control.<br/>
+            • Drag width handles on contact points / waist to adjust dimensions.
+          </div>
+        </div>
+
+        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
-            style={{display:"block",color:C.heading,fontSize:9,fontFamily:"'JetBrains Mono',monospace",marginBottom:2,textDecoration:"none"}}>Junk Supply Calc ↗</a>
+            style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
-            style={{display:"block",color:C.heading,fontSize:9,fontFamily:"'JetBrains Mono',monospace",marginBottom:2,textDecoration:"none"}}>Sooth Ski Comparator ↗</a>
+            style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
         </div>
-        <div style={{marginTop:"auto",padding:"3px 10px",borderTop:`1px solid ${C.panelBorder}`}}>
-          <div style={{color:C.label,fontSize:7,opacity:0.35}}>Phase 4 — Shape + Profile + Core + Flex + CNC</div>
+
+        <div style={{ marginTop: "auto", padding: "6px 10px", borderTop: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.</div>
         </div>
       </div>
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        {planH>0&&(<div style={{height:planH,position:"relative",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH}/>
-          <div style={{position:"absolute",top:4,left:6,color:C.label,fontSize:7,fontFamily:"'JetBrains Mono',monospace",background:"rgba(11,17,32,0.85)",padding:"1px 6px",borderRadius:2,border:`1px solid ${C.panelBorder}`,textTransform:"uppercase"}}>Plan</div>
-        </div>)}
-        {profH>0&&(<div style={{height:profH,position:"relative",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <ProfileView ski={ski} width={canvasW} height={profH}/>
-          <div style={{position:"absolute",top:4,left:6,color:C.label,fontSize:7,fontFamily:"'JetBrains Mono',monospace",background:"rgba(11,17,32,0.85)",padding:"1px 6px",borderRadius:2,border:`1px solid ${C.panelBorder}`,textTransform:"uppercase"}}>Profile</div>
-        </div>)}
-        {coreH>0&&(<div style={{height:coreH,position:"relative",borderBottom:`1px solid ${C.panelBorder}`}}>
-          <CoreView ski={ski} setSki={setSki} width={canvasW} height={coreH}/>
-          <div style={{position:"absolute",top:4,left:6,color:C.label,fontSize:7,fontFamily:"'JetBrains Mono',monospace",background:"rgba(11,17,32,0.85)",padding:"1px 6px",borderRadius:2,border:`1px solid ${C.panelBorder}`,textTransform:"uppercase"}}>Core</div>
-        </div>)}
-        {flexH>0&&(<div style={{height:flexH,position:"relative"}}>
-          <FlexView ski={ski} flex={flex} width={canvasW} height={flexH}/>
-          <div style={{position:"absolute",top:4,left:6,color:C.label,fontSize:7,fontFamily:"'JetBrains Mono',monospace",background:"rgba(11,17,32,0.85)",padding:"1px 6px",borderRadius:2,border:`1px solid ${C.panelBorder}`,textTransform:"uppercase"}}>Flex</div>
-        </div>)}
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {planH > 0 && (
+          <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} />
+            {viewLabelChip("Plan")}
+          </div>
+        )}
+        {profH > 0 && (
+          <div style={{ height: profH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
+            <ProfileView ski={ski} width={canvasW} height={profH} />
+            {viewLabelChip("Side Profile")}
+          </div>
+        )}
+        {coreH > 0 && (
+          <div style={{ height: coreH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
+            <CoreView ski={ski} setSki={setSki} width={canvasW} height={coreH} />
+            {viewLabelChip("Core")}
+          </div>
+        )}
+        {flexH > 0 && (
+          <div style={{ height: flexH, position: "relative" }}>
+            <FlexView ski={ski} flex={flex} width={canvasW} height={flexH} />
+            {viewLabelChip("Flex")}
+          </div>
+        )}
       </div>
     </div>
   );
