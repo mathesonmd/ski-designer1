@@ -1702,7 +1702,7 @@ export default function App() {
 
   return (
     <div ref={containerRef} style={{
-      display: "flex", height: "100vh", width: "100vw",
+      display: "flex", height: "100%", width: "100%",
       background: C.bg, fontFamily: "'Segoe UI', sans-serif", overflow: "hidden"
     }}>
       <div style={{
