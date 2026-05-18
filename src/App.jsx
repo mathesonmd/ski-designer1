@@ -1646,6 +1646,204 @@ function FlexView({ ski, flex, width, height }) {
   }, [flex, width, height]);
   return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
 }
+// ══════════════ FEEDBACK MODAL ══════════════
+// Lightweight beta-feedback form. POSTs to Formspree's REST endpoint (free tier, up to 50
+// submissions/month at launch — plenty for early Reddit-driven validation). Submissions arrive
+// via email and are also viewable in the Formspree dashboard, exportable to CSV.
+//
+// To activate: replace FORMSPREE_ENDPOINT below with your actual Formspree form URL (after
+// signing up at formspree.io and creating a form).
+const FORMSPREE_ENDPOINT = "https://formspree.io/f/xkoegnlg";
+
+function FeedbackModal({ isOpen, onClose, trigger }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState(null);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    experience: "",
+    heardFrom: "",
+    feedback: "",
+    interestedPaid: false,
+    interestedForum: false,
+  });
+
+  if (!isOpen) return null;
+
+  const handleField = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.email || !form.feedback) {
+      setError("Email and feedback are required.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(FORMSPREE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({
+          name: form.name || "(not provided)",
+          email: form.email,
+          experience: form.experience || "(not provided)",
+          heard_from: form.heardFrom || "(not provided)",
+          feedback: form.feedback,
+          interested_in_paid_version: form.interestedPaid ? "Yes" : "No",
+          interested_in_revived_forum: form.interestedForum ? "Yes" : "No",
+          trigger: trigger || "manual",
+          source: "Black Chapel Ski Designer",
+          timestamp: new Date().toISOString(),
+        }),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        setError("Submission failed. Please try again, or email matheson@blackchapelstudios.com directly.");
+      }
+    } catch (err) {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const inputStyle = {
+    width: "100%",
+    background: C.inputBg,
+    border: `1px solid ${C.inputBorder}`,
+    borderRadius: 4,
+    padding: "8px 10px",
+    color: C.value,
+    fontSize: 13,
+    fontFamily: "'Segoe UI', sans-serif",
+    outline: "none",
+    boxSizing: "border-box",
+    marginBottom: 12,
+  };
+  const labelStyle = {
+    display: "block",
+    color: C.label,
+    fontSize: 11,
+    marginBottom: 4,
+    fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000, padding: 20,
+    }} onClick={onClose}>
+      <div style={{
+        background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 6,
+        padding: "24px 28px", width: "100%", maxWidth: 520, maxHeight: "90vh",
+        overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+      }} onClick={e => e.stopPropagation()}>
+        {!submitted ? (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+              <div>
+                <div style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, marginBottom: 4 }}>BLACK CHAPEL STUDIOS</div>
+                <div style={{ color: C.value, fontSize: 20, fontWeight: 600 }}>Send Feedback</div>
+                <div style={{ color: C.labelDim, fontSize: 12, marginTop: 4 }}>This designer is in early beta. Your input shapes what comes next.</div>
+              </div>
+              <button onClick={onClose} style={{
+                background: "transparent", border: "none", color: C.labelDim,
+                fontSize: 22, cursor: "pointer", padding: 0, lineHeight: 1,
+              }}>×</button>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <label style={labelStyle}>Name <span style={{ color: C.labelDim, textTransform: "none" }}>(optional)</span></label>
+              <input type="text" value={form.name} onChange={e => handleField("name", e.target.value)} style={inputStyle} />
+
+              <label style={labelStyle}>Email <span style={{ color: C.torch }}>*</span></label>
+              <input type="email" value={form.email} onChange={e => handleField("email", e.target.value)} style={inputStyle} required />
+
+              <label style={labelStyle}>Ski Building Experience</label>
+              <select value={form.experience} onChange={e => handleField("experience", e.target.value)} style={{...inputStyle, cursor: "pointer"}}>
+                <option value="">Select...</option>
+                <option value="Never built one">Never built a ski</option>
+                <option value="Built 1-5">Built 1–5 pairs</option>
+                <option value="Built 6+">Built 6+ pairs</option>
+                <option value="Professional">Professional / commercial builder</option>
+              </select>
+
+              <label style={labelStyle}>How did you hear about this?</label>
+              <input type="text" value={form.heardFrom} onChange={e => handleField("heardFrom", e.target.value)}
+                placeholder="Reddit, friend, search..." style={inputStyle} />
+
+              <label style={labelStyle}>Your Feedback <span style={{ color: C.torch }}>*</span></label>
+              <textarea value={form.feedback} onChange={e => handleField("feedback", e.target.value)}
+                placeholder="What's working, what's broken, what's missing?"
+                style={{...inputStyle, minHeight: 100, fontFamily: "'Segoe UI', sans-serif", resize: "vertical"}}
+                required />
+
+              <div style={{ background: C.bgDeep, border: `1px solid ${C.panelBorder}`, borderRadius: 4, padding: "12px 14px", marginBottom: 14 }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", marginBottom: 10 }}>
+                  <input type="checkbox" checked={form.interestedPaid}
+                    onChange={e => handleField("interestedPaid", e.target.checked)}
+                    style={{ marginTop: 3, accentColor: C.heading, cursor: "pointer" }} />
+                  <span style={{ color: C.value, fontSize: 13, lineHeight: 1.4 }}>
+                    I'd be interested in a paid version with unlimited exports and advanced features.
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                  <input type="checkbox" checked={form.interestedForum}
+                    onChange={e => handleField("interestedForum", e.target.checked)}
+                    style={{ marginTop: 3, accentColor: C.heading, cursor: "pointer" }} />
+                  <span style={{ color: C.value, fontSize: 13, lineHeight: 1.4 }}>
+                    I'd be interested in joining a new forum — similar to the old skibuilders.com forum if it were revived.
+                  </span>
+                </label>
+              </div>
+
+              {error && (
+                <div style={{ color: C.torch, fontSize: 12, marginBottom: 12, padding: "8px 10px", background: "rgba(216,90,48,0.10)", border: `1px solid ${C.torch}`, borderRadius: 4 }}>
+                  {error}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
+                <button type="button" onClick={onClose} style={{
+                  background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label,
+                  padding: "10px 18px", borderRadius: 4, cursor: "pointer", fontSize: 13,
+                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
+                }}>Cancel</button>
+                <button type="submit" disabled={submitting} style={{
+                  background: C.heading, border: "none", color: C.bgDeep,
+                  padding: "10px 22px", borderRadius: 4, cursor: submitting ? "wait" : "pointer", fontSize: 13,
+                  fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
+                  opacity: submitting ? 0.6 : 1,
+                }}>{submitting ? "Sending..." : "Send Feedback"}</button>
+              </div>
+            </form>
+          </>
+        ) : (
+          <div style={{ textAlign: "center", padding: "20px 10px" }}>
+            <div style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, marginBottom: 8 }}>RECEIVED</div>
+            <div style={{ color: C.value, fontSize: 22, fontWeight: 600, marginBottom: 12, fontFamily: "'Fraunces', Georgia, serif" }}>Thank you.</div>
+            <div style={{ color: C.labelDim, fontSize: 14, lineHeight: 1.5, marginBottom: 24 }}>
+              Your feedback has been recorded. We read every submission.<br/>
+              Worship the work.
+            </div>
+            <button onClick={onClose} style={{
+              background: C.heading, border: "none", color: C.bgDeep,
+              padding: "10px 28px", borderRadius: 4, cursor: "pointer", fontSize: 13,
+              fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
+            }}>Close</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
@@ -1654,6 +1852,35 @@ export default function App() {
   const [size, setSize] = useState({ w: 1200, h: 800 });
   const derived = useMemo(() => computeDerived(ski), [ski]);
   const flex = useMemo(() => computeFlexProfile(ski), [ski]);
+
+  // Feedback modal state. `feedbackTrigger` records WHY the modal was opened (for analytics
+  // in the form submission payload — "manual" vs "first-export-prompt").
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackTrigger, setFeedbackTrigger] = useState("manual");
+
+  // Wraps any export function to: (1) run the export, (2) check if this is the user's first
+  // export in this browser, and if so, schedule a gentle feedback prompt ~1.5s later.
+  // localStorage flag prevents re-prompting on subsequent sessions.
+  const exportWithFeedbackPrompt = useCallback((exportFn) => {
+    exportFn(ski);
+    try {
+      const hasPrompted = localStorage.getItem("bcs_feedback_prompted");
+      if (!hasPrompted) {
+        localStorage.setItem("bcs_feedback_prompted", "1");
+        setTimeout(() => {
+          setFeedbackTrigger("first-export-prompt");
+          setFeedbackOpen(true);
+        }, 1500);
+      }
+    } catch (e) {
+      // localStorage may be unavailable (private browsing, etc.) — fail silently
+    }
+  }, [ski]);
+
+  const openFeedback = useCallback(() => {
+    setFeedbackTrigger("manual");
+    setFeedbackOpen(true);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
@@ -1859,14 +2086,14 @@ export default function App() {
             <b style={{color: C.label}}>Core inset:</b> width reduction per side for sidewall material on core blank.
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
-            <button onClick={() => exportPlanDXF(ski)} style={expBtn}>Plan DXF</button>
-            <button onClick={() => exportPlanSVG(ski)} style={expBtn}>Plan SVG</button>
-            <button onClick={() => exportCoreSideDXF(ski)} style={expBtn}>Core Side DXF</button>
-            <button onClick={() => exportCoreSideSVG(ski)} style={expBtn}>Core Side SVG</button>
-            <button onClick={() => exportCorePlanDXF(ski)} style={expBtn}>Core Plan DXF</button>
-            <button onClick={() => exportCorePlanSVG(ski)} style={expBtn}>Core Plan SVG</button>
-            <button onClick={() => exportRockerDXF(ski)} style={expBtn}>Rocker DXF</button>
-            <button onClick={() => exportRockerSVG(ski)} style={expBtn}>Rocker SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Plan DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Plan SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCoreSideSVG)} style={expBtn}>Core Side SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>Core Plan DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>Core Plan SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportRockerDXF)} style={expBtn}>Rocker DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportRockerSVG)} style={expBtn}>Rocker SVG</button>
           </div>
           <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45 }}>
             <b style={{color: C.label}}>Plan</b>: outer edge line + inset base-cut line (top-down).<br/>
@@ -1891,6 +2118,24 @@ export default function App() {
             style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
+        </div>
+
+        <div style={{ padding: "10px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{
+            background: "rgba(216,90,48,0.10)", border: `1px solid ${C.torch}`, borderRadius: 4,
+            padding: "8px 10px", marginBottom: 8,
+          }}>
+            <div style={{ color: C.torch, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.2, fontWeight: 700, marginBottom: 3 }}>BETA</div>
+            <div style={{ color: C.value, fontSize: 11, lineHeight: 1.4 }}>
+              This designer is in active development. Your feedback shapes what comes next.
+            </div>
+          </div>
+          <button onClick={openFeedback} style={{
+            width: "100%", background: C.heading, border: "none", borderRadius: 4,
+            padding: "9px 0", color: C.bgDeep, fontSize: 11, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, cursor: "pointer",
+            textTransform: "uppercase",
+          }}>Send Feedback</button>
         </div>
 
         <div style={{ marginTop: "auto", padding: "6px 10px", borderTop: `1px solid ${C.panelBorder}` }}>
@@ -1924,6 +2169,12 @@ export default function App() {
           </div>
         )}
       </div>
+
+      <FeedbackModal
+        isOpen={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        trigger={feedbackTrigger}
+      />
     </div>
   );
 }
