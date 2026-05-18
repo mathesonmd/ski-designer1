@@ -514,76 +514,45 @@ function exportPlanDXF(ski){
 // Width at each station is the SKI width minus 2× coreInset (sidewall material compensation).
 // Registration marks are included as transverse lines at tail contact, waist, tip contact,
 // so this profile can be aligned with the plan view in CAD.
-function exportCoreTopDXF(ski){
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+// ══════════════ CORE SIDE PROFILE EXPORT ══════════════
+// Closed extrudable shape with flat bottom + thickness profile on top. Intended to be imported
+// into 3D modeling software on the XZ (side-view) plane. Combined with the Core Plan export
+// (which lives on the XY plane), the user can extrude the side profile then boolean-cut with
+// the plan outline to produce the 3D core shape.
+function exportCoreSideDXF(ski){
   const N = 200;
-  // Build top profile points (side view, X = position along ski, Y = thickness above flat base)
   const topPts = [];
   for (let i = 0; i <= N; i++) {
     const pos = i / N;
     topPts.push({ x: pos * ski.length, y: getCoreThickAt(ski.coreProfile, pos) });
   }
-  // Build plan-view points for the core (top-down outline narrowed by coreInset on each side)
-  // Build it from the ski outline, then shrink laterally by coreInset on each side, station by station.
-  const planPts = [];  // CCW: right side from tail to tip, then left side back from tip to tail
-  for (let i = 0; i <= N; i++) {
-    const pos = i / N;
-    const xmm = pos * ski.length;
-    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-    planPts.push({ x: halfW, y: xmm });
-  }
-  for (let i = N; i >= 0; i--) {
-    const pos = i / N;
-    const xmm = pos * ski.length;
-    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-    planPts.push({ x: -halfW, y: xmm });
-  }
-
   const marks = getRegistrationMarks(ski);
+  const maxT = Math.max(...topPts.map(p => p.y)) + 4;
 
-  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n5\n`;
-  dxf += `0\nLAYER\n2\nCORE_TOP_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nCORE_TOP_PLAN\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;
+  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n`;
+  dxf += `0\nLAYER\n2\nCORE_SIDE_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
   dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
   dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
   dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
 
-  // Side profile (closed shape: flat bottom + thickness curve on top)
+  // Closed side-profile polygon: flat bottom + thickness curve on top.
   const nClosed = topPts.length + 2;
-  dxf += `0\nLWPOLYLINE\n8\nCORE_TOP_PROFILE\n90\n${nClosed}\n70\n1\n`;
-  // Bottom-left corner of side profile
+  dxf += `0\nLWPOLYLINE\n8\nCORE_SIDE_PROFILE\n90\n${nClosed}\n70\n1\n`;
   dxf += `10\n0\n20\n0\n`;
-  // Top curve
   topPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
-  // Bottom-right corner (close the shape)
   dxf += `10\n${ski.length.toFixed(3)}\n20\n0\n`;
 
-  // Plan-view outline of the core (closed)
-  dxf += `0\nLWPOLYLINE\n8\nCORE_TOP_PLAN\n90\n${planPts.length}\n70\n1\n`;
-  planPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
-
-  // Centerline (plan view) — runs the length of the ski
-  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
-
-  // Registration: transverse lines at tail contact, waist, tip contact
-  // These appear in BOTH side-profile coords AND plan-view coords so the user can align them.
+  // Registration: vertical lines + labels at tail contact, waist, tip contact.
   marks.forEach(m => {
-    // Plan-view transverse mark
-    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 6;
-    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
-    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
-    // Side-profile vertical line at the same X position
-    const maxT = Math.max(...topPts.map(p => p.y)) + 4;
     dxf += `0\nLINE\n8\nREGISTRATION\n10\n${m.skiY.toFixed(3)}\n20\n0\n11\n${m.skiY.toFixed(3)}\n21\n${maxT.toFixed(3)}\n`;
+    dxf += `0\nTEXT\n8\nTEXT\n10\n${(m.skiY + 2).toFixed(3)}\n20\n${(maxT + 1).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
   });
 
   dxf += `0\nENDSEC\n0\nEOF\n`;
-  downloadFile(dxf, `bcs-ski-core-top-${ski.length}mm.dxf`, "application/dxf");
+  downloadFile(dxf, `bcs-ski-core-side-${ski.length}mm.dxf`, "application/dxf");
 }
 
-function exportCoreTopSVG(ski){
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+function exportCoreSideSVG(ski){
   const N = 200;
   const topPts = [];
   for (let i = 0; i <= N; i++) {
@@ -606,12 +575,98 @@ function exportCoreTopSVG(ski){
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
-  <title>Black Chapel Studios — Core Top Profile ${ski.length}mm</title>
-  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Width inset ${coreInset}mm/side. Y scale ${sz}x.</desc>
+  <title>Black Chapel Studios — Core Side Profile ${ski.length}mm</title>
+  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Y scale ${sz}x.</desc>
   <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
   <g id="registration">${regLines}</g>
 </svg>`;
-  downloadFile(svg, `bcs-ski-core-top-${ski.length}mm.svg`, "image/svg+xml");
+  downloadFile(svg, `bcs-ski-core-side-${ski.length}mm.svg`, "image/svg+xml");
+}
+
+// ══════════════ CORE PLAN OUTLINE EXPORT ══════════════
+// Top-down outline of the wood core, narrowed by coreInset on each side for sidewall comp.
+// Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
+// boolean-cut the extruded side profile for the final 3D core shape.
+function exportCorePlanDXF(ski){
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const N = 200;
+  const planPts = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    const xmm = pos * ski.length;
+    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    planPts.push({ x: halfW, y: xmm });
+  }
+  for (let i = N; i >= 0; i--) {
+    const pos = i / N;
+    const xmm = pos * ski.length;
+    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    planPts.push({ x: -halfW, y: xmm });
+  }
+  const marks = getRegistrationMarks(ski);
+
+  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n4\n`;
+  dxf += `0\nLAYER\n2\nCORE_PLAN_OUTLINE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;
+  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
+  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+
+  dxf += `0\nLWPOLYLINE\n8\nCORE_PLAN_OUTLINE\n90\n${planPts.length}\n70\n1\n`;
+  planPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+
+  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
+
+  marks.forEach(m => {
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 6;
+    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
+    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+  });
+
+  dxf += `0\nENDSEC\n0\nEOF\n`;
+  downloadFile(dxf, `bcs-ski-core-plan-${ski.length}mm.dxf`, "application/dxf");
+}
+
+function exportCorePlanSVG(ski){
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const N = 200;
+  const right = [], left = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    const xmm = pos * ski.length;
+    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    right.push({ x: halfW, y: xmm });
+    left.unshift({ x: -halfW, y: xmm });
+  }
+  const all = [...right, ...left];
+  const pad = 10;
+  const minX = Math.min(...all.map(p => p.x)) - pad;
+  const maxX = Math.max(...all.map(p => p.x)) + pad;
+  const minY = Math.min(...all.map(p => p.y)) - pad;
+  const maxY = Math.max(...all.map(p => p.y)) + pad;
+  const w = maxX - minX, h = maxY - minY;
+  const toSvgY = y => (maxY - y + minY);
+  const pathD = all.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+  ).join(' ') + ' Z';
+  const marks = getRegistrationMarks(ski);
+  const regLines = marks.map(m => {
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 4;
+    const cy = toSvgY(m.skiY);
+    return `<line x1="${(-hw).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${hw.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    <text x="${(hw + 3).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+  }).join('\n    ');
+  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.3" stroke-dasharray="6,3"/>`;
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
+  <title>Black Chapel Studios — Core Plan Outline ${ski.length}mm</title>
+  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation.</desc>
+  <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
+  <g id="centerline">${centerline}</g>
+  <g id="registration">${regLines}</g>
+</svg>`;
+  downloadFile(svg, `bcs-ski-core-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
 
 // ══════════════ ROCKER (mold) PROFILE EXPORT ══════════════
@@ -1685,8 +1740,8 @@ export default function App() {
   );
 
   const expBtn = {
-    background: C.exportBtn, border: "none", borderRadius: 3, padding: "5px 0",
-    color: C.bgDeep, fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+    background: C.exportBtn, border: "none", borderRadius: 3, padding: "7px 0",
+    color: C.bgDeep, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
     cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%"
   };
   const rating = flexRating(flex.underfootK);
@@ -1711,7 +1766,7 @@ export default function App() {
         display: "flex", flexDirection: "column", overflowY: "auto"
       }}>
         <div style={{ padding: "10px 12px 6px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL</div>
+          <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL STUDIOS</div>
           <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
         </div>
 
@@ -1795,27 +1850,30 @@ export default function App() {
           {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
         </div>
 
-        <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 8, marginBottom: 5, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>CNC Export</div>
+        <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div style={{ color: C.heading, fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>CNC Export</div>
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.3, marginBottom: 6 }}>
-            Edge inset: P-Tex base cut offset (leaves room for metal edges).<br/>
-            Core inset: width reduction per side for sidewall material on core blank.
+          <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45, marginBottom: 10, marginTop: 6 }}>
+            <b style={{color: C.label}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
+            <b style={{color: C.label}}>Core inset:</b> width reduction per side for sidewall material on core blank.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 5 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
             <button onClick={() => exportPlanDXF(ski)} style={expBtn}>Plan DXF</button>
             <button onClick={() => exportPlanSVG(ski)} style={expBtn}>Plan SVG</button>
-            <button onClick={() => exportCoreTopDXF(ski)} style={expBtn}>Core Top DXF</button>
-            <button onClick={() => exportCoreTopSVG(ski)} style={expBtn}>Core Top SVG</button>
+            <button onClick={() => exportCoreSideDXF(ski)} style={expBtn}>Core Side DXF</button>
+            <button onClick={() => exportCoreSideSVG(ski)} style={expBtn}>Core Side SVG</button>
+            <button onClick={() => exportCorePlanDXF(ski)} style={expBtn}>Core Plan DXF</button>
+            <button onClick={() => exportCorePlanSVG(ski)} style={expBtn}>Core Plan SVG</button>
             <button onClick={() => exportRockerDXF(ski)} style={expBtn}>Rocker DXF</button>
             <button onClick={() => exportRockerSVG(ski)} style={expBtn}>Rocker SVG</button>
           </div>
-          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.3 }}>
-            <b style={{color: C.label}}>Plan</b>: outer edge line + inset base-cut line.<br/>
-            <b style={{color: C.label}}>Core Top</b>: flat-bottom closed shape (CNC mill on flat bed).<br/>
+          <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45 }}>
+            <b style={{color: C.label}}>Plan</b>: outer edge line + inset base-cut line (top-down).<br/>
+            <b style={{color: C.label}}>Core Side</b>: closed flat-bottom side profile for extrusion in 3D (XZ plane).<br/>
+            <b style={{color: C.label}}>Core Plan</b>: top-down core outline for boolean cut (XY plane).<br/>
             <b style={{color: C.label}}>Rocker</b>: side-view line for press mold.<br/>
-            All include registration marks at tail/waist/tip contact.
+            All include registration marks at tail / waist / tip contact for CAD alignment.
           </div>
         </div>
 
