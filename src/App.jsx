@@ -126,6 +126,7 @@ function makeDefaultCore(){return[
 ];}
 const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,metal:"none",carbon:"none",carbonLayers:1};
 const DEFAULT_SKI={
+  designName: "Untitled Design",
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
@@ -136,6 +137,111 @@ const DEFAULT_SKI={
   tipSymmetric:true,tailSymmetric:true,
   coreProfile:makeDefaultCore(),layup:{...DEFAULT_LAYUP},
 };
+
+// ══════════════ FILE SAVE / LOAD ══════════════
+// Format version 1 — bump this when the ski state schema changes incompatibly.
+// File extension `.bcski` (Black Chapel Ski). JSON envelope with metadata for forward-compat.
+const BCSKI_FORMAT = "bcs.ski-design";
+const BCSKI_FORMAT_VERSION = 1;
+const APP_VERSION = "0.6";
+
+function saveDesignToFile(ski) {
+  const envelope = {
+    format: BCSKI_FORMAT,
+    formatVersion: BCSKI_FORMAT_VERSION,
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    designName: ski.designName || "Untitled Design",
+    ski: ski,
+  };
+  const json = JSON.stringify(envelope, null, 2);
+  const safeName = (ski.designName || "untitled").replace(/[^a-z0-9-]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "");
+  const filename = `bcs-${safeName}-${ski.length}mm.bcski`;
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Parse a loaded file's JSON contents. Returns { ok: true, ski } or { ok: false, error }.
+// Handles forward-compat: if format version is newer than this app supports, warn but try to load.
+// Handles older versions via migration step (currently a no-op since version 1 is the first).
+function parseDesignFile(jsonText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    return { ok: false, error: "File is not valid JSON. Try a .bcski file from a previous save." };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, error: "File doesn't contain a valid design." };
+  }
+  if (parsed.format !== BCSKI_FORMAT) {
+    return { ok: false, error: "This doesn't look like a Black Chapel ski design file." };
+  }
+  if (!parsed.ski || typeof parsed.ski !== "object") {
+    return { ok: false, error: "File is missing ski data." };
+  }
+  // Migration hook for future format versions:
+  let ski = parsed.ski;
+  if (parsed.formatVersion > BCSKI_FORMAT_VERSION) {
+    // Newer file than this app knows about. Try to load anyway but caller should warn.
+    return { ok: true, ski, warning: `File was saved by a newer app version (format v${parsed.formatVersion}). Some fields may not be recognized.` };
+  }
+  // Ensure designName exists (older files may not have it)
+  if (!ski.designName) ski.designName = parsed.designName || "Loaded Design";
+  return { ok: true, ski };
+}
+
+function loadDesignFromFile(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(parseDesignFile(e.target.result));
+    reader.onerror = () => resolve({ ok: false, error: "Could not read file." });
+    reader.readAsText(file);
+  });
+}
+
+// ══════════════ AUTOSAVE TO LOCALSTORAGE ══════════════
+const AUTOSAVE_KEY = "bcs_autosave";
+const AUTOSAVE_META_KEY = "bcs_autosave_meta";
+
+function writeAutosave(ski) {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(ski));
+    localStorage.setItem(AUTOSAVE_META_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      designName: ski.designName || "Untitled Design",
+    }));
+  } catch (e) {
+    // localStorage may be unavailable or full — ignore
+  }
+}
+
+function readAutosave() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    const metaRaw = localStorage.getItem(AUTOSAVE_META_KEY);
+    if (!raw) return null;
+    const ski = JSON.parse(raw);
+    const meta = metaRaw ? JSON.parse(metaRaw) : {};
+    return { ski, meta };
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearAutosave() {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+    localStorage.removeItem(AUTOSAVE_META_KEY);
+  } catch (e) {}
+}
 // ══════════════ EI ENGINE ══════════════
 function getWidthAtPos(ski,pos){
   const L=ski.length,TL=ski.tipLength,TAIL=ski.tailLength;
@@ -1653,7 +1759,7 @@ function FlexView({ ski, flex, width, height }) {
 //
 // To activate: replace FORMSPREE_ENDPOINT below with your actual Formspree form URL (after
 // signing up at formspree.io and creating a form).
-const FORMSPREE_ENDPOINT = "https://formspree.io/f/xkoegnlg";
+const FORMSPREE_ENDPOINT = "https://formspree.io/f/YOUR_FORM_ID_HERE";
 
 function FeedbackModal({ isOpen, onClose, trigger }) {
   const [submitting, setSubmitting] = useState(false);
@@ -1853,6 +1959,103 @@ export default function App() {
   const derived = useMemo(() => computeDerived(ski), [ski]);
   const flex = useMemo(() => computeFlexProfile(ski), [ski]);
 
+  // ── Save / Load state ─────────────────────────────────────────
+  const fileInputRef = useRef(null);
+  const [loadMessage, setLoadMessage] = useState(null);  // { type: "ok"|"error"|"warn", text }
+  const [recoverBanner, setRecoverBanner] = useState(null);
+
+  // On mount: check for an autosave session that doesn't match the initial state.
+  useEffect(() => {
+    const saved = readAutosave();
+    if (saved && saved.ski && JSON.stringify(saved.ski) !== JSON.stringify(DEFAULT_SKI)) {
+      setRecoverBanner(saved);
+    }
+  }, []);
+
+  // Debounced autosave: write to localStorage 1 second after the last edit.
+  useEffect(() => {
+    const t = setTimeout(() => writeAutosave(ski), 1000);
+    return () => clearTimeout(t);
+  }, [ski]);
+
+  const handleSave = useCallback(() => {
+    if (!ski.designName || ski.designName === "Untitled Design") {
+      const name = window.prompt("Name this design before saving:", "My Ski Design");
+      if (!name) return;
+      const named = { ...ski, designName: name };
+      setSki(named);
+      saveDesignToFile(named);
+    } else {
+      saveDesignToFile(ski);
+    }
+  }, [ski]);
+
+  const handleLoadClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const result = await loadDesignFromFile(file);
+    if (result.ok) {
+      setSki(result.ski);
+      setLoadMessage({ type: result.warning ? "warn" : "ok", text: result.warning || `Loaded "${result.ski.designName}"` });
+      setTimeout(() => setLoadMessage(null), 4000);
+    } else {
+      setLoadMessage({ type: "error", text: result.error });
+      setTimeout(() => setLoadMessage(null), 5000);
+    }
+    e.target.value = "";  // allow re-loading the same file
+  }, []);
+
+  const handleNewDesign = useCallback(() => {
+    if (window.confirm("Start a new design? Any unsaved changes will be lost (autosave will keep a copy).")) {
+      setSki({ ...DEFAULT_SKI, designName: "Untitled Design" });
+    }
+  }, []);
+
+  const acceptRecover = useCallback(() => {
+    if (recoverBanner?.ski) setSki(recoverBanner.ski);
+    setRecoverBanner(null);
+  }, [recoverBanner]);
+
+  const dismissRecover = useCallback(() => {
+    clearAutosave();
+    setRecoverBanner(null);
+  }, []);
+
+  // ── Accordion section state ──────────────────────────────────
+  // Persisted in localStorage so user's preferred layout sticks across sessions.
+  const ACCORDION_KEY = "bcs_sections_open";
+  const defaultSectionsOpen = {
+    file: true,
+    views: true,
+    presets: true,
+    dimensions: true,
+    sideProfile: false,
+    symmetry: false,
+    layup: false,
+    flex: true,           // open by default so the rating chip is visible
+    cncExport: false,
+    externalTools: false,
+    beta: true,
+  };
+  const [sectionsOpen, setSectionsOpen] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ACCORDION_KEY);
+      if (raw) return { ...defaultSectionsOpen, ...JSON.parse(raw) };
+    } catch (e) {}
+    return defaultSectionsOpen;
+  });
+  const toggleSection = useCallback((key) => {
+    setSectionsOpen(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  }, []);
+
   // Feedback modal state. `feedbackTrigger` records WHY the modal was opened (for analytics
   // in the form submission payload — "manual" vs "first-export-prompt").
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1982,6 +2185,41 @@ export default function App() {
     }}>{text}</div>
   );
 
+  // Collapsible sidebar section. `sectionKey` ties to sectionsOpen state.
+  // `accent` is an optional element rendered next to the chevron (e.g. the flex rating chip
+  // when the Flex section is collapsed, so the headline number stays visible).
+  const AccordionSection = ({ sectionKey, title, accent, children }) => {
+    const isOpen = sectionsOpen[sectionKey];
+    return (
+      <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
+        <button
+          onClick={() => toggleSection(sectionKey)}
+          style={{
+            width: "100%", padding: "9px 12px", background: "transparent", border: "none",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase",
+            }}>{title}</span>
+            {accent}
+          </span>
+          <span style={{ color: C.heading, fontSize: 10, fontFamily: "monospace" }}>
+            {isOpen ? "▾" : "▸"}
+          </span>
+        </button>
+        {isOpen && (
+          <div style={{ padding: "2px 12px 10px" }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div ref={containerRef} style={{
       display: "flex", height: "100%", width: "100%",
@@ -1992,56 +2230,134 @@ export default function App() {
         borderRight: `1px solid ${C.panelBorder}`,
         display: "flex", flexDirection: "column", overflowY: "auto"
       }}>
-        <div style={{ padding: "10px 12px 6px", borderBottom: `1px solid ${C.panelBorder}` }}>
+        {/* Hidden file input for Load Design */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileSelected}
+          accept=".bcski,.json,application/json"
+          style={{ display: "none" }}
+        />
+
+        <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}` }}>
           <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL STUDIOS</div>
           <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
         </div>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", gap: 3 }}>
-          {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
-        </div>
+        {/* Recover-session banner */}
+        {recoverBanner && (
+          <div style={{
+            margin: "8px 12px",
+            background: "rgba(200,147,90,0.10)", border: `1px solid ${C.heading}`, borderRadius: 4,
+            padding: "8px 10px",
+          }}>
+            <div style={{ color: C.heading, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>UNSAVED SESSION</div>
+            <div style={{ color: C.value, fontSize: 11, lineHeight: 1.35, marginBottom: 6 }}>
+              "{recoverBanner.meta?.designName || "Untitled"}" was left in progress.
+            </div>
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={acceptRecover} style={{
+                flex: 1, background: C.heading, border: "none", borderRadius: 3,
+                padding: "5px 0", color: C.bgDeep, fontSize: 10, fontWeight: 700,
+                fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+              }}>Recover</button>
+              <button onClick={dismissRecover} style={{
+                flex: 1, background: "transparent", border: `1px solid ${C.panelBorder}`, borderRadius: 3,
+                padding: "5px 0", color: C.label, fontSize: 10,
+                fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+              }}>Discard</button>
+            </div>
+          </div>
+        )}
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.label, fontSize: 8, marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Presets</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+        {/* Load message toast */}
+        {loadMessage && (
+          <div style={{
+            margin: "0 12px 6px",
+            padding: "6px 10px", borderRadius: 4, fontSize: 11, lineHeight: 1.35,
+            background: loadMessage.type === "error" ? "rgba(216,90,48,0.15)" : loadMessage.type === "warn" ? "rgba(200,147,90,0.15)" : "rgba(159,184,168,0.15)",
+            border: `1px solid ${loadMessage.type === "error" ? C.torch : loadMessage.type === "warn" ? C.heading : "#9FB8A8"}`,
+            color: loadMessage.type === "error" ? C.torch : C.value,
+          }}>{loadMessage.text}</div>
+        )}
+
+        <AccordionSection sectionKey="file" title="File">
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Design Name</div>
+            <input
+              type="text" value={ski.designName || ""}
+              onChange={e => setSki(s => ({ ...s, designName: e.target.value }))}
+              placeholder="Untitled Design"
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 8px", color: C.value, fontSize: 12, fontFamily: "'Segoe UI', sans-serif", outline: "none", boxSizing: "border-box" }}
+              onFocus={e => e.target.style.borderColor = C.inputFocus}
+              onBlur={e => e.target.style.borderColor = C.inputBorder}
+            />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 6 }}>
+            <button onClick={handleSave} style={{
+              background: C.heading, border: "none", borderRadius: 3, padding: "7px 0",
+              color: C.bgDeep, fontSize: 11, fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
+              textTransform: "uppercase",
+            }}>Save</button>
+            <button onClick={handleLoadClick} style={{
+              background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "7px 0",
+              color: C.heading, fontSize: 11, fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
+              textTransform: "uppercase",
+            }}>Load</button>
+          </div>
+          <button onClick={handleNewDesign} style={{
+            width: "100%", background: "transparent", border: `1px solid ${C.inputBorder}`,
+            borderRadius: 3, padding: "5px 0", color: C.label, fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer",
+            textTransform: "uppercase",
+          }}>New Design</button>
+          <div style={{ color: C.labelDim, fontSize: 9, lineHeight: 1.4, marginTop: 8 }}>
+            Save to a <code style={{ color: C.heading }}>.bcski</code> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
+          </div>
+        </AccordionSection>
+
+        <AccordionSection sectionKey="views" title="Views">
+          <div style={{ display: "flex", gap: 3 }}>
+            {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
+          </div>
+        </AccordionSection>
+
+        <AccordionSection sectionKey="presets" title="Presets">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {PRESETS.map(p => (
-              <button key={p.name} onClick={() => setSki({ ...p, layup: ski.layup })}
-                style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "2px 7px", color: C.label, fontSize: 9, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
+              <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
+                style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 9px", color: C.label, fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
                 onMouseOver={e => { e.currentTarget.style.borderColor = C.heading; e.currentTarget.style.color = C.heading; }}
                 onMouseOut={e => { e.currentTarget.style.borderColor = C.inputBorder; e.currentTarget.style.color = C.label; }}
               >{p.name}</button>
             ))}
           </div>
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.label, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1 }}>Dimensions (mm)</div>
+        <AccordionSection sectionKey="dimensions" title="Dimensions (mm)">
           {inputField("Length", "length", 1200, 2200)}
           {inputField("Tip W", "tipWidth", 60, 200)}
           {inputField("Waist", "waistWidth", 50, 180)}
           {inputField("Tail W", "tailWidth", 60, 200)}
-        </div>
-
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
           {inputField("Tip Len", "tipLength", 80, 500)}
           {inputField("Tail Len", "tailLength", 60, 400)}
           {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.label, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1 }}>Side Profile</div>
+        <AccordionSection sectionKey="sideProfile" title="Side Profile">
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
           {inputField("Camber", "camberHeight", 0, 10, 0.5)}
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+        <AccordionSection sectionKey="symmetry" title="Symmetry">
           {toggleBtn("Tip Symmetric", "tipSymmetric")}
           {toggleBtn("Tail Symmetric", "tailSymmetric")}
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Layup / Materials</div>
+        <AccordionSection sectionKey="layup" title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
           {selectField("Fiberglass", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 5 }}>
@@ -2060,11 +2376,21 @@ export default function App() {
                 style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             </div>
           )}
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 8, marginBottom: 3, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>Flex Analysis</div>
-          <div style={{ background: rating.color + "20", border: `1px solid ${rating.color}66`, borderRadius: 4, padding: "4px 7px", marginBottom: 5, textAlign: "center" }}>
+        <AccordionSection
+          sectionKey="flex"
+          title="Flex Analysis"
+          accent={
+            <span style={{
+              background: rating.color + "30", color: rating.color,
+              border: `1px solid ${rating.color}66`, borderRadius: 3,
+              padding: "1px 7px", fontSize: 9, fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>{rating.label}</span>
+          }
+        >
+          <div style={{ background: rating.color + "20", border: `1px solid ${rating.color}66`, borderRadius: 4, padding: "5px 8px", marginBottom: 6, textAlign: "center" }}>
             <div style={{ color: rating.color, fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{rating.label}</div>
             <div style={{ color: C.labelDim, fontSize: 7 }}>Underfoot flex rating</div>
           </div>
@@ -2075,10 +2401,9 @@ export default function App() {
           {stat("Dims", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
           {stat("Eff Edge", `${Math.round(derived.effectiveEdge)} mm`)}
           {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>CNC Export</div>
+        <AccordionSection sectionKey="cncExport" title="CNC Export">
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
           <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45, marginBottom: 10, marginTop: 6 }}>
@@ -2102,30 +2427,26 @@ export default function App() {
             <b style={{color: C.label}}>Rocker</b>: side-view line for press mold.<br/>
             All include registration marks at tail / waist / tip contact for CAD alignment.
           </div>
-        </div>
+        </AccordionSection>
 
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.labelDim, fontSize: 7, lineHeight: 1.4, marginBottom: 4 }}>
+        <AccordionSection sectionKey="externalTools" title="External Tools">
+          <div style={{ color: C.labelDim, fontSize: 9, lineHeight: 1.5, marginBottom: 6 }}>
             <b style={{color: C.label}}>Edit tips:</b><br/>
-            • Top row: full ski at true aspect. Drag nodes (circles) to reshape.<br/>
-            • Bottom row: tail &amp; tip zoom panels. Drag tangent handles (diamonds) for fine bezier control.<br/>
-            • Drag width handles on contact points / waist to adjust dimensions.
+            • Drag nodes (circles) on the main view to reshape & adjust dimensions.<br/>
+            • Drag tangent handles (diamonds) in the zoom panels for fine bezier control.<br/>
+            • Width handles on contacts adjust tip/tail width.
           </div>
-        </div>
-
-        <div style={{ padding: "5px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Junk Supply Calc ↗</a>
+            style={{ display: "block", color: C.label, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginBottom: 3, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", marginBottom: 2, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
-        </div>
+            style={{ display: "block", color: C.label, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginBottom: 3, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
+        </AccordionSection>
 
-        <div style={{ padding: "10px 10px", borderBottom: `1px solid ${C.panelBorder}` }}>
+        <AccordionSection sectionKey="beta" title="Beta / Feedback">
           <div style={{
             background: "rgba(216,90,48,0.10)", border: `1px solid ${C.torch}`, borderRadius: 4,
             padding: "8px 10px", marginBottom: 8,
           }}>
-            <div style={{ color: C.torch, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.2, fontWeight: 700, marginBottom: 3 }}>BETA</div>
             <div style={{ color: C.value, fontSize: 11, lineHeight: 1.4 }}>
               This designer is in active development. Your feedback shapes what comes next.
             </div>
@@ -2136,9 +2457,9 @@ export default function App() {
             fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, cursor: "pointer",
             textTransform: "uppercase",
           }}>Send Feedback</button>
-        </div>
+        </AccordionSection>
 
-        <div style={{ marginTop: "auto", padding: "6px 10px", borderTop: `1px solid ${C.panelBorder}` }}>
+        <div style={{ marginTop: "auto", padding: "8px 12px", borderTop: `1px solid ${C.panelBorder}` }}>
           <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.</div>
         </div>
       </div>
