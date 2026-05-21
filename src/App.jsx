@@ -2149,22 +2149,22 @@ export default function App() {
   const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
 
   const inputField = (label, param, min, max, step) => (
-    <div style={{ marginBottom: 5 }}>
-      <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
       <input
         type="number" value={ski[param]} min={min} max={max} step={step || 1}
         onChange={e => setSki(s => ({ ...s, [param]: parseFloat(e.target.value) || 0 }))}
-        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
         onFocus={e => e.target.style.borderColor = C.inputFocus}
         onBlur={e => e.target.style.borderColor = C.inputBorder}
       />
     </div>
   );
   const selectField = (label, value, options, onChange) => (
-    <div style={{ marginBottom: 5 }}>
-      <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
       <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 5px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
         {Object.entries(options).map(([k, v]) => (
           <option key={k} value={k}>
             {v.name}{v.E > 0 ? ` (${(v.E / 1000).toFixed(v.E > 50000 ? 0 : 1)}GPa)` : ""}
@@ -2174,23 +2174,23 @@ export default function App() {
     </div>
   );
   const stat = (label, value, color) => (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: `1px solid ${C.panelBorder}` }}>
-      <span style={{ color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
-      <span style={{ color: color || C.heading, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{value}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: `1px solid ${C.panelBorder}` }}>
+      <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
+      <span style={{ color: color || C.heading, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{value}</span>
     </div>
   );
   const viewBtn = (label, val) => (
     <button onClick={() => setActiveView(val)} style={{
-      flex: 1, padding: "4px 0", fontSize: 8, fontFamily: "'JetBrains Mono', monospace",
+      flex: 1, padding: "6px 0", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
       background: activeView === val ? C.heading : C.inputBg,
       color: activeView === val ? C.bgDeep : C.label,
       border: `1px solid ${activeView === val ? C.heading : C.inputBorder}`,
       borderRadius: 3, cursor: "pointer",
-      fontWeight: activeView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.5
+      fontWeight: activeView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
   const toggleBtn = (label, key) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
       <button onClick={() => {
         const nv = !ski[key]; const u = { [key]: nv };
         if (nv) {
@@ -2201,7 +2201,7 @@ export default function App() {
       }} style={{ width: 30, height: 14, borderRadius: 7, border: "none", cursor: "pointer", position: "relative", background: ski[key] ? C.heading : C.inputBorder }}>
         <div style={{ width: 10, height: 10, borderRadius: 5, background: "#F0EDE4", position: "absolute", top: 2, left: ski[key] ? 18 : 2, transition: "left 0.2s" }} />
       </button>
-      <span style={{ color: C.label, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>{label}</span>
+      <span style={{ color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>{label}</span>
     </div>
   );
 
@@ -2248,23 +2248,23 @@ export default function App() {
         {/* Recover-session banner */}
         {recoverBanner && (
           <div style={{
-            margin: "8px 12px",
+            margin: "10px 12px",
             background: "rgba(200,147,90,0.10)", border: `1px solid ${C.heading}`, borderRadius: 4,
-            padding: "8px 10px",
+            padding: "10px 12px",
           }}>
-            <div style={{ color: C.heading, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>UNSAVED SESSION</div>
-            <div style={{ color: C.value, fontSize: 11, lineHeight: 1.35, marginBottom: 6 }}>
+            <div style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>UNSAVED SESSION</div>
+            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.4, marginBottom: 8 }}>
               "{recoverBanner.meta?.designName || "Untitled"}" was left in progress.
             </div>
-            <div style={{ display: "flex", gap: 5 }}>
+            <div style={{ display: "flex", gap: 6 }}>
               <button onClick={acceptRecover} style={{
                 flex: 1, background: C.heading, border: "none", borderRadius: 3,
-                padding: "5px 0", color: C.bgDeep, fontSize: 10, fontWeight: 700,
+                padding: "6px 0", color: C.bgDeep, fontSize: 11, fontWeight: 700,
                 fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
               }}>Recover</button>
               <button onClick={dismissRecover} style={{
                 flex: 1, background: "transparent", border: `1px solid ${C.panelBorder}`, borderRadius: 3,
-                padding: "5px 0", color: C.label, fontSize: 10,
+                padding: "6px 0", color: C.label, fontSize: 11,
                 fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
               }}>Discard</button>
             </div>
@@ -2274,8 +2274,8 @@ export default function App() {
         {/* Load message toast */}
         {loadMessage && (
           <div style={{
-            margin: "0 12px 6px",
-            padding: "6px 10px", borderRadius: 4, fontSize: 11, lineHeight: 1.35,
+            margin: "0 12px 8px",
+            padding: "8px 12px", borderRadius: 4, fontSize: 12, lineHeight: 1.4,
             background: loadMessage.type === "error" ? "rgba(216,90,48,0.15)" : loadMessage.type === "warn" ? "rgba(200,147,90,0.15)" : "rgba(159,184,168,0.15)",
             border: `1px solid ${loadMessage.type === "error" ? C.torch : loadMessage.type === "warn" ? C.heading : "#9FB8A8"}`,
             color: loadMessage.type === "error" ? C.torch : C.value,
@@ -2283,39 +2283,39 @@ export default function App() {
         )}
 
         <AccordionSection isOpen={sectionsOpen.file} onToggle={() => toggleSection("file")} title="File">
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Design Name</div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Design Name</div>
             <input
               type="text" value={ski.designName || ""}
               onChange={e => setSki(s => ({ ...s, designName: e.target.value }))}
               placeholder="Untitled Design"
-              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 8px", color: C.value, fontSize: 12, fontFamily: "'Segoe UI', sans-serif", outline: "none", boxSizing: "border-box" }}
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 9px", color: C.value, fontSize: 13, fontFamily: "'Segoe UI', sans-serif", outline: "none", boxSizing: "border-box" }}
               onFocus={e => e.target.style.borderColor = C.inputFocus}
               onBlur={e => e.target.style.borderColor = C.inputBorder}
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
             <button onClick={handleSave} style={{
-              background: C.heading, border: "none", borderRadius: 3, padding: "7px 0",
-              color: C.bgDeep, fontSize: 11, fontWeight: 700,
+              background: C.heading, border: "none", borderRadius: 3, padding: "8px 0",
+              color: C.bgDeep, fontSize: 12, fontWeight: 700,
               fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
               textTransform: "uppercase",
             }}>Save</button>
             <button onClick={handleLoadClick} style={{
-              background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "7px 0",
-              color: C.heading, fontSize: 11, fontWeight: 700,
+              background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "8px 0",
+              color: C.heading, fontSize: 12, fontWeight: 700,
               fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
               textTransform: "uppercase",
             }}>Load</button>
           </div>
           <button onClick={handleNewDesign} style={{
             width: "100%", background: "transparent", border: `1px solid ${C.inputBorder}`,
-            borderRadius: 3, padding: "5px 0", color: C.label, fontSize: 10,
+            borderRadius: 3, padding: "6px 0", color: C.label, fontSize: 11,
             fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer",
             textTransform: "uppercase",
           }}>New Design</button>
-          <div style={{ color: C.labelDim, fontSize: 9, lineHeight: 1.4, marginTop: 8 }}>
-            Save to a <code style={{ color: C.heading }}>.bcski</code> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
+          <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
+            Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>.bcski</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
           </div>
         </AccordionSection>
 
@@ -2326,10 +2326,10 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {PRESETS.map(p => (
               <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
-                style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 9px", color: C.label, fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
+                style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 11px", color: C.label, fontSize: 12, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
                 onMouseOver={e => { e.currentTarget.style.borderColor = C.heading; e.currentTarget.style.color = C.heading; }}
                 onMouseOut={e => { e.currentTarget.style.borderColor = C.inputBorder; e.currentTarget.style.color = C.label; }}
               >{p.name}</button>
@@ -2361,20 +2361,20 @@ export default function App() {
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
           {selectField("Fiberglass", ski.layup.glass, GLASS, v => setLayup("glass", v))}
-          <div style={{ marginBottom: 5 }}>
-            <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Glass Layers / side</div>
+          <div style={{ marginBottom: 7 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Glass Layers / side</div>
             <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
               onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
-              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
           </div>
           {selectField("Metal", ski.layup.metal, METALS, v => setLayup("metal", v))}
           {selectField("Carbon", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
           {ski.layup.carbon !== "none" && (
-            <div style={{ marginBottom: 5 }}>
-              <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Carbon Layers</div>
+            <div style={{ marginBottom: 7 }}>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Carbon Layers</div>
               <input type="number" value={ski.layup.carbonLayers} min={1} max={4} step={1}
                 onChange={e => setLayup("carbonLayers", parseInt(e.target.value) || 1)}
-                style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             </div>
           )}
         </AccordionSection>
@@ -2385,14 +2385,14 @@ export default function App() {
             <span style={{
               background: rating.color + "30", color: rating.color,
               border: `1px solid ${rating.color}66`, borderRadius: 3,
-              padding: "1px 7px", fontSize: 9, fontWeight: 700,
+              padding: "2px 8px", fontSize: 10, fontWeight: 700,
               fontFamily: "'JetBrains Mono', monospace",
             }}>{rating.label}</span>
           }
         >
-          <div style={{ background: rating.color + "20", border: `1px solid ${rating.color}66`, borderRadius: 4, padding: "5px 8px", marginBottom: 6, textAlign: "center" }}>
-            <div style={{ color: rating.color, fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{rating.label}</div>
-            <div style={{ color: C.labelDim, fontSize: 7 }}>Underfoot flex rating</div>
+          <div style={{ background: rating.color + "20", border: `1px solid ${rating.color}66`, borderRadius: 4, padding: "7px 10px", marginBottom: 8, textAlign: "center" }}>
+            <div style={{ color: rating.color, fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{rating.label}</div>
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2 }}>Underfoot flex rating</div>
           </div>
           {stat("Underfoot", `${Math.round(flex.underfootK)} N/mm`, C.flexStroke)}
           {stat("Peak", `${Math.round(flex.peakK)} N/mm`, C.flexStroke)}
@@ -2406,11 +2406,11 @@ export default function App() {
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45, marginBottom: 10, marginTop: 6 }}>
-            <b style={{color: C.label}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
-            <b style={{color: C.label}}>Core inset:</b> width reduction per side for sidewall material on core blank.
+          <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 12, marginTop: 8 }}>
+            <b style={{color: C.heading}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
+            <b style={{color: C.heading}}>Core inset:</b> width reduction per side for sidewall material on core blank.
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Plan DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Plan SVG</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
@@ -2420,26 +2420,26 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportRockerDXF)} style={expBtn}>Rocker DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportRockerSVG)} style={expBtn}>Rocker SVG</button>
           </div>
-          <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45 }}>
-            <b style={{color: C.label}}>Plan</b>: outer edge line + inset base-cut line (top-down).<br/>
-            <b style={{color: C.label}}>Core Side</b>: closed flat-bottom side profile for extrusion in 3D (XZ plane).<br/>
-            <b style={{color: C.label}}>Core Plan</b>: top-down core outline for boolean cut (XY plane).<br/>
-            <b style={{color: C.label}}>Rocker</b>: side-view line for press mold.<br/>
+          <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5 }}>
+            <b style={{color: C.heading}}>Plan</b>: outer edge line + inset base-cut line (top-down).<br/>
+            <b style={{color: C.heading}}>Core Side</b>: closed flat-bottom side profile for extrusion in 3D (XZ plane).<br/>
+            <b style={{color: C.heading}}>Core Plan</b>: top-down core outline for boolean cut (XY plane).<br/>
+            <b style={{color: C.heading}}>Rocker</b>: side-view line for press mold.<br/>
             All include registration marks at tail / waist / tip contact for CAD alignment.
           </div>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
-          <div style={{ color: C.labelDim, fontSize: 9, lineHeight: 1.5, marginBottom: 6 }}>
-            <b style={{color: C.label}}>Edit tips:</b><br/>
+          <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
+            <b style={{color: C.heading}}>Edit tips:</b><br/>
             • Drag nodes (circles) on the main view to reshape & adjust dimensions.<br/>
             • Drag tangent handles (diamonds) in the zoom panels for fine bezier control.<br/>
             • Width handles on contacts adjust tip/tail width.
           </div>
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginBottom: 3, textDecoration: "none" }}>Junk Supply Calc ↗</a>
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginBottom: 3, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.beta} onToggle={() => toggleSection("beta")} title="Beta / Feedback">
