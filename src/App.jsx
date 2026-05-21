@@ -1950,6 +1950,42 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
   );
 }
 
+// ══════════════ ACCORDION SECTION (module-level for stable identity) ══════════════
+// Defined at module scope rather than inside App() so React doesn't unmount/remount it on every
+// parent re-render. (When defined inline, every keystroke in any input triggers App to re-render,
+// which creates a fresh AccordionSection function reference, which makes React tear down and
+// rebuild the entire subtree — causing focused inputs to lose focus after each character.)
+function AccordionSection({ isOpen, onToggle, title, accent, children }) {
+  return (
+    <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
+      <button
+        onClick={onToggle}
+        style={{
+          width: "100%", padding: "9px 12px", background: "transparent", border: "none",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+            fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase",
+          }}>{title}</span>
+          {accent}
+        </span>
+        <span style={{ color: C.heading, fontSize: 10, fontFamily: "monospace" }}>
+          {isOpen ? "▾" : "▸"}
+        </span>
+      </button>
+      {isOpen && (
+        <div style={{ padding: "2px 12px 10px" }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
@@ -2185,41 +2221,6 @@ export default function App() {
     }}>{text}</div>
   );
 
-  // Collapsible sidebar section. `sectionKey` ties to sectionsOpen state.
-  // `accent` is an optional element rendered next to the chevron (e.g. the flex rating chip
-  // when the Flex section is collapsed, so the headline number stays visible).
-  const AccordionSection = ({ sectionKey, title, accent, children }) => {
-    const isOpen = sectionsOpen[sectionKey];
-    return (
-      <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
-        <button
-          onClick={() => toggleSection(sectionKey)}
-          style={{
-            width: "100%", padding: "9px 12px", background: "transparent", border: "none",
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            cursor: "pointer", textAlign: "left",
-          }}
-        >
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-              fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase",
-            }}>{title}</span>
-            {accent}
-          </span>
-          <span style={{ color: C.heading, fontSize: 10, fontFamily: "monospace" }}>
-            {isOpen ? "▾" : "▸"}
-          </span>
-        </button>
-        {isOpen && (
-          <div style={{ padding: "2px 12px 10px" }}>
-            {children}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div ref={containerRef} style={{
       display: "flex", height: "100%", width: "100%",
@@ -2281,7 +2282,7 @@ export default function App() {
           }}>{loadMessage.text}</div>
         )}
 
-        <AccordionSection sectionKey="file" title="File">
+        <AccordionSection isOpen={sectionsOpen.file} onToggle={() => toggleSection("file")} title="File">
           <div style={{ marginBottom: 8 }}>
             <div style={{ color: C.label, fontSize: 9, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Design Name</div>
             <input
@@ -2318,13 +2319,13 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection sectionKey="views" title="Views">
+        <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title="Views">
           <div style={{ display: "flex", gap: 3 }}>
             {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
           </div>
         </AccordionSection>
 
-        <AccordionSection sectionKey="presets" title="Presets">
+        <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {PRESETS.map(p => (
               <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
@@ -2336,7 +2337,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection sectionKey="dimensions" title="Dimensions (mm)">
+        <AccordionSection isOpen={sectionsOpen.dimensions} onToggle={() => toggleSection("dimensions")} title="Dimensions (mm)">
           {inputField("Length", "length", 1200, 2200)}
           {inputField("Tip W", "tipWidth", 60, 200)}
           {inputField("Waist", "waistWidth", 50, 180)}
@@ -2346,18 +2347,18 @@ export default function App() {
           {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
         </AccordionSection>
 
-        <AccordionSection sectionKey="sideProfile" title="Side Profile">
+        <AccordionSection isOpen={sectionsOpen.sideProfile} onToggle={() => toggleSection("sideProfile")} title="Side Profile">
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
           {inputField("Camber", "camberHeight", 0, 10, 0.5)}
         </AccordionSection>
 
-        <AccordionSection sectionKey="symmetry" title="Symmetry">
+        <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
           {toggleBtn("Tip Symmetric", "tipSymmetric")}
           {toggleBtn("Tail Symmetric", "tailSymmetric")}
         </AccordionSection>
 
-        <AccordionSection sectionKey="layup" title="Layup / Materials">
+        <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
           {selectField("Fiberglass", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 5 }}>
@@ -2378,8 +2379,7 @@ export default function App() {
           )}
         </AccordionSection>
 
-        <AccordionSection
-          sectionKey="flex"
+        <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title="Flex Analysis"
           accent={
             <span style={{
@@ -2403,7 +2403,7 @@ export default function App() {
           {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
         </AccordionSection>
 
-        <AccordionSection sectionKey="cncExport" title="CNC Export">
+        <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
           <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45, marginBottom: 10, marginTop: 6 }}>
@@ -2429,7 +2429,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection sectionKey="externalTools" title="External Tools">
+        <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
           <div style={{ color: C.labelDim, fontSize: 9, lineHeight: 1.5, marginBottom: 6 }}>
             <b style={{color: C.label}}>Edit tips:</b><br/>
             • Drag nodes (circles) on the main view to reshape & adjust dimensions.<br/>
@@ -2442,7 +2442,7 @@ export default function App() {
             style={{ display: "block", color: C.label, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", marginBottom: 3, textDecoration: "none" }}>Sooth Ski Comparator ↗</a>
         </AccordionSection>
 
-        <AccordionSection sectionKey="beta" title="Beta / Feedback">
+        <AccordionSection isOpen={sectionsOpen.beta} onToggle={() => toggleSection("beta")} title="Beta / Feedback">
           <div style={{
             background: "rgba(216,90,48,0.10)", border: `1px solid ${C.torch}`, borderRadius: 4,
             padding: "8px 10px", marginBottom: 8,
