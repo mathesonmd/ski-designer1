@@ -2131,19 +2131,37 @@ export default function App() {
     return () => ro.disconnect();
   }, []);
 
+  // ── Responsive breakpoints ──────────────────────────────────
+  // Mobile:  < 768px  (phones any orientation, phablets)
+  // Tablet:  768–1023 (iPad portrait, small tablets)
+  // Desktop: ≥ 1024   (iPad landscape, laptops, monitors) — original layout
+  const isMobile = size.w < 768;
+  const isTablet = size.w >= 768 && size.w < 1024;
+  const isCompact = isMobile || isTablet;  // both use drawer sidebar
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Close the drawer if the viewport grows back to desktop while it was open,
+  // to prevent a lingering overlay when someone rotates or resizes a window.
+  useEffect(() => {
+    if (!isCompact && drawerOpen) setDrawerOpen(false);
+  }, [isCompact, drawerOpen]);
+
   const panelW = 270;
-  const canvasW = size.w - panelW;
+  const mobileHeaderH = 52;
+  // On compact viewports the sidebar becomes a drawer, so the main canvas gets full width
+  // and the top mobile header takes a fixed slice of the height.
+  const canvasW = isCompact ? size.w : (size.w - panelW);
+  const canvasAreaH = isCompact ? Math.max(0, size.h - mobileHeaderH) : size.h;
   let planH = 0, profH = 0, coreH = 0, flexH = 0;
-  if (activeView === "plan")    planH = size.h;
-  else if (activeView === "profile") profH = size.h;
-  else if (activeView === "core")    coreH = size.h;
-  else if (activeView === "flex")    flexH = size.h;
+  if (activeView === "plan")    planH = canvasAreaH;
+  else if (activeView === "profile") profH = canvasAreaH;
+  else if (activeView === "core")    coreH = canvasAreaH;
+  else if (activeView === "flex")    flexH = canvasAreaH;
   else {
     // Plan gets more height because it now has 2 rows internally
-    planH = Math.floor(size.h * 0.48);
-    profH = Math.floor(size.h * 0.16);
-    coreH = Math.floor(size.h * 0.18);
-    flexH = size.h - planH - profH - coreH;
+    planH = Math.floor(canvasAreaH * 0.48);
+    profH = Math.floor(canvasAreaH * 0.16);
+    coreH = Math.floor(canvasAreaH * 0.18);
+    flexH = canvasAreaH - planH - profH - coreH;
   }
 
   const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
@@ -2223,14 +2241,86 @@ export default function App() {
 
   return (
     <div ref={containerRef} style={{
-      display: "flex", height: "100%", width: "100%",
-      background: C.bg, fontFamily: "'Segoe UI', sans-serif", overflow: "hidden"
+      display: "flex",
+      flexDirection: isCompact ? "column" : "row",
+      height: "100%", width: "100%",
+      background: C.bg, fontFamily: "'Segoe UI', sans-serif", overflow: "hidden",
+      position: "relative",
     }}>
-      <div style={{
-        width: panelW, minWidth: panelW, background: C.panel,
-        borderRight: `1px solid ${C.panelBorder}`,
-        display: "flex", flexDirection: "column", overflowY: "auto"
-      }}>
+      {/* Mobile / tablet header bar */}
+      {isCompact && (
+        <div style={{
+          height: mobileHeaderH, minHeight: mobileHeaderH,
+          background: C.panel, borderBottom: `1px solid ${C.panelBorder}`,
+          display: "flex", alignItems: "center", padding: "0 12px",
+          gap: 10, flexShrink: 0,
+        }}>
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            style={{
+              width: 36, height: 36, background: "transparent",
+              border: `1px solid ${C.panelBorder}`, borderRadius: 4,
+              color: C.heading, cursor: "pointer", display: "flex",
+              alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <svg width="18" height="14" viewBox="0 0 18 14" fill="none" aria-hidden="true">
+              <path d="M0 1h18M0 7h18M0 13h18" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+          </button>
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <div style={{ color: C.heading, fontSize: 12, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", lineHeight: 1.1 }}>Black Chapel Studios</div>
+            <div style={{ color: C.label, fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", lineHeight: 1.1, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              Ski Designer{ski.designName && ski.designName !== "Untitled Design" ? ` · ${ski.designName}` : ""}
+            </div>
+          </div>
+          <button
+            onClick={handleSave}
+            style={{
+              height: 36, padding: "0 14px", background: C.heading,
+              border: "none", borderRadius: 4, color: C.bgDeep,
+              fontSize: 11, fontWeight: 700, letterSpacing: 0.7,
+              fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+              textTransform: "uppercase", flexShrink: 0,
+            }}
+          >Save</button>
+        </div>
+      )}
+
+      {/* Backdrop for mobile drawer */}
+      {isCompact && drawerOpen && (
+        <div
+          onClick={() => setDrawerOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            zIndex: 500,
+          }}
+        />
+      )}
+
+      <div style={
+        isCompact
+          ? {
+              // Mobile / tablet: sidebar becomes a slide-in left drawer
+              position: "fixed", top: 0, left: 0, bottom: 0,
+              width: Math.min(320, size.w - 40),
+              background: C.panel, borderRight: `1px solid ${C.panelBorder}`,
+              display: "flex", flexDirection: "column", overflowY: "auto",
+              zIndex: 501,
+              transform: drawerOpen ? "translateX(0)" : "translateX(-100%)",
+              transition: "transform 0.24s ease-out",
+              boxShadow: drawerOpen ? "4px 0 24px rgba(0,0,0,0.4)" : "none",
+              WebkitOverflowScrolling: "touch",
+            }
+          : {
+              // Desktop: original inline sidebar
+              width: panelW, minWidth: panelW, background: C.panel,
+              borderRight: `1px solid ${C.panelBorder}`,
+              display: "flex", flexDirection: "column", overflowY: "auto",
+            }
+      }>
         {/* Hidden file input for Load Design */}
         <input
           type="file"
@@ -2240,9 +2330,24 @@ export default function App() {
           style={{ display: "none" }}
         />
 
-        <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL STUDIOS</div>
-          <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
+        <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL STUDIOS</div>
+            <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
+          </div>
+          {isCompact && (
+            <button
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Close menu"
+              style={{
+                width: 32, height: 32, background: "transparent",
+                border: `1px solid ${C.panelBorder}`, borderRadius: 4,
+                color: C.heading, cursor: "pointer", display: "flex",
+                alignItems: "center", justifyContent: "center",
+                fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0,
+              }}
+            >×</button>
+          )}
         </div>
 
         {/* Recover-session banner */}
