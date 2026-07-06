@@ -2244,6 +2244,18 @@ export default function App() {
     if (!isCompact && drawerOpen) setDrawerOpen(false);
   }, [isCompact, drawerOpen]);
 
+  // Coerce activeView when transitioning across the compact/desktop boundary:
+  // - Desktop views (all/profile/core/flex) collapse to "analysis" on compact.
+  // - The compact "analysis" value collapses to "all" on desktop.
+  // "plan" is valid in both modes and passes through unchanged.
+  useEffect(() => {
+    if (isCompact && activeView !== "plan" && activeView !== "analysis") {
+      setActiveView("analysis");
+    } else if (!isCompact && activeView === "analysis") {
+      setActiveView("all");
+    }
+  }, [isCompact, activeView]);
+
   const panelW = 270;
   const mobileHeaderH = 52;
   // On compact viewports the sidebar becomes a drawer, so the main canvas gets full width
@@ -2251,15 +2263,31 @@ export default function App() {
   const canvasW = isCompact ? size.w : (size.w - panelW);
   const canvasAreaH = isCompact ? Math.max(0, size.h - mobileHeaderH) : size.h;
   let planH = 0, profH = 0, coreH = 0, flexH = 0;
-  // On compact viewports, treat "all" as "plan only" so the ski gets maximum vertical room.
-  // Users can still explicitly pick profile/core/flex from the sidebar Views section.
-  const effectiveActiveView = (isCompact && activeView === "all") ? "plan" : activeView;
-  if (effectiveActiveView === "plan")    planH = canvasAreaH;
-  else if (effectiveActiveView === "profile") profH = canvasAreaH;
-  else if (effectiveActiveView === "core")    coreH = canvasAreaH;
-  else if (effectiveActiveView === "flex")    flexH = canvasAreaH;
-  else {
-    // Plan gets more height because it now has 2 rows internally
+  // On compact viewports, we simplify the view options down to two: "plan" (the interactive
+  // rotated vertical ski) and "analysis" (a compact stack of Profile + Core + Flex). Any legacy
+  // activeView value that isn't "plan" collapses into "analysis". This avoids the terrible
+  // stretched look of, say, "profile" alone on a phone.
+  //
+  // Reserve ~34px at the top of "analysis" mode for a small "expand these on desktop" banner.
+  const analysisNoticeH = isCompact ? 34 : 0;
+  let effectiveActiveView;
+  if (isCompact) {
+    effectiveActiveView = (activeView === "plan") ? "plan" : "analysis";
+  } else {
+    effectiveActiveView = activeView;
+  }
+  if (effectiveActiveView === "plan")           planH = canvasAreaH;
+  else if (effectiveActiveView === "profile")   profH = canvasAreaH;
+  else if (effectiveActiveView === "core")      coreH = canvasAreaH;
+  else if (effectiveActiveView === "flex")      flexH = canvasAreaH;
+  else if (effectiveActiveView === "analysis") {
+    // Compact stacked analysis: divide remaining area equally among Profile, Core, Flex.
+    const available = canvasAreaH - analysisNoticeH;
+    profH = Math.floor(available / 3);
+    coreH = Math.floor(available / 3);
+    flexH = available - profH - coreH;
+  } else {
+    // Desktop "All" — plan gets more height because it has 2 rows internally
     planH = Math.floor(canvasAreaH * 0.48);
     profH = Math.floor(canvasAreaH * 0.16);
     coreH = Math.floor(canvasAreaH * 0.18);
@@ -2302,11 +2330,11 @@ export default function App() {
   const viewBtn = (label, val) => (
     <button onClick={() => setActiveView(val)} style={{
       flex: 1, padding: "6px 0", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
-      background: activeView === val ? C.heading : C.inputBg,
-      color: activeView === val ? C.bgDeep : C.label,
-      border: `1px solid ${activeView === val ? C.heading : C.inputBorder}`,
+      background: effectiveActiveView === val ? C.heading : C.inputBg,
+      color: effectiveActiveView === val ? C.bgDeep : C.label,
+      border: `1px solid ${effectiveActiveView === val ? C.heading : C.inputBorder}`,
       borderRadius: 3, cursor: "pointer",
-      fontWeight: activeView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
+      fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
   const toggleBtn = (label, key) => (
@@ -2527,8 +2555,16 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title="Views">
-          <div style={{ display: "flex", gap: 3 }}>
-            {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
+          <div style={{ display: "flex", gap: 4 }}>
+            {isCompact ? (
+              <>
+                {viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}
+              </>
+            ) : (
+              <>
+                {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
+              </>
+            )}
           </div>
         </AccordionSection>
 
@@ -2672,6 +2708,18 @@ export default function App() {
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {effectiveActiveView === "analysis" && (
+          <div style={{
+            height: analysisNoticeH, flexShrink: 0,
+            background: C.bgDeep, borderBottom: `1px solid ${C.panelBorder}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "0 12px",
+          }}>
+            <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, textAlign: "center", lineHeight: 1.3 }}>
+              Compact analysis view — <span style={{ color: C.heading }}>open on desktop</span> for full detail
+            </span>
+          </div>
+        )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
             <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} />
