@@ -877,18 +877,22 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const rowGap = 8;
   const colGap = 8;
 
-  // Vertical: reserve ~40% of width for the zoom column, but cap it at 200px so on wider
-  // tablets the main view can dominate more.
-  const zoomColW = isVertical ? Math.min(Math.floor(width * 0.40), 200) : 0;
+  // Vertical: main view is a narrow LEFT column (the ski is thin so it doesn't need much
+  // horizontal room), and the zoom column takes MOST of the width to give fingertip-friendly
+  // real estate for editing tip/tail nodes and tangent handles. Main is ~28% of width, capped
+  // at 130px so on wider tablets the zoom column still dominates.
+  const mainColW = isVertical ? Math.min(Math.floor(width * 0.28), 130) : width;
+  const zoomColW = isVertical ? (width - mainColW - colGap) : 0;
   const mainRowH = isVertical ? height : Math.floor(height * 0.38);
   const mainRowY = 0;
   const zoomRowY = isVertical ? 0 : (mainRowH + rowGap);
   const zoomRowH = isVertical ? height : (height - mainRowY - mainRowH - rowGap);
 
-  const mainPadX = 24;
+  // Main-view padding: shrink horizontal padding on the narrow vertical column since it's tight.
+  const mainPadX = isVertical ? 6 : 24;
   const mainPadY = 8;
-  // In vertical, the main view occupies the LEFT column only (width - zoomColW - colGap).
-  const mainPlotW = (isVertical ? (width - zoomColW - colGap) : width) - mainPadX * 2;
+  // In vertical, the main view occupies the LEFT column only.
+  const mainPlotW = (isVertical ? mainColW : width) - mainPadX * 2;
   const mainPlotH = mainRowH - mainPadY * 2;
   // TRUE aspect ratio: same mm-to-pixel scale for both axes.
   // In vertical: length axis is canvas-Y, so we fit ski.length to plotH and max width to plotW.
@@ -1108,8 +1112,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1;
     ctx.beginPath();
     if (isVertical) {
-      // Vertical: divider is a vertical line between the main-view left column and the zoom right column
-      const dx = width - zoomColW + colGap / 2;
+      // Vertical: divider is a vertical line centered in the gap between main and zoom columns
+      const dx = mainColW + colGap / 2;
       ctx.moveTo(dx, 0);
       ctx.lineTo(dx, height);
     } else {
