@@ -867,18 +867,28 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const isVertical = orientation === "vertical";
 
   // ── Layout regions ──────────────────────────────────────────────
-  // In horizontal mode: main view on top row, tail zoom + tip zoom side-by-side below.
-  // In vertical mode:   main view fills more (60%), zoom panels stack top/bottom below (tip zoom above tail zoom
-  //   to match "tip at top" convention in the main view).
+  // Horizontal (desktop):
+  //   Main view on top row (~38%), tail zoom + tip zoom side-by-side below.
+  // Vertical (mobile/tablet):
+  //   Main view takes a LEFT column with full height. Tip zoom and tail zoom stack in a
+  //   RIGHT column, also full height (tip on top, tail on bottom).
+  //   This gives the ski MUCH more vertical room than the previous stacked layout,
+  //   because the main view no longer has to share its vertical space with zoom panels.
   const rowGap = 8;
-  const mainRowH = Math.floor(height * (isVertical ? 0.60 : 0.38));
+  const colGap = 8;
+
+  // Vertical: reserve ~40% of width for the zoom column, but cap it at 200px so on wider
+  // tablets the main view can dominate more.
+  const zoomColW = isVertical ? Math.min(Math.floor(width * 0.40), 200) : 0;
+  const mainRowH = isVertical ? height : Math.floor(height * 0.38);
   const mainRowY = 0;
-  const zoomRowY = mainRowH + rowGap;
-  const zoomRowH = height - mainRowY - mainRowH - rowGap;
+  const zoomRowY = isVertical ? 0 : (mainRowH + rowGap);
+  const zoomRowH = isVertical ? height : (height - mainRowY - mainRowH - rowGap);
 
   const mainPadX = 24;
   const mainPadY = 8;
-  const mainPlotW = width - mainPadX * 2;
+  // In vertical, the main view occupies the LEFT column only (width - zoomColW - colGap).
+  const mainPlotW = (isVertical ? (width - zoomColW - colGap) : width) - mainPadX * 2;
   const mainPlotH = mainRowH - mainPadY * 2;
   // TRUE aspect ratio: same mm-to-pixel scale for both axes.
   // In vertical: length axis is canvas-Y, so we fit ski.length to plotH and max width to plotW.
@@ -896,16 +906,24 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ? { x: mainCenterX + skiX * mainScale, y: mainTailY - skiY * mainScale }
     : { x: mainOriginX + skiY * mainScale, y: mainCenterY + skiX * mainScale };
 
-  // ── Zoom row ──────────────────────────────────────────────
-  // Horizontal: tail on left, tip on right, side-by-side.
-  // Vertical:   tip on top, tail on bottom, stacked. Panels are wide but short.
+  // ── Zoom row / column ──────────────────────────────────────
+  // Horizontal: tail on left, tip on right, side-by-side across the bottom row.
+  // Vertical:   tip on top, tail on bottom, stacked full-height in the right column.
   const panelGap = 12;
-  const zoomPanelW = isVertical ? (width - panelGap * 2) : Math.floor((width - panelGap * 3) / 2);
-  const zoomPanelH = isVertical ? Math.floor((zoomRowH - panelGap) / 2) : zoomRowH;
-  const tailZoomX = panelGap;
-  const tailZoomY = isVertical ? (zoomRowY + panelGap + zoomPanelH) : zoomRowY;  // bottom in vertical
-  const tipZoomX  = isVertical ? panelGap : (panelGap * 2 + zoomPanelW);
-  const tipZoomY  = zoomRowY;  // top in vertical, same as zoomRowY horizontal
+  // In vertical, both zoom panels get the full zoom-column width and half the height each.
+  // In horizontal, zoom panels split the full width side by side.
+  const zoomPanelW = isVertical
+    ? (zoomColW - panelGap * 2)                       // narrower but full-height in vertical
+    : Math.floor((width - panelGap * 3) / 2);
+  const zoomPanelH = isVertical
+    ? Math.floor((zoomRowH - panelGap * 3) / 2)       // half of column height, minus paddings
+    : zoomRowH;
+  const zoomColOriginX = isVertical ? (width - zoomColW + panelGap) : 0;
+
+  const tipZoomX  = isVertical ? zoomColOriginX : (panelGap * 2 + zoomPanelW);
+  const tipZoomY  = isVertical ? panelGap : zoomRowY;
+  const tailZoomX = isVertical ? zoomColOriginX : panelGap;
+  const tailZoomY = isVertical ? (tipZoomY + zoomPanelH + panelGap) : zoomRowY;
 
   // Each zoom panel shows MUCH more area than just the tip/tail. The bezier handles can extend
   // outside the curve they shape — give 1.5× the tip/tail length and 2× the width so the
@@ -1048,8 +1066,14 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       ctx.fillText("TIP",  tipPt.x, tipPt.y - 6);
       ctx.fillText("TAIL", tailPt.x, tailPt.y + 14);
       ctx.font = "11px 'JetBrains Mono', monospace";
-      ctx.textAlign = "left";
-      ctx.fillText(`${ski.length} mm`, tipPt.x + 30, (tipPt.y + tailPt.y) / 2);
+      // Place length label on the LEFT side of the ski, rotated 90° so it reads bottom-to-top.
+      // This keeps it clear of the width labels on the right and matches a technical-drawing convention.
+      ctx.save();
+      ctx.translate(mainPadX + 10, (tipPt.y + tailPt.y) / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.fillText(`${ski.length} mm`, 0, 0);
+      ctx.restore();
     } else {
       ctx.textAlign = "left";
       ctx.fillText("TAIL", toMain(0, 0).x - 4, mainCenterY - 16);
@@ -1080,11 +1104,18 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       }
     });
 
-    // ── Divider between rows ────────────────────────────────────
+    // ── Divider between main view and zoom panels ────────────────
     ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, mainRowH + rowGap / 2);
-    ctx.lineTo(width, mainRowH + rowGap / 2);
+    if (isVertical) {
+      // Vertical: divider is a vertical line between the main-view left column and the zoom right column
+      const dx = width - zoomColW + colGap / 2;
+      ctx.moveTo(dx, 0);
+      ctx.lineTo(dx, height);
+    } else {
+      ctx.moveTo(0, mainRowH + rowGap / 2);
+      ctx.lineTo(width, mainRowH + rowGap / 2);
+    }
     ctx.stroke();
 
     // ── Zoom panels (bottom row) ─────────────────────────────────
@@ -1225,9 +1256,14 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
-    // Determine which region the cursor is in
-    if (my >= zoomRowY) {
-      // In zoom row — figure out which panel.
+    // Determine which region the cursor is in.
+    // Horizontal: zoom row is at the BOTTOM (my >= zoomRowY). Main view is above it.
+    // Vertical:   zoom column is on the RIGHT. Main view is on the left.
+    const inZoomRegion = isVertical
+      ? (mx >= (width - zoomColW))
+      : (my >= zoomRowY);
+    if (inZoomRegion) {
+      // Figure out which panel within the zoom region.
       // Horizontal: tip panel is to the RIGHT of tail panel (mx-based).
       // Vertical:   tip panel is ABOVE tail panel (my-based). tipZoomY < tailZoomY.
       const inTip  = isVertical ? (my < tailZoomY) : (mx >= tipZoomX);
@@ -1256,14 +1292,17 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       }
     }
     return null;
-  }, [cps, zoomRowY, tipZoomX, tailZoomX, tailZoomY, isVertical, toTip, toTail, toMain]);
+  }, [cps, zoomRowY, tipZoomX, tailZoomX, tailZoomY, zoomColW, width, isVertical, toTip, toTail, toMain]);
 
   const findDragFrame = useCallback((mx, my) => {
-    if (my < zoomRowY) return "main";
+    // Horizontal: my < zoomRowY means main view
+    // Vertical:   mx < (width - zoomColW) means main view
+    const inMain = isVertical ? (mx < (width - zoomColW)) : (my < zoomRowY);
+    if (inMain) return "main";
     if (isVertical) return (my < tailZoomY) ? "tip" : "tail";
     if (mx >= tipZoomX) return "tip";
     return "tail";
-  }, [zoomRowY, tipZoomX, tailZoomY, isVertical]);
+  }, [zoomRowY, tipZoomX, tailZoomY, zoomColW, width, isVertical]);
 
   const handleDown = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
