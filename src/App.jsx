@@ -858,16 +858,20 @@ function exportRockerSVG(ski){
 //   ROW 2 (bottom, ~62% of height): Two side-by-side zoom panels — tail (left) | tip (right).
 //                                   Lots of headroom so handle dragging doesn't hit the edge.
 //                                   This is where bezier handles are edited.
-function PlanView({ ski, setSki, width, height }) {
+function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const canvasRef = useRef(null);
   const [hovered, setHovered] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [dragStart, setDragStart] = useState(null);
   const { right, left, waistY, tipContactY, tailContactY } = useMemo(() => computeOutline(ski), [ski]);
+  const isVertical = orientation === "vertical";
 
   // ── Layout regions ──────────────────────────────────────────────
+  // In horizontal mode: main view on top row, tail zoom + tip zoom side-by-side below.
+  // In vertical mode:   main view fills more (60%), zoom panels stack top/bottom below (tip zoom above tail zoom
+  //   to match "tip at top" convention in the main view).
   const rowGap = 8;
-  const mainRowH = Math.floor(height * 0.38);
+  const mainRowH = Math.floor(height * (isVertical ? 0.60 : 0.38));
   const mainRowY = 0;
   const zoomRowY = mainRowH + rowGap;
   const zoomRowH = height - mainRowY - mainRowH - rowGap;
@@ -877,23 +881,31 @@ function PlanView({ ski, setSki, width, height }) {
   const mainPlotW = width - mainPadX * 2;
   const mainPlotH = mainRowH - mainPadY * 2;
   // TRUE aspect ratio: same mm-to-pixel scale for both axes.
-  const mainScale = Math.min(
-    mainPlotW / ski.length,
-    mainPlotH / (Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8)  // tiny breathing room
-  );
+  // In vertical: length axis is canvas-Y, so we fit ski.length to plotH and max width to plotW.
+  // In horizontal: length axis is canvas-X, so we fit ski.length to plotW and max width to plotH.
+  const skiMaxW = Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8;
+  const mainScale = isVertical
+    ? Math.min(mainPlotH / ski.length, mainPlotW / skiMaxW)
+    : Math.min(mainPlotW / ski.length, mainPlotH / skiMaxW);
   const mainCenterY = mainRowY + mainPadY + mainPlotH / 2;
+  const mainCenterX = mainPadX + mainPlotW / 2;
   const mainOriginX = mainPadX + (mainPlotW - ski.length * mainScale) / 2;
-  const toMain = (skiX, skiY) => ({
-    x: mainOriginX + skiY * mainScale,
-    y: mainCenterY + skiX * mainScale,
-  });
+  // Vertical: mainTailY is the canvas-Y where skiY=0 (tail) sits — near the bottom of the plot region
+  const mainTailY = mainRowY + mainPadY + (mainPlotH + ski.length * mainScale) / 2;
+  const toMain = (skiX, skiY) => isVertical
+    ? { x: mainCenterX + skiX * mainScale, y: mainTailY - skiY * mainScale }
+    : { x: mainOriginX + skiY * mainScale, y: mainCenterY + skiX * mainScale };
 
-  // ── Zoom row: two panels side by side, generous size ─────────
+  // ── Zoom row ──────────────────────────────────────────────
+  // Horizontal: tail on left, tip on right, side-by-side.
+  // Vertical:   tip on top, tail on bottom, stacked. Panels are wide but short.
   const panelGap = 12;
-  const zoomPanelW = Math.floor((width - panelGap * 3) / 2);
-  const zoomPanelH = zoomRowH;
+  const zoomPanelW = isVertical ? (width - panelGap * 2) : Math.floor((width - panelGap * 3) / 2);
+  const zoomPanelH = isVertical ? Math.floor((zoomRowH - panelGap) / 2) : zoomRowH;
   const tailZoomX = panelGap;
-  const tipZoomX = panelGap * 2 + zoomPanelW;
+  const tailZoomY = isVertical ? (zoomRowY + panelGap + zoomPanelH) : zoomRowY;  // bottom in vertical
+  const tipZoomX  = isVertical ? panelGap : (panelGap * 2 + zoomPanelW);
+  const tipZoomY  = zoomRowY;  // top in vertical, same as zoomRowY horizontal
 
   // Each zoom panel shows MUCH more area than just the tip/tail. The bezier handles can extend
   // outside the curve they shape — give 1.5× the tip/tail length and 2× the width so the
@@ -906,13 +918,17 @@ function PlanView({ ski, setSki, width, height }) {
   const tailPadInner = 16;
   const tailPlotW = zoomPanelW - tailPadInner * 2;
   const tailPlotH = zoomPanelH - 30;  // leave room for label at top
-  const tailScale = Math.min(tailPlotW / tailViewSpanY, tailPlotH / tailViewSpanX);
+  // In vertical: length axis maps to canvas-Y (skiY range fits into plotH); width axis to canvas-X.
+  const tailScale = isVertical
+    ? Math.min(tailPlotH / tailViewSpanY, tailPlotW / tailViewSpanX)
+    : Math.min(tailPlotW / tailViewSpanY, tailPlotH / tailViewSpanX);
   const tailOriginX = tailZoomX + tailPadInner + (tailPlotW - tailViewSpanY * tailScale) / 2;
-  const tailCenterY = zoomRowY + 24 + tailPlotH / 2;
-  const toTail = (skiX, skiY) => ({
-    x: tailOriginX + (skiY - tailViewMinY) * tailScale,
-    y: tailCenterY + skiX * tailScale,
-  });
+  const tailCenterY = tailZoomY + 24 + tailPlotH / 2;
+  const tailCenterX = tailZoomX + tailPadInner + tailPlotW / 2;
+  const tailTailBaseY = tailZoomY + 24 + (tailPlotH + tailViewSpanY * tailScale) / 2 + tailViewMinY * tailScale;
+  const toTail = (skiX, skiY) => isVertical
+    ? { x: tailCenterX + skiX * tailScale, y: tailTailBaseY - skiY * tailScale }
+    : { x: tailOriginX + (skiY - tailViewMinY) * tailScale, y: tailCenterY + skiX * tailScale };
 
   // Tip: span = [length - tipLength*1.4, length + tipLength*0.4]
   const tipViewSpanY = ski.tipLength * 1.8;
@@ -921,13 +937,16 @@ function PlanView({ ski, setSki, width, height }) {
   const tipPadInner = 16;
   const tipPlotW = zoomPanelW - tipPadInner * 2;
   const tipPlotH = zoomPanelH - 30;
-  const tipScale = Math.min(tipPlotW / tipViewSpanY, tipPlotH / tipViewSpanX);
+  const tipScale = isVertical
+    ? Math.min(tipPlotH / tipViewSpanY, tipPlotW / tipViewSpanX)
+    : Math.min(tipPlotW / tipViewSpanY, tipPlotH / tipViewSpanX);
   const tipOriginX = tipZoomX + tipPadInner + (tipPlotW - tipViewSpanY * tipScale) / 2;
-  const tipCenterY = zoomRowY + 24 + tipPlotH / 2;
-  const toTip = (skiX, skiY) => ({
-    x: tipOriginX + (skiY - tipViewMinY) * tipScale,
-    y: tipCenterY + skiX * tipScale,
-  });
+  const tipCenterY = tipZoomY + 24 + tipPlotH / 2;
+  const tipCenterX = tipZoomX + tipPadInner + tipPlotW / 2;
+  const tipTailBaseY = tipZoomY + 24 + (tipPlotH + tipViewSpanY * tipScale) / 2 + tipViewMinY * tipScale;
+  const toTip = (skiX, skiY) => isVertical
+    ? { x: tipCenterX + skiX * tipScale, y: tipTailBaseY - skiY * tipScale }
+    : { x: tipOriginX + (skiY - tipViewMinY) * tipScale, y: tipCenterY + skiX * tipScale };
 
   // ── Build control points ──────────────────────────────────────
   const buildCPs = useCallback(() => {
@@ -991,8 +1010,14 @@ function PlanView({ ski, setSki, width, height }) {
     // Centerline
     ctx.strokeStyle = C.center; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    ctx.moveTo(toMain(0, 0).x, mainCenterY);
-    ctx.lineTo(toMain(0, ski.length).x, mainCenterY);
+    if (isVertical) {
+      const cx = toMain(0, 0).x;
+      ctx.moveTo(cx, toMain(0, 0).y);
+      ctx.lineTo(cx, toMain(0, ski.length).y);
+    } else {
+      ctx.moveTo(toMain(0, 0).x, mainCenterY);
+      ctx.lineTo(toMain(0, ski.length).x, mainCenterY);
+    }
     ctx.stroke(); ctx.setLineDash([]);
 
     // Ski outline
@@ -1012,16 +1037,28 @@ function PlanView({ ski, setSki, width, height }) {
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     ctx.restore();
 
-    // TAIL/TIP labels and length
+    // TAIL/TIP labels and length dimension label
     ctx.fillStyle = C.dimText;
     ctx.font = "10px 'JetBrains Mono', monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("TAIL", toMain(0, 0).x - 4, mainCenterY - 16);
-    ctx.textAlign = "right";
-    ctx.fillText("TIP", toMain(0, ski.length).x + 4, mainCenterY - 16);
-    ctx.textAlign = "center";
-    ctx.font = "11px 'JetBrains Mono', monospace";
-    ctx.fillText(`${ski.length} mm`, mainOriginX + (ski.length * mainScale) / 2, mainRowY + mainRowH - 4);
+    if (isVertical) {
+      // Vertical: TIP label at top, TAIL label at bottom, length dimension on the right side
+      const tipPt = toMain(0, ski.length);
+      const tailPt = toMain(0, 0);
+      ctx.textAlign = "center";
+      ctx.fillText("TIP",  tipPt.x, tipPt.y - 6);
+      ctx.fillText("TAIL", tailPt.x, tailPt.y + 14);
+      ctx.font = "11px 'JetBrains Mono', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`${ski.length} mm`, tipPt.x + 30, (tipPt.y + tailPt.y) / 2);
+    } else {
+      ctx.textAlign = "left";
+      ctx.fillText("TAIL", toMain(0, 0).x - 4, mainCenterY - 16);
+      ctx.textAlign = "right";
+      ctx.fillText("TIP", toMain(0, ski.length).x + 4, mainCenterY - 16);
+      ctx.textAlign = "center";
+      ctx.font = "11px 'JetBrains Mono', monospace";
+      ctx.fillText(`${ski.length} mm`, mainOriginX + (ski.length * mainScale) / 2, mainRowY + mainRowH - 4);
+    }
 
     // Width values
     ctx.fillStyle = C.heading;
@@ -1031,9 +1068,16 @@ function PlanView({ ski, setSki, width, height }) {
       { skiY: waistY,       w: ski.waistWidth },
       { skiY: tipContactY,  w: ski.tipWidth },
     ].forEach(d => {
-      const s = toMain(d.w/2 + 2, d.skiY);
-      ctx.textAlign = "center";
-      ctx.fillText(`${Math.round(d.w)}`, s.x, s.y + 10);
+      if (isVertical) {
+        // Position label to the right of the right edge of the ski, at that skiY station
+        const s = toMain(d.w/2, d.skiY);
+        ctx.textAlign = "left";
+        ctx.fillText(`${Math.round(d.w)}`, s.x + 6, s.y + 3);
+      } else {
+        const s = toMain(d.w/2 + 2, d.skiY);
+        ctx.textAlign = "center";
+        ctx.fillText(`${Math.round(d.w)}`, s.x, s.y + 10);
+      }
     });
 
     // ── Divider between rows ────────────────────────────────────
@@ -1044,23 +1088,23 @@ function PlanView({ ski, setSki, width, height }) {
     ctx.stroke();
 
     // ── Zoom panels (bottom row) ─────────────────────────────────
-    const drawZoomPanel = (panelX, panelW, label, toFrame, viewMinY, viewSpanY) => {
+    const drawZoomPanel = (panelX, panelY, panelW, label, toFrame, viewMinY, viewSpanY) => {
       // Background and border
       ctx.fillStyle = C.bgDeep;
-      ctx.fillRect(panelX, zoomRowY, panelW, zoomPanelH);
+      ctx.fillRect(panelX, panelY, panelW, zoomPanelH);
       ctx.strokeStyle = C.zoomFrame; ctx.lineWidth = 1;
-      ctx.strokeRect(panelX + 0.5, zoomRowY + 0.5, panelW - 1, zoomPanelH - 1);
+      ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, zoomPanelH - 1);
 
       // Label
       ctx.fillStyle = C.heading;
       ctx.font = "bold 9px 'JetBrains Mono', monospace";
       ctx.textAlign = "left";
-      ctx.fillText(label, panelX + 10, zoomRowY + 16);
+      ctx.fillText(label, panelX + 10, panelY + 16);
 
       // Clip rest to inside panel
       ctx.save();
       ctx.beginPath();
-      ctx.rect(panelX + 3, zoomRowY + 22, panelW - 6, zoomPanelH - 26);
+      ctx.rect(panelX + 3, panelY + 22, panelW - 6, zoomPanelH - 26);
       ctx.clip();
 
       // Centerline inside panel
@@ -1093,8 +1137,8 @@ function PlanView({ ski, setSki, width, height }) {
 
       ctx.restore();  // outer clip
     };
-    drawZoomPanel(tailZoomX, zoomPanelW, "TAIL — ZOOM", toTail, tailViewMinY, tailViewSpanY);
-    drawZoomPanel(tipZoomX, zoomPanelW, "TIP — ZOOM", toTip, tipViewMinY, tipViewSpanY);
+    drawZoomPanel(tailZoomX, tailZoomY, zoomPanelW, "TAIL — ZOOM", toTail, tailViewMinY, tailViewSpanY);
+    drawZoomPanel(tipZoomX,  tipZoomY,  zoomPanelW, "TIP — ZOOM",  toTip,  tipViewMinY,  tipViewSpanY);
 
     // ── Tangent handle lines (only in zoom panels) ───────────────
     const drawTangents = (toFrame, nodes, isTip, sign, clipRect) => {
@@ -1119,8 +1163,8 @@ function PlanView({ ski, setSki, width, height }) {
       ctx.setLineDash([]);
       ctx.restore();
     };
-    const tailClip = { x: tailZoomX + 3, y: zoomRowY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
-    const tipClip  = { x: tipZoomX  + 3, y: zoomRowY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
+    const tailClip = { x: tailZoomX + 3, y: tailZoomY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
+    const tipClip  = { x: tipZoomX  + 3, y: tipZoomY  + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
     drawTangents(toTip, ski.tipNodesR, true, 1, tipClip);
     if (!ski.tipSymmetric) drawTangents(toTip, ski.tipNodesL, true, -1, tipClip);
     drawTangents(toTail, ski.tailNodesR, false, 1, tailClip);
@@ -1138,6 +1182,7 @@ function PlanView({ ski, setSki, width, height }) {
       const isDragged = dragging === cp.id;
       const isHandle = cp.type.includes("Tangent");
       let r = isHandle ? 5.5 : 6.5;
+      if (isVertical) r *= 1.5;  // Larger touch targets on mobile
       r *= scaleMul;
       if (isDragged) r += 2;
       else if (isHovered) r += 1.4;
@@ -1173,31 +1218,33 @@ function PlanView({ ski, setSki, width, height }) {
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
       if (cp.frames.includes("tail"))  drawCP(cp, toTail(cp.skiX, cp.skiY), 1.0, tailClip);
     });
-  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging,
+  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical,
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
-      tailScale, tailOriginX, tailCenterY, tailZoomX, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
-      tipScale, tipOriginX, tipCenterY, tipZoomX, tipViewMinY, tipViewSpanY]);
+      tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
+      tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY]);
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
     // Determine which region the cursor is in
     if (my >= zoomRowY) {
-      // In zoom row — figure out which panel
-      if (mx >= tipZoomX) {
-        // Tip zoom panel
+      // In zoom row — figure out which panel.
+      // Horizontal: tip panel is to the RIGHT of tail panel (mx-based).
+      // Vertical:   tip panel is ABOVE tail panel (my-based). tipZoomY < tailZoomY.
+      const inTip  = isVertical ? (my < tailZoomY) : (mx >= tipZoomX);
+      const inTail = isVertical ? (my >= tailZoomY) : (mx >= tailZoomX && mx < tipZoomX);
+      if (inTip) {
         const sorted = [...cps].filter(cp => cp.frames.includes("tip"))
           .sort((a, b) => (a.type.includes("Tangent") ? 0 : 1) - (b.type.includes("Tangent") ? 0 : 1));
         for (const cp of sorted) {
           const s = toTip(cp.skiX, cp.skiY);
-          if (Math.hypot(mx - s.x, my - s.y) < 14) return cp.id;
+          if (Math.hypot(mx - s.x, my - s.y) < (isVertical ? 22 : 14)) return cp.id;
         }
-      } else if (mx >= tailZoomX && mx < tipZoomX) {
-        // Tail zoom panel
+      } else if (inTail) {
         const sorted = [...cps].filter(cp => cp.frames.includes("tail"))
           .sort((a, b) => (a.type.includes("Tangent") ? 0 : 1) - (b.type.includes("Tangent") ? 0 : 1));
         for (const cp of sorted) {
           const s = toTail(cp.skiX, cp.skiY);
-          if (Math.hypot(mx - s.x, my - s.y) < 14) return cp.id;
+          if (Math.hypot(mx - s.x, my - s.y) < (isVertical ? 22 : 14)) return cp.id;
         }
       }
     } else {
@@ -1205,17 +1252,18 @@ function PlanView({ ski, setSki, width, height }) {
       const sorted = [...cps].filter(cp => cp.frames.includes("main"));
       for (const cp of sorted) {
         const s = toMain(cp.skiX, cp.skiY);
-        if (Math.hypot(mx - s.x, my - s.y) < 9) return cp.id;
+        if (Math.hypot(mx - s.x, my - s.y) < (isVertical ? 18 : 9)) return cp.id;
       }
     }
     return null;
-  }, [cps, zoomRowY, tipZoomX, tailZoomX, toTip, toTail, toMain]);
+  }, [cps, zoomRowY, tipZoomX, tailZoomX, tailZoomY, isVertical, toTip, toTail, toMain]);
 
   const findDragFrame = useCallback((mx, my) => {
     if (my < zoomRowY) return "main";
+    if (isVertical) return (my < tailZoomY) ? "tip" : "tail";
     if (mx >= tipZoomX) return "tip";
     return "tail";
-  }, [zoomRowY, tipZoomX]);
+  }, [zoomRowY, tipZoomX, tailZoomY, isVertical]);
 
   const handleDown = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -1244,8 +1292,12 @@ function PlanView({ ski, setSki, width, height }) {
       else if (dragStart.frame === "tail") scalePx = tailScale;
       else scalePx = mainScale;
 
-      const dSkiY = (mx - dragStart.mx) / scalePx;
-      const dSkiX = (my - dragStart.my) / scalePx;
+      const dSkiY = isVertical
+        ? -(my - dragStart.my) / scalePx   // vertical: moving down on screen = toward tail = decreasing skiY
+        :  (mx - dragStart.mx) / scalePx;  // horizontal: moving right = increasing skiY
+      const dSkiX = isVertical
+        ?  (mx - dragStart.mx) / scalePx   // vertical: moving right on screen = increasing skiX (right of centerline)
+        :  (my - dragStart.my) / scalePx;  // horizontal: moving down = increasing skiX
 
       if (cp.type === "width") {
         setSki(s => ({ ...s, [cp.param]: clamp(Math.round(dragStart.ski[cp.param] + dSkiX * cp.mult), 50, 220) }));
@@ -1356,11 +1408,12 @@ function PlanView({ ski, setSki, width, height }) {
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "default", display: "block" }}
-      onMouseDown={handleDown}
-      onMouseMove={handleMove}
-      onMouseUp={handleUp}
-      onMouseLeave={() => { handleUp(); setHovered(null); }}
+      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "default", display: "block", touchAction: "none" }}
+      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handleDown(e); }}
+      onPointerMove={handleMove}
+      onPointerUp={handleUp}
+      onPointerCancel={handleUp}
+      onPointerLeave={() => { setHovered(null); }}
     />
   );
 }
@@ -1638,9 +1691,12 @@ function CoreView({ ski, setSki, width, height }) {
 
   return (
     <canvas ref={canvasRef}
-      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "crosshair", display: "block" }}
-      onMouseDown={handleDown} onMouseMove={handleMove} onMouseUp={handleUp}
-      onMouseLeave={() => { handleUp(); setHovered(null); }} />
+      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "crosshair", display: "block", touchAction: "none" }}
+      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handleDown(e); }}
+      onPointerMove={handleMove}
+      onPointerUp={handleUp}
+      onPointerCancel={handleUp}
+      onPointerLeave={() => { setHovered(null); }} />
   );
 }
 
@@ -2152,10 +2208,13 @@ export default function App() {
   const canvasW = isCompact ? size.w : (size.w - panelW);
   const canvasAreaH = isCompact ? Math.max(0, size.h - mobileHeaderH) : size.h;
   let planH = 0, profH = 0, coreH = 0, flexH = 0;
-  if (activeView === "plan")    planH = canvasAreaH;
-  else if (activeView === "profile") profH = canvasAreaH;
-  else if (activeView === "core")    coreH = canvasAreaH;
-  else if (activeView === "flex")    flexH = canvasAreaH;
+  // On compact viewports, treat "all" as "plan only" so the ski gets maximum vertical room.
+  // Users can still explicitly pick profile/core/flex from the sidebar Views section.
+  const effectiveActiveView = (isCompact && activeView === "all") ? "plan" : activeView;
+  if (effectiveActiveView === "plan")    planH = canvasAreaH;
+  else if (effectiveActiveView === "profile") profH = canvasAreaH;
+  else if (effectiveActiveView === "core")    coreH = canvasAreaH;
+  else if (effectiveActiveView === "flex")    flexH = canvasAreaH;
   else {
     // Plan gets more height because it now has 2 rows internally
     planH = Math.floor(canvasAreaH * 0.48);
@@ -2572,7 +2631,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} />
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} />
             {viewLabelChip("Plan")}
           </div>
         )}
