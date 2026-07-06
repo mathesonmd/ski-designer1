@@ -2088,7 +2088,12 @@ function AccordionSection({ isOpen, onToggle, title, accent, children }) {
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
-  const [activeView, setActiveView] = useState("all");
+  // Default view depends on viewport at mount: mobile/tablet → "plan" (interactive rotated
+  // ski is the primary experience), desktop → "all" (see everything at once).
+  const [activeView, setActiveView] = useState(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) return "plan";
+    return "all";
+  });
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 1200, h: 800 });
   const derived = useMemo(() => computeDerived(ski), [ski]);
