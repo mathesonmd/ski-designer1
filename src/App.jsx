@@ -1759,7 +1759,7 @@ function FlexView({ ski, flex, width, height }) {
 //
 // To activate: replace FORMSPREE_ENDPOINT below with your actual Formspree form URL (after
 // signing up at formspree.io and creating a form).
-const FORMSPREE_ENDPOINT = "https://formspree.io/f/YOUR_FORM_ID_HERE";
+const FORMSPREE_ENDPOINT = "https://formspree.io/f/xkoegnlg";
 
 function FeedbackModal({ isOpen, onClose, trigger }) {
   const [submitting, setSubmitting] = useState(false);
