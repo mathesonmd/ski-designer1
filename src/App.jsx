@@ -1138,15 +1138,19 @@ function exportCombinedDXF(ski){
     dxf += dxfText('TEXT', m.skiY + 2, topY + 3, 6, m.label);
   });
 
-  // ── VIEW LABELS ── placed to the LEFT of each band (negative X, before the ski starts at x=0)
-  // so they sit beside the geometry and never collide with the contact labels along the top.
-  // ASCII only — DXF's default font renders non-ASCII (em-dash, ×) as "???".
+  // ── VIEW LABELS ── one per band, lifted into the empty GAP above each band's top edge so the
+  // text never crosses the geometry, and left-aligned at the drawing's left edge (x=0). The base
+  // label goes above the contact-label row so nothing stacks on it. ASCII only (DXF default font
+  // renders non-ASCII as "???").
   const edgeWrap = ski.edgeWrap || "full";
   const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
-  const lblX = -20;
-  dxf += dxfText('LABEL', lblX, baseYoff, 9, baseLbl);
-  dxf += dxfText('LABEL', lblX, coreYoff, 9, `CORE: outline (inset ${g.coreInset}mm/side)`);
-  dxf += dxfText('LABEL', lblX, sideYoff + maxThick / 2, 9, "CORE SIDE: thickness taper (flat bottom)");
+  const lblX = 0, lblH = 9;
+  // Base: above the contact-label row (which sits at topY+3 above the base band).
+  dxf += dxfText('LABEL', lblX, topY + 22, lblH, baseLbl);
+  // Core: in the gap between the base and core bands (just above the core band's top edge).
+  dxf += dxfText('LABEL', lblX, coreYoff + halfCoreW + 12, lblH, `CORE: outline (inset ${g.coreInset}mm/side)`);
+  // Core side: in the gap between the core and side bands (just above the side profile).
+  dxf += dxfText('LABEL', lblX, sideYoff + maxThick + 12, lblH, "CORE SIDE: thickness taper (flat bottom)");
 
   // ── MEASUREMENTS TABLE ── (as TEXT rows to the right of the drawing)
   const tblX = L + 60;
@@ -1188,9 +1192,10 @@ function exportCombinedSVG(ski){
   const halfCoreW = Math.max(...g.coreLoopPts.map(p => Math.abs(p.y)));
   const maxThick = Math.max(...g.sideTop.map(p => p.y));
   const gap = 40, pad = 15;
+  const topMargin = 26;   // extra room above the base band for the contact row + base label
   const derived = computeDerived(ski);
   // Compute band centers in a top-down SVG (Y grows down). Base at top.
-  const baseCY = pad + halfBaseW;
+  const baseCY = topMargin + halfBaseW;
   const coreCY = baseCY + halfBaseW + gap + halfCoreW;
   const sideTopY = coreCY + halfCoreW + gap;          // side profile baseline
   const totalH = sideTopY + maxThick + pad;
@@ -1217,12 +1222,13 @@ function exportCombinedSVG(ski){
     <text x="${(x + 2).toFixed(2)}" y="${(baseCY - halfBaseW - 8).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
 
-  // View labels (to the left of each band)
+  // View labels — lifted above each band (in SVG, smaller Y = higher). Base label goes above the
+  // contact-label row so nothing stacks on it.
   const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
   const labels = `
-    <text x="${pad}" y="${(baseCY - halfBaseW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${baseLbl}</text>
-    <text x="${pad}" y="${(coreCY - halfCoreW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE: outline (inset ${g.coreInset}mm/side)</text>
-    <text x="${pad}" y="${(sideTopY - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE: thickness taper (flat bottom)</text>`;
+    <text x="${pad}" y="${(baseCY - halfBaseW - 16).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${baseLbl}</text>
+    <text x="${pad}" y="${(coreCY - halfCoreW - 8).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE: outline (inset ${g.coreInset}mm/side)</text>
+    <text x="${pad}" y="${(sideTopY - 8).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE: thickness taper (flat bottom)</text>`;
 
   // Measurements table (right of the drawing)
   const rows = [
