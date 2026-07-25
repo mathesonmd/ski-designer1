@@ -2,44 +2,45 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 // ══════════════ BLACK CHAPEL THEME ══════════════
 const C = {
-  bg:           "#3D3D3A",
-  bgDeep:       "#2A2A28",
-  bgLight:      "#4A4A47",
-  panel:        "#2F2F2D",
-  panelLight:   "#4A4A47",
-  panelBorder:  "#5A5A55",
-  gridLine:     "#4F4F4A",
-  gridMajor:    "#5A5A55",
+  // Palette matched to the Black Chapel fretboard designer (warm forge-black).
+  bg:           "#141210",  // forge — main background
+  bgDeep:       "#0e0c0a",  // deeper than forge for insets
+  bgLight:      "#2a2622",  // anvil (control surface)
+  panel:        "#1c1916",  // forge2 (raised panel / sidebar)
+  panelLight:   "#2a2622",  // anvil
+  panelBorder:  "#37322c",  // anvil2 (borders)
+  gridLine:     "#2a2622",
+  gridMajor:    "#37322c",
   center:       "rgba(200,147,90,0.20)",
-  snow:         "rgba(240,237,228,0.30)",
-  skiFill:      "rgba(240,237,228,0.08)",
-  skiStroke:    "#F0EDE4",
-  skiGlow:      "rgba(240,237,228,0.20)",
-  control:      "#D85A30",
-  controlHover: "#E87A55",
+  snow:         "rgba(237,230,216,0.30)",
+  skiFill:      "rgba(237,230,216,0.08)",
+  skiStroke:    "#ede6d8",  // bone
+  skiGlow:      "rgba(237,230,216,0.20)",
+  control:      "#e8552a",  // torch
+  controlHover: "#f07a52",
   controlActive:"#FFD080",
-  handle:       "#C8935A",
+  handle:       "#c8935a",  // brass
   handleLine:   "rgba(200,147,90,0.55)",
-  label:        "#A8A39A",
-  labelDim:     "#7A766E",
-  value:        "#F0EDE4",
-  heading:      "#C8935A",
-  dim:          "rgba(240,237,228,0.35)",
-  dimText:      "rgba(240,237,228,0.75)",
-  inputBg:      "#1F1F1D",
-  inputBorder:  "#5A5A55",
-  inputFocus:   "#C8935A",
-  profileFill:  "rgba(240,237,228,0.06)",
+  label:        "#9b9388",  // bone-dim
+  labelDim:     "#6f685f",
+  value:        "#ede6d8",  // bone
+  heading:      "#c8935a",  // brass
+  dim:          "rgba(237,230,216,0.35)",
+  dimText:      "rgba(237,230,216,0.75)",
+  inputBg:      "#141210",  // forge
+  inputBorder:  "#37322c",  // anvil2
+  inputFocus:   "#c8935a",  // brass
+  profileFill:  "rgba(237,230,216,0.06)",
   coreFill:     "rgba(200,147,90,0.10)",
-  coreStroke:   "#C8935A",
+  coreStroke:   "#c8935a",
   coreGlow:     "rgba(200,147,90,0.30)",
-  coreNode:     "#C8935A",
-  flexStroke:   "#D85A30",
-  flexFill:     "rgba(216,90,48,0.10)",
-  flexGlow:     "rgba(216,90,48,0.35)",
-  eiStroke:     "#F0EDE4",
-  eiFill:       "rgba(240,237,228,0.06)",
-  exportBtn:    "#C8935A",
+  coreNode:     "#c8935a",
+  flexStroke:   "#e8552a",  // torch
+  flexFill:     "rgba(232,85,42,0.10)",
+  flexGlow:     "rgba(232,85,42,0.35)",
+  eiStroke:     "#ede6d8",  // bone
+  eiFill:       "rgba(237,230,216,0.06)",
+  exportBtn:    "#c8935a",  // brass
   zoomFrame:    "rgba(200,147,90,0.7)",
 };
 
@@ -131,6 +132,7 @@ const DEFAULT_SKI={
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
+  edgeWrap:"full",  // "full" = edges wrap around tip/tail; "contact" = edges only tail-contact→tip-contact.
   coreInset:2.0,    // mm. Core top-profile width reduction per side for sidewall material.
   tipNodesR:makeRoundedTip(),tipNodesL:makeRoundedTip(),
   tailNodesR:makeRoundedTail(),tailNodesL:makeRoundedTail(),
@@ -426,6 +428,85 @@ function downloadFile(content,filename,mime){
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
 
+// ══════════════ DXF WRITER (FreeCAD-compatible R2000/AC1015) ══════════════
+// The previous exporter emitted a minimal DXF without $ACADVER, without an LTYPE table, and
+// without the "100" subclass markers (AcDbEntity / AcDbPolyline / AcDbLine / AcDbText).
+// Strict importers — notably FreeCAD — reject LWPOLYLINE entities that lack the AcDbPolyline
+// subclass marker (verified: ezdxf raises "missing 'AcDbPolyline' subclass"), so those lines
+// silently vanished on import. These helpers emit a fully-conformant AC1015 document that both
+// strict (FreeCAD) and lenient (Fusion, Illustrator) readers accept. All geometry uses the
+// CONTINUOUS linetype; layers carry color so users can still distinguish line roles.
+function dxfStart(layers) {
+  let s = '0\nSECTION\n2\nHEADER\n';
+  s += '9\n$ACADVER\n1\nAC1015\n';       // AutoCAD 2000 — enables LWPOLYLINE
+  s += '9\n$INSUNITS\n70\n4\n';          // 4 = millimeters
+  s += '0\nENDSEC\n';
+  s += '0\nSECTION\n2\nTABLES\n';
+  // LTYPE table — CONTINUOUS must be defined
+  s += '0\nTABLE\n2\nLTYPE\n70\n1\n';
+  s += '0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0\n';
+  s += '0\nENDTAB\n';
+  // LAYER table
+  s += `0\nTABLE\n2\nLAYER\n70\n${layers.length}\n`;
+  layers.forEach(l => { s += `0\nLAYER\n2\n${l.name}\n70\n0\n62\n${l.color}\n6\nCONTINUOUS\n`; });
+  s += '0\nENDTAB\n';
+  s += '0\nENDSEC\n';
+  s += '0\nSECTION\n2\nENTITIES\n';
+  return s;
+}
+function dxfEnd() { return '0\nENDSEC\n0\nEOF\n'; }
+function dxfLwpolyline(layer, pts, closed) {
+  let s = '0\nLWPOLYLINE\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbPolyline\n';
+  s += `90\n${pts.length}\n70\n${closed ? 1 : 0}\n`;
+  pts.forEach(p => { s += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  return s;
+}
+function dxfLine(layer, x1, y1, x2, y2) {
+  let s = '0\nLINE\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbLine\n';
+  s += `10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0\n`;
+  s += `11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0\n`;
+  return s;
+}
+function dxfText(layer, x, y, h, str) {
+  let s = '0\nTEXT\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbText\n';
+  s += `10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n`;
+  s += `40\n${h.toFixed(3)}\n1\n${str}\n`;
+  return s;
+}
+
+// ══════════════ CONTACT-TO-CONTACT EDGE GEOMETRY ══════════════
+// Returns { right, left } — two OPEN polylines running from tail-contact to tip-contact, each
+// offset inward from the ski's side edge by `edgeInset` (using the local inward normal so the
+// offset tracks the sidecut curve correctly). Used when the user selects "Contact-to-Contact"
+// edge wrap instead of "Full Wrap".
+function getContactEdgeLines(ski, edgeInset) {
+  const tailC = ski.tailLength;
+  const tipC = ski.length - ski.tipLength;
+  const N = 120;
+  const right = [], left = [];
+  for (let i = 0; i <= N; i++) {
+    const y = tailC + (tipC - tailC) * (i / N);
+    const halfW = getWidthAtPos(ski, y / ski.length) / 2;
+    right.push({ x: halfW, y });
+    left.push({ x: -halfW, y });
+  }
+  const offsetInward = (edge) => {
+    const out = [];
+    for (let i = 0; i < edge.length; i++) {
+      const prev = edge[Math.max(0, i - 1)];
+      const next = edge[Math.min(edge.length - 1, i + 1)];
+      const tx = next.x - prev.x, ty = next.y - prev.y;
+      const tlen = Math.hypot(tx, ty) || 1;
+      let nx = ty / tlen, ny = -tx / tlen;
+      // Point the normal toward the centerline (opposite the edge's x sign)
+      if ((edge[i].x > 0 && nx > 0) || (edge[i].x < 0 && nx < 0)) { nx = -nx; ny = -ny; }
+      out.push({ x: edge[i].x + nx * edgeInset, y: edge[i].y + ny * edgeInset });
+    }
+    return out;
+  };
+  return { right: offsetInward(right), left: offsetInward(left) };
+}
+
 // ══════════════ POLYGON INSET (for base cut line) ══════════════
 // Given a closed CCW polygon `pts`, returns a new polygon offset INWARD by `dist` mm.
 // Uses per-vertex angle bisectors for the offset direction. Works well for smooth ski outlines.
@@ -502,8 +583,10 @@ function getRegistrationMarks(ski) {
 // ══════════════ PLAN SVG EXPORT ══════════════
 function exportPlanSVG(ski){
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+  const edgeWrap = ski.edgeWrap || "full";
   const pts = getFullOutlinePoints(ski);
-  const insetPts = edgeInset > 0 ? offsetPolygonInward(pts, edgeInset) : null;
+  const insetPts = (edgeInset > 0 && edgeWrap === "full") ? offsetPolygonInward(pts, edgeInset) : null;
+  const contactEdges = (edgeInset > 0 && edgeWrap === "contact") ? getContactEdgeLines(ski, edgeInset) : null;
   const marks = getRegistrationMarks(ski);
 
   // SVG bounds — encompass outer outline plus a small margin
@@ -525,41 +608,44 @@ function exportPlanSVG(ski){
     `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
   ).join(' ') + ' Z') : '';
 
-  // Registration marks: transverse lines at each station
-  const regMarks = marks.map(m => {
-    const halfW = m.halfWidthAt;
+  const edgePathFrom = (arr) => arr.map((p,i) =>
+    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+  ).join(' ');
+  const contactPaths = contactEdges
+    ? `<path d="${edgePathFrom(contactEdges.right)}"/><path d="${edgePathFrom(contactEdges.left)}"/>`
+    : '';
+
+  // Three horizontal reference cross-lines: tail contact, waist, tip contact (span ski width).
+  const refMarks = marks.map(m => {
+    const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
     const cy = toSvgY(m.skiY);
-    return `    <line x1="${(-halfW).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${halfW.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    return `    <line x1="${(-halfW).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${halfW.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
     <text x="${(halfW + 4).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n');
 
-  // Centerline (full length)
-  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.3" stroke-dasharray="6,3"/>`;
+  // Vertical centerline (full length)
+  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
-  // Core thickness station markers
-  const coreMarks = ski.coreProfile.map(cp => {
-    const xmm = cp.pos * ski.length, wh = getWidthAtPos(ski, cp.pos) / 2;
-    const cy = toSvgY(xmm);
-    return `    <line x1="${(-wh).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${wh.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#C8935A" stroke-width="0.2" stroke-dasharray="1.5,1.5" opacity="0.6"/>
-    <text x="${(wh + 3).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="3" fill="#C8935A" font-family="monospace">${cp.thick.toFixed(1)}</text>`;
-  }).join('\n');
+  const edgeDesc = edgeWrap === "contact"
+    ? `Edge offset = contact-to-contact (${edgeInset}mm inset, tail-contact to tip-contact each side).`
+    : `Inset line = base cut (${edgeInset}mm full-wrap inset).`;
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
   <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
-  <desc>Outer line = true outline (edge cut). Inset line = base cut (${edgeInset}mm inset). Red dashed = registration. Units: mm.</desc>
+  <desc>Outer line = true outline (edge cut). ${edgeDesc} Red = reference lines. Units: mm.</desc>
   <g id="outline" stroke="#000" stroke-width="0.6" fill="none">
     <path d="${outerPath}"/>
   </g>
-  ${insetPts ? `<g id="base_cut" stroke="#005000" stroke-width="0.4" stroke-dasharray="2,1.5" fill="none">
+  ${insetPts ? `<g id="base_cut" stroke="#005000" stroke-width="0.5" stroke-dasharray="2,1.5" fill="none">
     <path d="${insetPath}"/>
   </g>` : ''}
+  ${contactEdges ? `<g id="edge_offset" stroke="#005000" stroke-width="0.5" fill="none">
+    ${contactPaths}
+  </g>` : ''}
   <g id="centerline">${centerline}</g>
-  <g id="registration">
-${regMarks}
-  </g>
-  <g id="core_stations">
-${coreMarks}
+  <g id="reference">
+${refMarks}
   </g>
 </svg>`;
   downloadFile(svg, `bcs-ski-plan-${ski.length}mm.svg`, "image/svg+xml");
@@ -568,48 +654,47 @@ ${coreMarks}
 // ══════════════ PLAN DXF EXPORT ══════════════
 function exportPlanDXF(ski){
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+  const edgeWrap = ski.edgeWrap || "full";
   const pts = getFullOutlinePoints(ski);
-  const insetPts = edgeInset > 0 ? offsetPolygonInward(pts, edgeInset) : null;
   const marks = getRegistrationMarks(ski);
+  const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
 
-  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n6\n`;
-  dxf += `0\nLAYER\n2\nOUTLINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;          // white/black
-  dxf += `0\nLAYER\n2\nBASE_CUT\n70\n0\n62\n3\n6\nDASHED\n`;             // green dashed
-  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;           // blue
-  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;     // red
-  dxf += `0\nLAYER\n2\nCORE_STATIONS\n70\n0\n62\n8\n6\nCONTINUOUS\n`;    // dark grey
-  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;             // red
-  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+  const layers = [
+    { name: 'OUTLINE', color: 7 },
+    { name: 'EDGE_OFFSET', color: 3 },
+    { name: 'CENTERLINE', color: 5 },
+    { name: 'REFERENCE', color: 1 },
+    { name: 'TEXT', color: 2 },
+  ];
+  let dxf = dxfStart(layers);
 
-  // Outer outline (LWPOLYLINE, closed)
-  dxf += `0\nLWPOLYLINE\n8\nOUTLINE\n90\n${pts.length}\n70\n1\n`;
-  pts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Outer outline (closed)
+  dxf += dxfLwpolyline('OUTLINE', pts, true);
 
-  // Inset base-cut line (LWPOLYLINE, closed)
-  if (insetPts) {
-    dxf += `0\nLWPOLYLINE\n8\nBASE_CUT\n90\n${insetPts.length}\n70\n1\n`;
-    insetPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Edge offset line(s)
+  if (edgeInset > 0) {
+    if (edgeWrap === "contact") {
+      const { right, left } = getContactEdgeLines(ski, edgeInset);
+      dxf += dxfLwpolyline('EDGE_OFFSET', right, false);  // open polyline, right side
+      dxf += dxfLwpolyline('EDGE_OFFSET', left, false);   // open polyline, left side
+    } else {
+      const insetPts = offsetPolygonInward(pts, edgeInset);
+      dxf += dxfLwpolyline('EDGE_OFFSET', insetPts, true); // closed full-wrap
+    }
   }
 
-  // Centerline
-  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
+  // Vertical centerline (length of ski)
+  dxf += dxfLine('CENTERLINE', 0, 0, 0, ski.length);
 
-  // Registration marks — transverse lines at tail contact, waist, tip contact
+  // Three horizontal reference cross-lines: tail contact, waist, tip contact.
+  // Each spans the ski width at its station (touching both edges).
   marks.forEach(m => {
-    const hw = m.halfWidthAt;
-    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
-    // Text label at the right of the line
-    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+    const hw = getWidthAtPos(ski, m.skiY / ski.length) / 2;
+    dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
+    dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
   });
 
-  // Core station marks (faint)
-  ski.coreProfile.forEach(cp => {
-    const xmm = cp.pos * ski.length;
-    const wh = getWidthAtPos(ski, cp.pos) / 2;
-    dxf += `0\nLINE\n8\nCORE_STATIONS\n10\n${(-wh).toFixed(3)}\n20\n${xmm.toFixed(3)}\n11\n${wh.toFixed(3)}\n21\n${xmm.toFixed(3)}\n`;
-  });
-
-  dxf += `0\nENDSEC\n0\nEOF\n`;
+  dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-plan-${ski.length}mm.dxf`, "application/dxf");
 }
 
@@ -635,26 +720,24 @@ function exportCoreSideDXF(ski){
   const marks = getRegistrationMarks(ski);
   const maxT = Math.max(...topPts.map(p => p.y)) + 4;
 
-  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n3\n`;
-  dxf += `0\nLAYER\n2\nCORE_SIDE_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+  const layers = [
+    { name: 'CORE_SIDE_PROFILE', color: 3 },
+    { name: 'REFERENCE', color: 1 },
+    { name: 'TEXT', color: 2 },
+  ];
+  let dxf = dxfStart(layers);
 
   // Closed side-profile polygon: flat bottom + thickness curve on top.
-  const nClosed = topPts.length + 2;
-  dxf += `0\nLWPOLYLINE\n8\nCORE_SIDE_PROFILE\n90\n${nClosed}\n70\n1\n`;
-  dxf += `10\n0\n20\n0\n`;
-  topPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
-  dxf += `10\n${ski.length.toFixed(3)}\n20\n0\n`;
+  const poly = [{ x: 0, y: 0 }, ...topPts, { x: ski.length, y: 0 }];
+  dxf += dxfLwpolyline('CORE_SIDE_PROFILE', poly, true);
 
-  // Registration: vertical lines + labels at tail contact, waist, tip contact.
+  // Reference: vertical lines + labels at tail contact, waist, tip contact.
   marks.forEach(m => {
-    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${m.skiY.toFixed(3)}\n20\n0\n11\n${m.skiY.toFixed(3)}\n21\n${maxT.toFixed(3)}\n`;
-    dxf += `0\nTEXT\n8\nTEXT\n10\n${(m.skiY + 2).toFixed(3)}\n20\n${(maxT + 1).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+    dxf += dxfLine('REFERENCE', m.skiY, 0, m.skiY, maxT);
+    dxf += dxfText('TEXT', m.skiY + 2, maxT + 1, 6, m.label);
   });
 
-  dxf += `0\nENDSEC\n0\nEOF\n`;
+  dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-core-side-${ski.length}mm.dxf`, "application/dxf");
 }
 
@@ -675,7 +758,7 @@ function exportCoreSideSVG(ski){
   const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
     const x = pad + m.skiY;
-    return `<line x1="${x.toFixed(2)}" y1="${pad}" x2="${x.toFixed(2)}" y2="${(pad + maxT * sz).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    return `<line x1="${x.toFixed(2)}" y1="${pad}" x2="${x.toFixed(2)}" y2="${(pad + maxT * sz).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
     <text x="${(x + 2).toFixed(2)}" y="${(pad + 5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
 
@@ -684,7 +767,7 @@ function exportCoreSideSVG(ski){
   <title>Black Chapel Studios — Core Side Profile ${ski.length}mm</title>
   <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Y scale ${sz}x.</desc>
   <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
-  <g id="registration">${regLines}</g>
+  <g id="reference">${regLines}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-core-side-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -711,25 +794,28 @@ function exportCorePlanDXF(ski){
   }
   const marks = getRegistrationMarks(ski);
 
-  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n4\n`;
-  dxf += `0\nLAYER\n2\nCORE_PLAN_OUTLINE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nCENTERLINE\n70\n0\n62\n5\n6\nCENTER\n`;
-  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+  const layers = [
+    { name: 'CORE_PLAN_OUTLINE', color: 3 },
+    { name: 'CENTERLINE', color: 5 },
+    { name: 'REFERENCE', color: 1 },
+    { name: 'TEXT', color: 2 },
+  ];
+  let dxf = dxfStart(layers);
 
-  dxf += `0\nLWPOLYLINE\n8\nCORE_PLAN_OUTLINE\n90\n${planPts.length}\n70\n1\n`;
-  planPts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Closed core outline
+  dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts, true);
 
-  dxf += `0\nLINE\n8\nCENTERLINE\n10\n0\n20\n0\n11\n0\n21\n${ski.length.toFixed(3)}\n`;
+  // Vertical centerline
+  dxf += dxfLine('CENTERLINE', 0, 0, 0, ski.length);
 
+  // Three horizontal reference cross-lines at tail contact, waist, tip contact (span core width).
   marks.forEach(m => {
-    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 6;
-    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${(-hw).toFixed(3)}\n20\n${m.skiY.toFixed(3)}\n11\n${hw.toFixed(3)}\n21\n${m.skiY.toFixed(3)}\n`;
-    dxf += `0\nTEXT\n8\nTEXT\n10\n${(hw + 4).toFixed(3)}\n20\n${(m.skiY - 2).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
+    dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
+    dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
   });
 
-  dxf += `0\nENDSEC\n0\nEOF\n`;
+  dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-core-plan-${ski.length}mm.dxf`, "application/dxf");
 }
 
@@ -757,12 +843,12 @@ function exportCorePlanSVG(ski){
   ).join(' ') + ' Z';
   const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
-    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset) + 4;
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
     const cy = toSvgY(m.skiY);
-    return `<line x1="${(-hw).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${hw.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    return `<line x1="${(-hw).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${hw.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
     <text x="${(hw + 3).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
-  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.3" stroke-dasharray="6,3"/>`;
+  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
@@ -770,7 +856,7 @@ function exportCorePlanSVG(ski){
   <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation.</desc>
   <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
   <g id="centerline">${centerline}</g>
-  <g id="registration">${regLines}</g>
+  <g id="reference">${regLines}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-core-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -793,27 +879,27 @@ function exportRockerDXF(ski){
   const marks = getRegistrationMarks(ski);
   const maxY = Math.max(...pts.map(p => p.y));
 
-  let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n4\n`;
-  dxf += `0\nLAYER\n2\nROCKER_PROFILE\n70\n0\n62\n3\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nBASELINE\n70\n0\n62\n7\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nREGISTRATION\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nLAYER\n2\nTEXT\n70\n0\n62\n1\n6\nCONTINUOUS\n`;
-  dxf += `0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+  const layers = [
+    { name: 'ROCKER_PROFILE', color: 3 },
+    { name: 'BASELINE', color: 7 },
+    { name: 'REFERENCE', color: 1 },
+    { name: 'TEXT', color: 2 },
+  ];
+  let dxf = dxfStart(layers);
 
-  // Rocker curve as an open polyline (it's just a line, not a closed shape)
-  dxf += `0\nLWPOLYLINE\n8\nROCKER_PROFILE\n90\n${pts.length}\n70\n0\n`;
-  pts.forEach(p => { dxf += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Rocker curve as an open polyline (it's a line, not a closed shape)
+  dxf += dxfLwpolyline('ROCKER_PROFILE', pts, false);
 
   // Baseline (snow line)
-  dxf += `0\nLINE\n8\nBASELINE\n10\n0\n20\n0\n11\n${ski.length.toFixed(3)}\n21\n0\n`;
+  dxf += dxfLine('BASELINE', 0, 0, ski.length, 0);
 
-  // Registration: vertical lines at tail contact, waist, tip contact
+  // Reference: vertical lines at tail contact, waist, tip contact
   marks.forEach(m => {
-    dxf += `0\nLINE\n8\nREGISTRATION\n10\n${m.skiY.toFixed(3)}\n20\n${(-3).toFixed(3)}\n11\n${m.skiY.toFixed(3)}\n21\n${(maxY + 4).toFixed(3)}\n`;
-    dxf += `0\nTEXT\n8\nTEXT\n10\n${(m.skiY + 2).toFixed(3)}\n20\n${(maxY + 5).toFixed(3)}\n40\n6\n1\n${m.label}\n`;
+    dxf += dxfLine('REFERENCE', m.skiY, -3, m.skiY, maxY + 4);
+    dxf += dxfText('TEXT', m.skiY + 2, maxY + 5, 6, m.label);
   });
 
-  dxf += `0\nENDSEC\n0\nEOF\n`;
+  dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-rocker-${ski.length}mm.dxf`, "application/dxf");
 }
 
@@ -1058,6 +1144,41 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.fillStyle = C.skiFill; ctx.fill();
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     ctx.restore();
+
+    // ── Edge offset preview (live) ──────────────────────────────
+    // Shows where the metal edges / base cut will sit, updating as the user changes
+    // Edge Inset or the Edge Wrap mode. Full wrap = closed inset loop; contact = two side lines.
+    const previewInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+    const previewWrap = ski.edgeWrap || "full";
+    if (previewInset > 0) {
+      ctx.save();
+      ctx.strokeStyle = C.coreStroke;   // brass — distinct from the white outline
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      if (previewWrap === "contact") {
+        const { right: er, left: el } = getContactEdgeLines(ski, previewInset);
+        [er, el].forEach(edge => {
+          ctx.beginPath();
+          edge.forEach((p, i) => {
+            const s = toMain(p.x, p.y);
+            if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+          });
+          ctx.stroke();
+        });
+      } else {
+        const outline = getFullOutlinePoints(ski);
+        const inset = offsetPolygonInward(outline, previewInset);
+        ctx.beginPath();
+        inset.forEach((p, i) => {
+          const s = toMain(p.x, p.y);
+          if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
 
     // TAIL/TIP labels and length dimension label
     ctx.fillStyle = C.dimText;
@@ -2072,8 +2193,8 @@ function AccordionSection({ isOpen, onToggle, title, accent, children }) {
           }}>{title}</span>
           {accent}
         </span>
-        <span style={{ color: C.heading, fontSize: 10, fontFamily: "monospace" }}>
-          {isOpen ? "▾" : "▸"}
+        <span style={{ color: C.heading, fontSize: 16, fontFamily: "monospace", lineHeight: 1, marginLeft: 9 }}>
+          {isOpen ? "\u25BC" : "\u25B6"}
         </span>
       </button>
       {isOpen && (
@@ -2263,10 +2384,12 @@ export default function App() {
 
   const panelW = 270;
   const mobileHeaderH = 52;
-  // On compact viewports the sidebar becomes a drawer, so the main canvas gets full width
-  // and the top mobile header takes a fixed slice of the height.
+  const desktopHeaderH = 56;
+  const headerH = isCompact ? mobileHeaderH : desktopHeaderH;
+  // The persistent top header takes a fixed slice of height on all screen sizes.
+  // On compact, the sidebar becomes a drawer so the canvas also gets full width.
   const canvasW = isCompact ? size.w : (size.w - panelW);
-  const canvasAreaH = isCompact ? Math.max(0, size.h - mobileHeaderH) : size.h;
+  const canvasAreaH = Math.max(0, size.h - headerH);
   let planH = 0, profH = 0, coreH = 0, flexH = 0;
   // On compact viewports, we simplify the view options down to two: "plan" (the interactive
   // rotated vertical ski) and "analysis" (a compact stack of Profile + Core + Flex). Any legacy
@@ -2363,6 +2486,16 @@ export default function App() {
     color: C.bgDeep, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
     cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%"
   };
+  const headerBtn = {
+    background: C.bgLight, color: C.value, border: `1px solid ${C.panelBorder}`,
+    padding: "7px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600,
+    letterSpacing: "0.02em", fontFamily: "'Inter', 'Segoe UI', sans-serif",
+  };
+  const headerBtnPrimary = {
+    background: C.heading, color: "#1a1611", border: `1px solid ${C.heading}`,
+    padding: "7px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
+    letterSpacing: "0.02em", fontFamily: "'Inter', 'Segoe UI', sans-serif",
+  };
   const rating = flexRating(flex.underfootK);
 
   const viewLabelChip = (text) => (
@@ -2377,19 +2510,21 @@ export default function App() {
   return (
     <div ref={containerRef} style={{
       display: "flex",
-      flexDirection: isCompact ? "column" : "row",
+      flexDirection: "column",
       height: "100%", width: "100%",
-      background: C.bg, fontFamily: "'Segoe UI', sans-serif", overflow: "hidden",
+      background: C.bg, fontFamily: "'Inter', 'Segoe UI', sans-serif", overflow: "hidden",
       position: "relative",
     }}>
-      {/* Mobile / tablet header bar */}
-      {isCompact && (
-        <div style={{
-          height: mobileHeaderH, minHeight: mobileHeaderH,
-          background: C.panel, borderBottom: `1px solid ${C.panelBorder}`,
-          display: "flex", alignItems: "center", padding: "0 12px",
-          gap: 10, flexShrink: 0,
-        }}>
+      {/* Persistent top header (all screen sizes) — matches Black Chapel fretboard designer */}
+      <div style={{
+        height: isCompact ? mobileHeaderH : 56, minHeight: isCompact ? mobileHeaderH : 56,
+        background: "linear-gradient(180deg, #1c1916, #141210)",
+        borderBottom: `1px solid ${C.panelBorder}`,
+        display: "flex", alignItems: "center", padding: isCompact ? "0 12px" : "0 18px",
+        gap: isCompact ? 10 : 16, flexShrink: 0,
+      }}>
+        {/* Hamburger (compact only) */}
+        {isCompact && (
           <button
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
@@ -2397,20 +2532,30 @@ export default function App() {
               width: 36, height: 36, background: "transparent",
               border: `1px solid ${C.panelBorder}`, borderRadius: 4,
               color: C.heading, cursor: "pointer", display: "flex",
-              alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
+              alignItems: "center", justifyContent: "center", flexShrink: 0,
             }}
           >
             <svg width="18" height="14" viewBox="0 0 18 14" fill="none" aria-hidden="true">
               <path d="M0 1h18M0 7h18M0 13h18" stroke="currentColor" strokeWidth="1.6" />
             </svg>
           </button>
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <div style={{ color: C.heading, fontSize: 12, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", lineHeight: 1.1 }}>Black Chapel Studios</div>
-            <div style={{ color: C.label, fontSize: 9, letterSpacing: 1.5, textTransform: "uppercase", lineHeight: 1.1, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        )}
+
+        {/* Brand: logo + divider + tool name */}
+        <div style={{ display: "flex", alignItems: "center", gap: isCompact ? 10 : 14, flex: 1, overflow: "hidden" }}>
+          <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", lineHeight: 0, flexShrink: 0 }}>
+            <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: isCompact ? 30 : 40, width: "auto", display: "block" }} />
+          </a>
+          {!isCompact && <div style={{ width: 1, height: 26, background: C.panelBorder, flexShrink: 0 }} />}
+          <div style={{ overflow: "hidden" }}>
+            <div style={{ color: C.label, fontSize: 11, letterSpacing: "0.22em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               Ski Designer{ski.designName && ski.designName !== "Untitled Design" ? ` · ${ski.designName}` : ""}
             </div>
           </div>
+        </div>
+
+        {/* Right-side actions */}
+        {isCompact ? (
           <button
             onClick={handleSave}
             style={{
@@ -2421,15 +2566,26 @@ export default function App() {
               textTransform: "uppercase", flexShrink: 0,
             }}
           >Save</button>
-        </div>
-      )}
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <button onClick={handleSave} style={headerBtn}>Save</button>
+            <button onClick={handleLoadClick} style={headerBtn}>Load</button>
+            <button onClick={handleNewDesign} style={headerBtn}>New</button>
+            <button onClick={openFeedback} style={headerBtnPrimary}>Send Feedback</button>
+          </div>
+        )}
+      </div>
+
+      {/* Body row: sidebar + canvas */}
+      <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0, position: "relative" }}>
 
       {/* Backdrop for mobile drawer */}
       {isCompact && drawerOpen && (
         <div
           onClick={() => setDrawerOpen(false)}
           style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+            position: "fixed", top: mobileHeaderH, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.55)",
             zIndex: 500,
           }}
         />
@@ -2438,8 +2594,8 @@ export default function App() {
       <div style={
         isCompact
           ? {
-              // Mobile / tablet: sidebar becomes a slide-in left drawer
-              position: "fixed", top: 0, left: 0, bottom: 0,
+              // Mobile / tablet: sidebar becomes a slide-in left drawer, below the top header
+              position: "fixed", top: mobileHeaderH, left: 0, bottom: 0,
               width: Math.min(320, size.w - 40),
               background: C.panel, borderRight: `1px solid ${C.panelBorder}`,
               display: "flex", flexDirection: "column", overflowY: "auto",
@@ -2465,12 +2621,9 @@ export default function App() {
           style={{ display: "none" }}
         />
 
-        <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>BLACK CHAPEL STUDIOS</div>
-            <div style={{ color: C.label, fontSize: 8, letterSpacing: 2, textTransform: "uppercase", marginTop: 1 }}>Ski Designer</div>
-          </div>
-          {isCompact && (
+        {isCompact && (
+          <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, textTransform: "uppercase" }}>Menu</div>
             <button
               onClick={() => setDrawerOpen(false)}
               aria-label="Close menu"
@@ -2482,8 +2635,8 @@ export default function App() {
                 fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0,
               }}
             >×</button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Recover-session banner */}
         {recoverBanner && (
@@ -2534,26 +2687,31 @@ export default function App() {
               onBlur={e => e.target.style.borderColor = C.inputBorder}
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-            <button onClick={handleSave} style={{
-              background: C.heading, border: "none", borderRadius: 3, padding: "8px 0",
-              color: C.bgDeep, fontSize: 12, fontWeight: 700,
-              fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
-              textTransform: "uppercase",
-            }}>Save</button>
-            <button onClick={handleLoadClick} style={{
-              background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "8px 0",
-              color: C.heading, fontSize: 12, fontWeight: 700,
-              fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
-              textTransform: "uppercase",
-            }}>Load</button>
-          </div>
-          <button onClick={handleNewDesign} style={{
-            width: "100%", background: "transparent", border: `1px solid ${C.inputBorder}`,
-            borderRadius: 3, padding: "6px 0", color: C.label, fontSize: 11,
-            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer",
-            textTransform: "uppercase",
-          }}>New Design</button>
+          {/* Save/Load/New live in the top header on desktop; shown here only in the mobile drawer. */}
+          {isCompact && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                <button onClick={handleSave} style={{
+                  background: C.heading, border: "none", borderRadius: 3, padding: "8px 0",
+                  color: C.bgDeep, fontSize: 12, fontWeight: 700,
+                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
+                  textTransform: "uppercase",
+                }}>Save</button>
+                <button onClick={handleLoadClick} style={{
+                  background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "8px 0",
+                  color: C.heading, fontSize: 12, fontWeight: 700,
+                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
+                  textTransform: "uppercase",
+                }}>Load</button>
+              </div>
+              <button onClick={handleNewDesign} style={{
+                width: "100%", background: "transparent", border: `1px solid ${C.inputBorder}`,
+                borderRadius: 3, padding: "6px 0", color: C.label, fontSize: 11,
+                fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer",
+                textTransform: "uppercase",
+              }}>New Design</button>
+            </>
+          )}
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
             Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>.bcski</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
           </div>
@@ -2653,6 +2811,32 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
+          <div style={{ marginBottom: 9 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[
+                { val: "full", label: "Full Wrap" },
+                { val: "contact", label: "Contact→Contact" },
+              ].map(opt => {
+                const on = (ski.edgeWrap || "full") === opt.val;
+                return (
+                  <button key={opt.val}
+                    onClick={() => setSki(s => ({ ...s, edgeWrap: opt.val }))}
+                    style={{
+                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
+                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
+                    }}>{opt.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+              {(ski.edgeWrap || "full") === "contact"
+                ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
+                : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
+            </div>
+          </div>
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 12, marginTop: 8 }}>
             <b style={{color: C.heading}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
@@ -2669,11 +2853,11 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportRockerSVG)} style={expBtn}>Rocker SVG</button>
           </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5 }}>
-            <b style={{color: C.heading}}>Plan</b>: outer edge line + inset base-cut line (top-down).<br/>
+            <b style={{color: C.heading}}>Plan</b>: outer edge line + edge offset line (top-down).<br/>
             <b style={{color: C.heading}}>Core Side</b>: closed flat-bottom side profile for extrusion in 3D (XZ plane).<br/>
             <b style={{color: C.heading}}>Core Plan</b>: top-down core outline for boolean cut (XY plane).<br/>
             <b style={{color: C.heading}}>Rocker</b>: side-view line for press mold.<br/>
-            All include registration marks at tail / waist / tip contact for CAD alignment.
+            Reference lines: vertical centerline + horizontal lines at tail / waist / tip contact.
           </div>
         </AccordionSection>
 
@@ -2749,6 +2933,7 @@ export default function App() {
             {viewLabelChip("Flex")}
           </div>
         )}
+      </div>
       </div>
 
       <FeedbackModal
