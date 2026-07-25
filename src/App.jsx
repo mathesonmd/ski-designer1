@@ -1130,20 +1130,23 @@ function exportCombinedDXF(ski){
   // ── CORE SIDE BAND ──
   dxf += dxfLwpolyline('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
 
-  // ── VIEW LABELS ── (left of each band, so imports read clearly)
-  const edgeWrap = ski.edgeWrap || "full";
-  const baseLbl = edgeWrap === "contact" ? "BASE — full profile + contact edge cut" : "BASE — full profile + edge offset";
-  dxf += dxfText('LABEL', 4, baseYoff + halfBaseW + 8, 9, baseLbl);
-  dxf += dxfText('LABEL', 4, coreYoff + halfCoreW + 8, 9, `CORE — outline (inset ${g.coreInset}mm/side)`);
-  dxf += dxfText('LABEL', 4, sideYoff + maxThick + 8, 9, "CORE SIDE — thickness taper (flat bottom)");
-
   // ── SHARED REFERENCE LINES ── at tail/waist/tip contact, spanning all three bands for lofting.
   const topY = baseYoff + halfBaseW + 6;
   const botY = sideYoff - 6;
   g.marks.forEach(m => {
     dxf += dxfLine('REFERENCE', m.skiY, botY, m.skiY, topY);
-    dxf += dxfText('TEXT', m.skiY + 2, topY + 2, 6, m.label);
+    dxf += dxfText('TEXT', m.skiY + 2, topY + 3, 6, m.label);
   });
+
+  // ── VIEW LABELS ── placed to the LEFT of each band (negative X, before the ski starts at x=0)
+  // so they sit beside the geometry and never collide with the contact labels along the top.
+  // ASCII only — DXF's default font renders non-ASCII (em-dash, ×) as "???".
+  const edgeWrap = ski.edgeWrap || "full";
+  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
+  const lblX = -20;
+  dxf += dxfText('LABEL', lblX, baseYoff, 9, baseLbl);
+  dxf += dxfText('LABEL', lblX, coreYoff, 9, `CORE: outline (inset ${g.coreInset}mm/side)`);
+  dxf += dxfText('LABEL', lblX, sideYoff + maxThick / 2, 9, "CORE SIDE: thickness taper (flat bottom)");
 
   // ── MEASUREMENTS TABLE ── (as TEXT rows to the right of the drawing)
   const tblX = L + 60;
@@ -1215,11 +1218,11 @@ function exportCombinedSVG(ski){
   }).join('\n    ');
 
   // View labels (to the left of each band)
-  const baseLbl = edgeWrap === "contact" ? "BASE — full profile + contact edge cut" : "BASE — full profile + edge offset";
+  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
   const labels = `
     <text x="${pad}" y="${(baseCY - halfBaseW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${baseLbl}</text>
-    <text x="${pad}" y="${(coreCY - halfCoreW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE — outline (inset ${g.coreInset}mm/side)</text>
-    <text x="${pad}" y="${(sideTopY - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE — thickness taper (flat bottom)</text>`;
+    <text x="${pad}" y="${(coreCY - halfCoreW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE: outline (inset ${g.coreInset}mm/side)</text>
+    <text x="${pad}" y="${(sideTopY - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE: thickness taper (flat bottom)</text>`;
 
   // Measurements table (right of the drawing)
   const rows = [
