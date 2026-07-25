@@ -539,6 +539,75 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
   return { right: offsetInward(rightRaw), left: offsetInward(leftRaw) };
 }
 
+// Build a SINGLE CONTINUOUS closed loop for the contact-mode base cut, suitable for a drag knife
+// (one perimeter, no lifting). Walking the loop:
+//   tail-end outline → [tie-in ⟂] → right edge inset (tail→tip) → [tie-out ⟂] → tip outline arc
+//   → [tie-in ⟂] → left edge inset (tip→tail) → [tie-out ⟂] → tail outline arc → close.
+// The tie-ins are perpendicular connectors: because each edge-inset endpoint is a normal offset
+// of the outline at the same station, connecting the inset endpoint straight to the outline point
+// at that station IS perpendicular to the edge. This yields the closed base perimeter the knife
+// follows, with the notch cut in where the metal edges sit.
+function getContactBaseCutLoop(ski, edgeInset, extTip, extTail) {
+  extTip = extTip || 0;
+  extTail = extTail || 0;
+  const tailC = ski.tailLength;
+  const tipC = ski.length - ski.tipLength;
+  const eps = 0.5;
+  const startY = Math.max(eps, tailC - extTail);          // tail end of the edge inset
+  const endY = Math.min(ski.length - eps, tipC + extTip); // tip end of the edge inset
+
+  const outline = computeOutline(ski);              // full outline, both sides, y: 0→length
+  const edges = getContactEdgeLines(ski, edgeInset, extTip, extTail);  // inset lines, y: startY→endY
+
+  // Outline points for one side within a skiY sub-range, ascending in skiY, with exact endpoints.
+  const outlineSlice = (pts, y0, y1) => {
+    const asc = pts[0].y <= pts[pts.length - 1].y ? pts : pts.slice().reverse();
+    const interp = (a, b, y) => { const t = (y - a.y) / (b.y - a.y); return { x: a.x + (b.x - a.x) * t, y }; };
+    const out = [];
+    for (let i = 0; i < asc.length; i++) {
+      const p = asc[i];
+      if (i > 0) {
+        const q = asc[i - 1];
+        if (q.y < y0 && p.y >= y0 && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, y0));
+        if (q.y < y1 && p.y >= y1 && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, y1));
+      }
+      if (p.y >= y0 && p.y <= y1) out.push({ x: p.x, y: p.y });
+    }
+    out.sort((a, b) => a.y - b.y);
+    return out;
+  };
+
+  // Sub-arcs of the outline in the tip and tail regions (past the edge-inset ends).
+  const tailArcR = outlineSlice(outline.right, 0, startY);   // tail-end → startY (right side)
+  const tipArcR  = outlineSlice(outline.right, endY, ski.length); // endY → tip-end (right side)
+  const tailArcL = outlineSlice(outline.left, 0, startY);    // tail-end → startY (left side)
+  const tipArcL  = outlineSlice(outline.left, endY, ski.length);  // endY → tip-end (left side)
+
+  const rightEdge = edges.right;  // ascending y: startY→endY
+  const leftEdge = edges.left;    // ascending y: startY→endY
+
+  // Assemble the loop. All sub-arrays are ascending in skiY; reverse where the walk goes tip→tail.
+  const loop = [];
+  const pushAll = (arr) => arr.forEach(p => loop.push({ x: p.x, y: p.y }));
+
+  // 1. Tail outline arc, right side: from tail-end (y=0) UP to startY.
+  pushAll(tailArcR);
+  // 2. Tie-in ⟂ to right edge inset start (rightEdge[0]) — implicit straight segment to next point.
+  // 3. Right edge inset: startY → endY.
+  pushAll(rightEdge);
+  // 4. Tie-out ⟂ to right outline at endY, then tip arc right: endY → tip-end.
+  pushAll(tipArcR);
+  // 5. Around the tip to the left side: tip arc left reversed (tip-end → endY).
+  pushAll(tipArcL.slice().reverse());
+  // 6. Tie-in ⟂ to left edge inset end (leftEdge last), then left edge inset reversed: endY → startY.
+  pushAll(leftEdge.slice().reverse());
+  // 7. Tie-out ⟂ to left outline at startY, then tail arc left reversed: startY → tail-end.
+  pushAll(tailArcL.slice().reverse());
+  // Loop closes back at the tail-end (tailArcR[0] and tailArcL[0] are both the x=0 tail tip).
+
+  return loop;
+}
+
 // ══════════════ POLYGON INSET (for base cut line) ══════════════
 // Given a closed CCW polygon `pts`, returns a new polygon offset INWARD by `dist` mm.
 // Uses per-vertex angle bisectors for the offset direction. Works well for smooth ski outlines.
@@ -617,8 +686,9 @@ function exportPlanSVG(ski){
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
   const edgeWrap = ski.edgeWrap || "full";
   const pts = getFullOutlinePoints(ski);
+  const isContact = edgeInset > 0 && edgeWrap === "contact";
   const insetPts = (edgeInset > 0 && edgeWrap === "full") ? offsetPolygonInward(pts, edgeInset) : null;
-  const contactEdges = (edgeInset > 0 && edgeWrap === "contact") ? getContactEdgeLines(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
+  const baseCutLoop = isContact ? getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
   const marks = getRegistrationMarks(ski);
 
   // SVG bounds — encompass outer outline plus a small margin
@@ -632,20 +702,13 @@ function exportPlanSVG(ski){
   // In SVG, Y increases downward. We flip so that ski Y (which goes tail-to-tip) is shown vertically.
   const toSvgY = y => (maxY - y + minY);
 
-  const outerPath = pts.map((p,i) =>
+  const pathFrom = (arr, close) => arr.map((p,i) =>
     `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
-  ).join(' ') + ' Z';
+  ).join(' ') + (close ? ' Z' : '');
 
-  const insetPath = insetPts ? (insetPts.map((p,i) =>
-    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
-  ).join(' ') + ' Z') : '';
-
-  const edgePathFrom = (arr) => arr.map((p,i) =>
-    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
-  ).join(' ');
-  const contactPaths = contactEdges
-    ? `<path d="${edgePathFrom(contactEdges.right)}"/><path d="${edgePathFrom(contactEdges.left)}"/>`
-    : '';
+  const outerPath = pathFrom(pts, true);
+  const insetPath = insetPts ? pathFrom(insetPts, true) : '';
+  const baseCutPath = baseCutLoop ? pathFrom(baseCutLoop, true) : '';
 
   // Three horizontal reference cross-lines: tail contact, waist, tip contact (span ski width).
   const refMarks = marks.map(m => {
@@ -658,23 +721,28 @@ function exportPlanSVG(ski){
   // Vertical centerline (full length)
   const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
-  const edgeDesc = edgeWrap === "contact"
-    ? `Edge offset = contact-to-contact (${edgeInset}mm inset, tail-contact to tip-contact each side).`
-    : `Inset line = base cut (${edgeInset}mm full-wrap inset).`;
+  const edgeDesc = isContact
+    ? `Cut path = single continuous base-cut loop (${edgeInset}mm edge inset, partial wrap with perpendicular tie-ins).`
+    : (insetPts ? `Inset line = base cut (${edgeInset}mm full-wrap inset).` : `Outline only.`);
 
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
-  <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
-  <desc>Outer line = true outline (edge cut). ${edgeDesc} Red = reference lines. Units: mm.</desc>
-  <g id="outline" stroke="#000" stroke-width="0.6" fill="none">
+  // In contact mode, the single closed base-cut loop IS the cut path (black). No separate outline.
+  // In full-wrap mode, draw the outline (black) plus optional dashed inset (green).
+  const cutGroup = isContact
+    ? `  <g id="base_cut" stroke="#000" stroke-width="0.6" fill="none">
+    <path d="${baseCutPath}"/>
+  </g>`
+    : `  <g id="outline" stroke="#000" stroke-width="0.6" fill="none">
     <path d="${outerPath}"/>
   </g>
   ${insetPts ? `<g id="base_cut" stroke="#005000" stroke-width="0.5" stroke-dasharray="2,1.5" fill="none">
     <path d="${insetPath}"/>
-  </g>` : ''}
-  ${contactEdges ? `<g id="edge_offset" stroke="#005000" stroke-width="0.5" fill="none">
-    ${contactPaths}
-  </g>` : ''}
+  </g>` : ''}`;
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
+  <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
+  <desc>${edgeDesc} Red = reference lines. Units: mm.</desc>
+${cutGroup}
   <g id="centerline">${centerline}</g>
   <g id="reference">
 ${refMarks}
@@ -693,6 +761,7 @@ function exportPlanDXF(ski){
 
   const layers = [
     { name: 'OUTLINE', color: 7 },
+    { name: 'BASE_CUT', color: 7 },
     { name: 'EDGE_OFFSET', color: 3 },
     { name: 'CENTERLINE', color: 5 },
     { name: 'REFERENCE', color: 1 },
@@ -700,18 +769,19 @@ function exportPlanDXF(ski){
   ];
   let dxf = dxfStart(layers);
 
-  // Outer outline (closed)
-  dxf += dxfLwpolyline('OUTLINE', pts, true);
-
-  // Edge offset line(s)
-  if (edgeInset > 0) {
-    if (edgeWrap === "contact") {
-      const { right, left } = getContactEdgeLines(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
-      dxf += dxfLwpolyline('EDGE_OFFSET', right, false);  // open polyline, right side
-      dxf += dxfLwpolyline('EDGE_OFFSET', left, false);   // open polyline, left side
-    } else {
+  if (edgeWrap === "contact" && edgeInset > 0) {
+    // Contact mode: the base cut is a SINGLE continuous closed loop (outline arcs at tip/tail +
+    // perpendicular tie-ins + edge insets). This is the one perimeter a drag knife follows, so we
+    // export just this loop as the cut path — NOT a separate full outline, which would be a second
+    // stray cut. The loop already traces the true outline in the tip/tail regions.
+    const loop = getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
+    dxf += dxfLwpolyline('BASE_CUT', loop, true);
+  } else {
+    // Full-wrap (or zero inset): full outline + (optionally) a closed inset loop around it.
+    dxf += dxfLwpolyline('OUTLINE', pts, true);
+    if (edgeInset > 0) {
       const insetPts = offsetPolygonInward(pts, edgeInset);
-      dxf += dxfLwpolyline('EDGE_OFFSET', insetPts, true); // closed full-wrap
+      dxf += dxfLwpolyline('EDGE_OFFSET', insetPts, true);
     }
   }
 
@@ -1234,15 +1304,16 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
       if (previewWrap === "contact") {
-        const { right: er, left: el } = getContactEdgeLines(ski, previewInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
-        [er, el].forEach(edge => {
-          ctx.beginPath();
-          edge.forEach((p, i) => {
-            const s = toMain(p.x, p.y);
-            if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
-          });
-          ctx.stroke();
+        // Show the full continuous base-cut loop (edge insets + perpendicular tie-ins + tip/tail
+        // outline arcs) so the user sees exactly the single perimeter the knife will cut.
+        const loop = getContactBaseCutLoop(ski, previewInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
+        ctx.beginPath();
+        loop.forEach((p, i) => {
+          const s = toMain(p.x, p.y);
+          if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
         });
+        ctx.closePath();
+        ctx.stroke();
       } else {
         const outline = getFullOutlinePoints(ski);
         const inset = offsetPolygonInward(outline, previewInset);
