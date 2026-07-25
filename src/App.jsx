@@ -465,26 +465,63 @@ function dxfText(layer, x, y, h, str) {
 // offset inward from the ski's side edge by `edgeInset` (using the local inward normal so the
 // offset tracks the sidecut curve correctly). Used when the user selects "Contact-to-Contact"
 // edge wrap instead of "Full Wrap".
+//
+// The edge samples the TRUE ski outline (from computeOutline, which includes the bezier tip/tail
+// curves), NOT getWidthAtPos — the latter flat-lines the width outside the contact zone (it's a
+// simplified sidecut model for flex math), which made extended edges run straight instead of
+// following the shovel/tail taper. By filtering the real outline to the desired skiY range and
+// offsetting inward, the extension curves correctly along the actual edge.
 function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
   extTip = extTip || 0;
   extTail = extTail || 0;
-  // Contact points along the ski's length axis.
   const tailC = ski.tailLength;
   const tipC = ski.length - ski.tipLength;
-  // Extend past each contact point by the requested amount, clamped so the edge never runs
-  // past the physical tail-end (skiY=0) or tip-end (skiY=ski.length). A tiny epsilon keeps the
-  // sampled point just inside the outline so the inward offset/normal stays well-defined.
+  // Extend past each contact point, clamped to the physical ends (with a small epsilon so the
+  // sampled endpoint stays just inside the outline and the inward normal is well-defined).
   const eps = 0.5;
   const startY = Math.max(eps, tailC - extTail);          // toward the tail
   const endY = Math.min(ski.length - eps, tipC + extTip); // toward the tip
-  const N = 160;
-  const right = [], left = [];
-  for (let i = 0; i <= N; i++) {
-    const y = startY + (endY - startY) * (i / N);
-    const halfW = getWidthAtPos(ski, y / ski.length) / 2;
-    right.push({ x: halfW, y });
-    left.push({ x: -halfW, y });
-  }
+
+  // True outline points (include tip/tail bezier curves). `right` runs tail-end→tip-end.
+  const outline = computeOutline(ski);
+
+  // Extract one side's points within [startY, endY], interpolating exact endpoints so the edge
+  // starts/ends precisely at the requested stations. `pts` is assumed ordered by increasing skiY.
+  const sliceSide = (pts) => {
+    // Ensure ascending skiY order.
+    const asc = pts[0].y <= pts[pts.length - 1].y ? pts : pts.slice().reverse();
+    const out = [];
+    const interp = (a, b, y) => {
+      const t = (y - a.y) / (b.y - a.y);
+      return { x: a.x + (b.x - a.x) * t, y };
+    };
+    for (let i = 0; i < asc.length; i++) {
+      const p = asc[i];
+      if (p.y < startY || p.y > endY) {
+        // Check if this segment crosses a boundary; if so, add the interpolated crossing point.
+        if (i > 0) {
+          const q = asc[i - 1];
+          if ((q.y < startY) !== (p.y < startY) && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, startY));
+          if ((q.y < endY)   !== (p.y < endY)   && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, endY));
+        }
+        continue;
+      }
+      // Point is inside range — but first, if the previous point was outside, add the crossing.
+      if (i > 0) {
+        const q = asc[i - 1];
+        if (q.y < startY && p.y >= startY && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, startY));
+        if (q.y > endY && p.y <= endY && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, endY));
+      }
+      out.push({ x: p.x, y: p.y });
+    }
+    // Sort by skiY to guarantee monotonic ordering for the offset step.
+    out.sort((a, b) => a.y - b.y);
+    return out;
+  };
+
+  const rightRaw = sliceSide(outline.right);
+  const leftRaw = sliceSide(outline.left);
+
   const offsetInward = (edge) => {
     const out = [];
     for (let i = 0; i < edge.length; i++) {
@@ -499,7 +536,7 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
     }
     return out;
   };
-  return { right: offsetInward(right), left: offsetInward(left) };
+  return { right: offsetInward(rightRaw), left: offsetInward(leftRaw) };
 }
 
 // ══════════════ POLYGON INSET (for base cut line) ══════════════
