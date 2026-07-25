@@ -597,7 +597,16 @@ function getContactBaseCutLoop(ski, edgeInset, extTip, extTail) {
 // Uses per-vertex angle bisectors for the offset direction. Works well for smooth ski outlines.
 // For self-intersection prevention at very tight concave corners, we clamp the offset to never
 // cross the centerline (x=0). The ski outline is smooth so this shouldn't trigger in practice.
-function offsetPolygonInward(pts, dist) {
+function offsetPolygonInward(ptsIn, dist) {
+  // Remove consecutive coincident points first. computeOutline emits a duplicate vertex where the
+  // sidecut meets the tip/tail curve (both sections put a point exactly at the contact station).
+  // A zero-length segment there corrupts the edge-direction/normal math and makes the bisector
+  // overshoot inward — the visible "bump" at the tip contact. Deduping removes the cause.
+  const pts = [];
+  for (let i = 0; i < ptsIn.length; i++) {
+    const p = ptsIn[i], q = ptsIn[(i + 1) % ptsIn.length];
+    if (Math.hypot(p.x - q.x, p.y - q.y) > 1e-6) pts.push({ x: p.x, y: p.y });
+  }
   const n = pts.length;
   if (n < 3 || dist <= 0) return pts.slice();
   // Determine winding (signed area). If negative, polygon is CW; flip the offset direction.
@@ -1081,6 +1090,7 @@ function buildCombinedGeometry(ski){
 function exportCombinedDXF(ski){
   const g = buildCombinedGeometry(ski);
   const { L, marks } = g;
+  const derived = computeDerived(ski);
 
   // Vertical layout bands (Y offsets). Base on top, core in middle, side profile at bottom.
   const halfBaseW = Math.max(...g.baseLoopPts.map(p => Math.abs(p.y)));
@@ -1094,41 +1104,75 @@ function exportCombinedDXF(ski){
   const shift = (pts, dy) => pts.map(p => ({ x: p.x, y: p.y + dy }));
 
   const layers = [
-    { name: 'BASE_OUTLINE', color: 7 },
-    { name: 'BASE_EDGE', color: 3 },
-    { name: 'CORE_OUTLINE', color: 3 },
-    { name: 'CORE_SIDE', color: 5 },
-    { name: 'REFERENCE', color: 1 },
-    { name: 'CENTERLINE', color: 5 },
-    { name: 'TEXT', color: 2 },
+    { name: 'FULL_PROFILE', color: 7 },   // full outer outline, no edge offset (white)
+    { name: 'BASE_EDGE', color: 3 },      // edge offset / base cut (green)
+    { name: 'CORE_OUTLINE', color: 3 },   // core-inset outline (green)
+    { name: 'CORE_SIDE', color: 5 },      // side thickness profile (blue)
+    { name: 'REFERENCE', color: 1 },      // contact reference lines (red)
+    { name: 'CENTERLINE', color: 5 },     // band centerlines (blue)
+    { name: 'LABEL', color: 4 },          // view labels (cyan)
+    { name: 'TABLE', color: 2 },          // measurements table (yellow)
+    { name: 'TEXT', color: 2 },           // contact labels (yellow)
   ];
   let dxf = dxfStart(layers);
 
-  // Base band
-  const edgeWrap = ski.edgeWrap || "full";
-  if (edgeWrap === "contact" && g.baseEdge) {
-    dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);  // the cut loop IS the base
-  } else {
-    dxf += dxfLwpolyline('BASE_OUTLINE', shift(g.baseLoopPts, baseYoff), true);
-    if (g.baseEdge) dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);
-  }
+  // ── BASE BAND ──
+  // Always draw the full outer profile (no edge offset) so the true ski shape is present.
+  dxf += dxfLwpolyline('FULL_PROFILE', shift(g.baseLoopPts, baseYoff), true);
+  // Plus the edge offset / base cut line on its own layer.
+  if (g.baseEdge) dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);
   dxf += dxfLine('CENTERLINE', 0, baseYoff, L, baseYoff);
 
-  // Core band
+  // ── CORE BAND ──
   dxf += dxfLwpolyline('CORE_OUTLINE', shift(g.coreLoopPts, coreYoff), true);
   dxf += dxfLine('CENTERLINE', 0, coreYoff, L, coreYoff);
 
-  // Core side band (thickness up from its baseline)
+  // ── CORE SIDE BAND ──
   dxf += dxfLwpolyline('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
 
-  // Shared reference lines at tail/waist/tip contact — full vertical lines spanning all three bands
-  // so the views stay registered for lofting.
+  // ── VIEW LABELS ── (left of each band, so imports read clearly)
+  const edgeWrap = ski.edgeWrap || "full";
+  const baseLbl = edgeWrap === "contact" ? "BASE — full profile + contact edge cut" : "BASE — full profile + edge offset";
+  dxf += dxfText('LABEL', 4, baseYoff + halfBaseW + 8, 9, baseLbl);
+  dxf += dxfText('LABEL', 4, coreYoff + halfCoreW + 8, 9, `CORE — outline (inset ${g.coreInset}mm/side)`);
+  dxf += dxfText('LABEL', 4, sideYoff + maxThick + 8, 9, "CORE SIDE — thickness taper (flat bottom)");
+
+  // ── SHARED REFERENCE LINES ── at tail/waist/tip contact, spanning all three bands for lofting.
   const topY = baseYoff + halfBaseW + 6;
   const botY = sideYoff - 6;
   g.marks.forEach(m => {
     dxf += dxfLine('REFERENCE', m.skiY, botY, m.skiY, topY);
     dxf += dxfText('TEXT', m.skiY + 2, topY + 2, 6, m.label);
   });
+
+  // ── MEASUREMENTS TABLE ── (as TEXT rows to the right of the drawing)
+  const tblX = L + 60;
+  let tblY = baseYoff + halfBaseW;       // start near the top
+  const rowH = 16, th = 7;
+  const row = (label, value) => {
+    dxf += dxfText('TABLE', tblX, tblY, th, label);
+    dxf += dxfText('TABLE', tblX + 190, tblY, th, value);
+    tblY -= rowH;
+  };
+  dxf += dxfText('TABLE', tblX, tblY + rowH, 9, "MEASUREMENTS (mm)");
+  row("Overall length", `${ski.length}`);
+  row("Tip width", `${ski.tipWidth}`);
+  row("Waist width", `${ski.waistWidth}`);
+  row("Tail width", `${ski.tailWidth}`);
+  row("Tip length (shovel)", `${ski.tipLength}`);
+  row("Tail length", `${ski.tailLength}`);
+  row("Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`);
+  row("Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`);
+  row("Tip height (rocker)", `${ski.tipHeight}`);
+  row("Tail height (rocker)", `${ski.tailHeight}`);
+  row("Camber height", `${ski.camberHeight}`);
+  row("Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`);
+  row("Edge inset", `${ski.edgeInset}`);
+  row("Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap");
+  if (edgeWrap === "contact") {
+    row("Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`);
+  }
+  row("Core inset", `${g.coreInset}`);
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-combined-${ski.length}mm.dxf`, "application/dxf");
@@ -1141,22 +1185,25 @@ function exportCombinedSVG(ski){
   const halfCoreW = Math.max(...g.coreLoopPts.map(p => Math.abs(p.y)));
   const maxThick = Math.max(...g.sideTop.map(p => p.y));
   const gap = 40, pad = 15;
+  const derived = computeDerived(ski);
   // Compute band centers in a top-down SVG (Y grows down). Base at top.
   const baseCY = pad + halfBaseW;
   const coreCY = baseCY + halfBaseW + gap + halfCoreW;
   const sideTopY = coreCY + halfCoreW + gap;          // side profile baseline
   const totalH = sideTopY + maxThick + pad;
-  const totalW = L + pad * 2;
+  const tableW = 320;                                  // room for the measurements table
+  const totalW = L + pad * 2 + tableW;
 
   const pathFrom = (pts, cy, close) => pts.map((p,i) =>
     `${i===0?'M':'L'}${(p.x + pad).toFixed(2)},${(cy - p.y).toFixed(2)}`
   ).join(' ') + (close ? ' Z' : '');
 
   const edgeWrap = ski.edgeWrap || "full";
-  const baseGroup = (edgeWrap === "contact" && g.baseEdge)
-    ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>`
-    : `<path d="${pathFrom(g.baseLoopPts, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
-      (g.baseEdge ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#005000" stroke-width="0.5" stroke-dasharray="2,1.5"/>` : '');
+  // Always draw the full outer profile (black). Add the edge offset on top (green, dashed for
+  // full-wrap; solid for the contact cut loop).
+  const baseGroup =
+    `<path d="${pathFrom(g.baseLoopPts, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
+    (g.baseEdge ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#005000" stroke-width="0.5" ${edgeWrap === "contact" ? "" : 'stroke-dasharray="2,1.5"'}/>` : '');
 
   const coreGroup = `<path d="${pathFrom(g.coreLoopPts, coreCY, true)}" fill="none" stroke="#C8935A" stroke-width="0.6"/>`;
   const sideGroup = `<path d="${pathFrom(g.sideLoop, sideTopY, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
@@ -1167,14 +1214,51 @@ function exportCombinedSVG(ski){
     <text x="${(x + 2).toFixed(2)}" y="${(baseCY - halfBaseW - 8).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
 
+  // View labels (to the left of each band)
+  const baseLbl = edgeWrap === "contact" ? "BASE — full profile + contact edge cut" : "BASE — full profile + edge offset";
+  const labels = `
+    <text x="${pad}" y="${(baseCY - halfBaseW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${baseLbl}</text>
+    <text x="${pad}" y="${(coreCY - halfCoreW - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE — outline (inset ${g.coreInset}mm/side)</text>
+    <text x="${pad}" y="${(sideTopY - 4).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE — thickness taper (flat bottom)</text>`;
+
+  // Measurements table (right of the drawing)
+  const rows = [
+    ["Overall length", `${ski.length}`],
+    ["Tip width", `${ski.tipWidth}`],
+    ["Waist width", `${ski.waistWidth}`],
+    ["Tail width", `${ski.tailWidth}`],
+    ["Tip length (shovel)", `${ski.tipLength}`],
+    ["Tail length", `${ski.tailLength}`],
+    ["Running edge", `${derived.effectiveEdge.toFixed(0)}`],
+    ["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`],
+    ["Tip height", `${ski.tipHeight}`],
+    ["Tail height", `${ski.tailHeight}`],
+    ["Camber height", `${ski.camberHeight}`],
+    ["Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`],
+    ["Edge inset", `${ski.edgeInset}`],
+    ["Edge wrap", edgeWrap === "contact" ? "contact" : "full wrap"],
+  ];
+  if (edgeWrap === "contact") rows.push(["Edge ext tip/tail", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
+  rows.push(["Core inset", `${g.coreInset}`]);
+  const tblX = L + pad * 2 + 8;
+  let tblY = pad + 12;
+  const tblRows = [`<text x="${tblX}" y="${tblY}" font-size="8" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`];
+  tblY += 16;
+  rows.forEach(([k,v]) => {
+    tblRows.push(`<text x="${tblX}" y="${tblY}" font-size="6.5" fill="#000" font-family="monospace">${k}</text><text x="${tblX + 210}" y="${tblY}" font-size="6.5" fill="#000" font-family="monospace">${v}</text>`);
+    tblY += 13;
+  });
+
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
   <title>Black Chapel Studios — Combined Views ${ski.length}mm</title>
-  <desc>Base outline, core outline, and core side profile — aligned on the length axis for lofting. Units: mm, 1:1.</desc>
+  <desc>Full profile, base edge, core outline, and core side profile — aligned on the length axis for lofting. Units: mm, 1:1.</desc>
   <g id="base">${baseGroup}</g>
   <g id="core">${coreGroup}</g>
   <g id="core_side">${sideGroup}</g>
   <g id="reference">${refLines}</g>
+  <g id="labels">${labels}</g>
+  <g id="table">${tblRows.join('\n    ')}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
 }
