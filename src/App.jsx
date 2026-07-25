@@ -133,6 +133,8 @@ const DEFAULT_SKI={
   waistPosition:0.48,
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
   edgeWrap:"full",  // "full" = edges wrap around tip/tail; "contact" = edges only tail-contact→tip-contact.
+  edgeExtTip:0,     // mm. In contact mode, extend the edge past the TIP contact point toward the tip.
+  edgeExtTail:0,    // mm. In contact mode, extend the edge past the TAIL contact point toward the tail.
   coreInset:2.0,    // mm. Core top-profile width reduction per side for sidewall material.
   tipNodesR:makeRoundedTip(),tipNodesL:makeRoundedTip(),
   tailNodesR:makeRoundedTail(),tailNodesL:makeRoundedTail(),
@@ -463,13 +465,22 @@ function dxfText(layer, x, y, h, str) {
 // offset inward from the ski's side edge by `edgeInset` (using the local inward normal so the
 // offset tracks the sidecut curve correctly). Used when the user selects "Contact-to-Contact"
 // edge wrap instead of "Full Wrap".
-function getContactEdgeLines(ski, edgeInset) {
+function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
+  extTip = extTip || 0;
+  extTail = extTail || 0;
+  // Contact points along the ski's length axis.
   const tailC = ski.tailLength;
   const tipC = ski.length - ski.tipLength;
-  const N = 120;
+  // Extend past each contact point by the requested amount, clamped so the edge never runs
+  // past the physical tail-end (skiY=0) or tip-end (skiY=ski.length). A tiny epsilon keeps the
+  // sampled point just inside the outline so the inward offset/normal stays well-defined.
+  const eps = 0.5;
+  const startY = Math.max(eps, tailC - extTail);          // toward the tail
+  const endY = Math.min(ski.length - eps, tipC + extTip); // toward the tip
+  const N = 160;
   const right = [], left = [];
   for (let i = 0; i <= N; i++) {
-    const y = tailC + (tipC - tailC) * (i / N);
+    const y = startY + (endY - startY) * (i / N);
     const halfW = getWidthAtPos(ski, y / ski.length) / 2;
     right.push({ x: halfW, y });
     left.push({ x: -halfW, y });
@@ -570,7 +581,7 @@ function exportPlanSVG(ski){
   const edgeWrap = ski.edgeWrap || "full";
   const pts = getFullOutlinePoints(ski);
   const insetPts = (edgeInset > 0 && edgeWrap === "full") ? offsetPolygonInward(pts, edgeInset) : null;
-  const contactEdges = (edgeInset > 0 && edgeWrap === "contact") ? getContactEdgeLines(ski, edgeInset) : null;
+  const contactEdges = (edgeInset > 0 && edgeWrap === "contact") ? getContactEdgeLines(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
   const marks = getRegistrationMarks(ski);
 
   // SVG bounds — encompass outer outline plus a small margin
@@ -658,7 +669,7 @@ function exportPlanDXF(ski){
   // Edge offset line(s)
   if (edgeInset > 0) {
     if (edgeWrap === "contact") {
-      const { right, left } = getContactEdgeLines(ski, edgeInset);
+      const { right, left } = getContactEdgeLines(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
       dxf += dxfLwpolyline('EDGE_OFFSET', right, false);  // open polyline, right side
       dxf += dxfLwpolyline('EDGE_OFFSET', left, false);   // open polyline, left side
     } else {
@@ -930,9 +941,19 @@ function exportRockerSVG(ski){
 //                                   This is where bezier handles are edited.
 function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const canvasRef = useRef(null);
+  const edgeHandleRef = useRef(null);  // screen positions of edge-extension drag handles
   const [hovered, setHovered] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [dragStart, setDragStart] = useState(null);
+  // Per-panel zoom (scale multiplier) and pan (screen-pixel offset). Default: 1× / no offset.
+  const [tipZoom, setTipZoom] = useState(1);
+  const [tailZoom, setTailZoom] = useState(1);
+  const [tipPan, setTipPan] = useState({ x: 0, y: 0 });
+  const [tailPan, setTailPan] = useState({ x: 0, y: 0 });
+  const [mainZoom, setMainZoom] = useState(1);
+  const [mainPan, setMainPan] = useState({ x: 0, y: 0 });
+  // Active pan gesture (when the user drags empty space inside a panel)
+  const [panning, setPanning] = useState(null); // { frame, startMx, startMy, startPan }
   const { right, left, waistY, tipContactY, tailContactY } = useMemo(() => computeOutline(ski), [ski]);
   const isVertical = orientation === "vertical";
 
@@ -976,9 +997,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const mainOriginX = mainPadX + (mainPlotW - ski.length * mainScale) / 2;
   // Vertical: mainTailY is the canvas-Y where skiY=0 (tail) sits — near the bottom of the plot region
   const mainTailY = mainRowY + mainPadY + (mainPlotH + ski.length * mainScale) / 2;
-  const toMain = (skiX, skiY) => isVertical
+  // Pivot for main-view zoom: the center of the main plot region.
+  const mainPivotX = isVertical ? (mainColW / 2) : (mainOriginX + ski.length * mainScale / 2);
+  const mainPivotY = isVertical ? (mainRowY + mainRowH / 2) : mainCenterY;
+  const toMainBase = (skiX, skiY) => isVertical
     ? { x: mainCenterX + skiX * mainScale, y: mainTailY - skiY * mainScale }
     : { x: mainOriginX + skiY * mainScale, y: mainCenterY + skiX * mainScale };
+  const toMain = (skiX, skiY) => {
+    const b = toMainBase(skiX, skiY);
+    return {
+      x: mainPivotX + (b.x - mainPivotX) * mainZoom + mainPan.x,
+      y: mainPivotY + (b.y - mainPivotY) * mainZoom + mainPan.y,
+    };
+  };
 
   // ── Zoom row / column ──────────────────────────────────────
   // Horizontal: tail on left, tip on right, side-by-side across the bottom row.
@@ -1018,9 +1049,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const tailCenterY = tailZoomY + 24 + tailPlotH / 2;
   const tailCenterX = tailZoomX + tailPadInner + tailPlotW / 2;
   const tailTailBaseY = tailZoomY + 24 + (tailPlotH + tailViewSpanY * tailScale) / 2 + tailViewMinY * tailScale;
-  const toTail = (skiX, skiY) => isVertical
+  // Base transform (before user zoom/pan), then zoom about the panel center and add pan offset.
+  const tailPivotX = tailZoomX + zoomPanelW / 2;
+  const tailPivotY = tailZoomY + zoomPanelH / 2;
+  const toTailBase = (skiX, skiY) => isVertical
     ? { x: tailCenterX + skiX * tailScale, y: tailTailBaseY - skiY * tailScale }
     : { x: tailOriginX + (skiY - tailViewMinY) * tailScale, y: tailCenterY + skiX * tailScale };
+  const toTail = (skiX, skiY) => {
+    const b = toTailBase(skiX, skiY);
+    return {
+      x: tailPivotX + (b.x - tailPivotX) * tailZoom + tailPan.x,
+      y: tailPivotY + (b.y - tailPivotY) * tailZoom + tailPan.y,
+    };
+  };
 
   // Tip: span = [length - tipLength*1.4, length + tipLength*0.4]
   const tipViewSpanY = ski.tipLength * 1.8;
@@ -1036,9 +1077,18 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const tipCenterY = tipZoomY + 24 + tipPlotH / 2;
   const tipCenterX = tipZoomX + tipPadInner + tipPlotW / 2;
   const tipTailBaseY = tipZoomY + 24 + (tipPlotH + tipViewSpanY * tipScale) / 2 + tipViewMinY * tipScale;
-  const toTip = (skiX, skiY) => isVertical
+  const tipPivotX = tipZoomX + zoomPanelW / 2;
+  const tipPivotY = tipZoomY + zoomPanelH / 2;
+  const toTipBase = (skiX, skiY) => isVertical
     ? { x: tipCenterX + skiX * tipScale, y: tipTailBaseY - skiY * tipScale }
     : { x: tipOriginX + (skiY - tipViewMinY) * tipScale, y: tipCenterY + skiX * tipScale };
+  const toTip = (skiX, skiY) => {
+    const b = toTipBase(skiX, skiY);
+    return {
+      x: tipPivotX + (b.x - tipPivotX) * tipZoom + tipPan.x,
+      y: tipPivotY + (b.y - tipPivotY) * tipZoom + tipPan.y,
+    };
+  };
 
   // ── Build control points ──────────────────────────────────────
   const buildCPs = useCallback(() => {
@@ -1098,17 +1148,24 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
 
-    // ── Main view (top row) ─────────────────────────────────────
-    // Centerline
+    // ── Main view (top row / left column) ───────────────────────
+    // Clip the main view so zoomed/panned content stays within its region and doesn't spill
+    // into the zoom panels.
+    const mainClip = isVertical
+      ? { x: 0, y: 0, w: mainColW, h: height }
+      : { x: 0, y: 0, w: width, h: mainRowH };
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(mainClip.x, mainClip.y, mainClip.w, mainClip.h);
+    ctx.clip();
+
+    // Centerline (uses toMain so it follows zoom/pan)
     ctx.strokeStyle = C.center; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    if (isVertical) {
-      const cx = toMain(0, 0).x;
-      ctx.moveTo(cx, toMain(0, 0).y);
-      ctx.lineTo(cx, toMain(0, ski.length).y);
-    } else {
-      ctx.moveTo(toMain(0, 0).x, mainCenterY);
-      ctx.lineTo(toMain(0, ski.length).x, mainCenterY);
+    {
+      const a = toMain(0, 0), b = toMain(0, ski.length);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
     }
     ctx.stroke(); ctx.setLineDash([]);
 
@@ -1140,7 +1197,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
       if (previewWrap === "contact") {
-        const { right: er, left: el } = getContactEdgeLines(ski, previewInset);
+        const { right: er, left: el } = getContactEdgeLines(ski, previewInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
         [er, el].forEach(edge => {
           ctx.beginPath();
           edge.forEach((p, i) => {
@@ -1162,6 +1219,32 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       }
       ctx.setLineDash([]);
       ctx.restore();
+
+      // Edge extension DRAG HANDLES (contact mode only) — square markers at each edge end on the
+      // right side. Dragging along the length axis changes edgeExtTip / edgeExtTail. Their screen
+      // positions are stashed in a ref for hit-testing.
+      if (previewWrap === "contact") {
+        const { right: er2 } = getContactEdgeLines(ski, previewInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
+        const tipEnd = er2[er2.length - 1];   // toward the tip
+        const tailEnd = er2[0];               // toward the tail
+        const tipS = toMain(tipEnd.x, tipEnd.y);
+        const tailS = toMain(tailEnd.x, tailEnd.y);
+        edgeHandleRef.current = { tip: tipS, tail: tailS };
+        const drawHandle = (s, isActive) => {
+          const r = (isVertical ? 8 : 6) + (isActive ? 2 : 0);
+          ctx.beginPath();
+          ctx.rect(s.x - r, s.y - r, r * 2, r * 2);
+          ctx.fillStyle = isActive ? C.controlActive : C.control;
+          ctx.fill();
+          ctx.strokeStyle = C.bgDeep; ctx.lineWidth = 1.5; ctx.stroke();
+        };
+        drawHandle(tipS, dragging === "edgeExtTip");
+        drawHandle(tailS, dragging === "edgeExtTail");
+      } else {
+        edgeHandleRef.current = null;
+      }
+    } else {
+      edgeHandleRef.current = null;
     }
 
     // TAIL/TIP labels and length dimension label
@@ -1213,6 +1296,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       }
     });
 
+    ctx.restore();  // end main-view clip
+
     // ── Divider between main view and zoom panels ────────────────
     ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1228,7 +1313,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.stroke();
 
     // ── Zoom panels (bottom row) ─────────────────────────────────
-    const drawZoomPanel = (panelX, panelY, panelW, label, toFrame, viewMinY, viewSpanY) => {
+    const drawZoomPanel = (panelX, panelY, panelW, label, toFrame, viewMinY, viewSpanY, zoomFactor) => {
       // Background and border
       ctx.fillStyle = C.bgDeep;
       ctx.fillRect(panelX, panelY, panelW, zoomPanelH);
@@ -1240,6 +1325,15 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       ctx.font = "bold 9px 'JetBrains Mono', monospace";
       ctx.textAlign = "left";
       ctx.fillText(label, panelX + 10, panelY + 16);
+
+      // Zoom readout (only when zoomed in) — right-aligned in the label row
+      if (zoomFactor > 1.01) {
+        ctx.fillStyle = C.label;
+        ctx.font = "8px 'JetBrains Mono', monospace";
+        ctx.textAlign = "right";
+        ctx.fillText(`${zoomFactor.toFixed(1)}× · dbl-click reset`, panelX + panelW - 8, panelY + 16);
+        ctx.textAlign = "left";
+      }
 
       // Clip rest to inside panel
       ctx.save();
@@ -1277,8 +1371,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
 
       ctx.restore();  // outer clip
     };
-    drawZoomPanel(tailZoomX, tailZoomY, zoomPanelW, "TAIL — ZOOM", toTail, tailViewMinY, tailViewSpanY);
-    drawZoomPanel(tipZoomX,  tipZoomY,  zoomPanelW, "TIP — ZOOM",  toTip,  tipViewMinY,  tipViewSpanY);
+    drawZoomPanel(tailZoomX, tailZoomY, zoomPanelW, "TAIL — ZOOM", toTail, tailViewMinY, tailViewSpanY, tailZoom);
+    drawZoomPanel(tipZoomX,  tipZoomY,  zoomPanelW, "TIP — ZOOM",  toTip,  tipViewMinY,  tipViewSpanY, tipZoom);
 
     // ── Tangent handle lines (only in zoom panels) ───────────────
     const drawTangents = (toFrame, nodes, isTip, sign, clipRect) => {
@@ -1353,15 +1447,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       if (doClip) ctx.restore();
     };
 
+    const mainClipRect = isVertical
+      ? { x: 0, y: 0, w: mainColW, h: height }
+      : { x: 0, y: 0, w: width, h: mainRowH };
     cps.forEach(cp => {
-      if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, null);
+      if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, mainClipRect);
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
       if (cp.frames.includes("tail"))  drawCP(cp, toTail(cp.skiX, cp.skiY), 1.0, tailClip);
     });
   }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical,
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
-      tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY]);
+      tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
+      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan]);
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
@@ -1416,6 +1514,23 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const handleDown = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+    // Check edge-extension handles first (contact mode only). Generous hit radius for touch.
+    const eh = edgeHandleRef.current;
+    if (eh && (ski.edgeWrap || "full") === "contact") {
+      const hitR = isVertical ? 22 : 14;
+      if (eh.tip && Math.hypot(mx - eh.tip.x, my - eh.tip.y) < hitR) {
+        setDragging("edgeExtTip");
+        setDragStart({ mx, my, frame: "main", ski: JSON.parse(JSON.stringify(ski)) });
+        return;
+      }
+      if (eh.tail && Math.hypot(mx - eh.tail.x, my - eh.tail.y) < hitR) {
+        setDragging("edgeExtTail");
+        setDragStart({ mx, my, frame: "main", ski: JSON.parse(JSON.stringify(ski)) });
+        return;
+      }
+    }
+
     const id = findCP(mx, my);
     if (id) {
       setDragging(id);
@@ -1424,21 +1539,102 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
         frame: findDragFrame(mx, my),
         ski: JSON.parse(JSON.stringify(ski)),
       });
+    } else {
+      // No node/handle under cursor — start a PAN gesture for whichever region we're in.
+      const frame = findDragFrame(mx, my);
+      const startPan = frame === "tip" ? { ...tipPan } : frame === "tail" ? { ...tailPan } : { ...mainPan };
+      setPanning({ frame, startMx: mx, startMy: my, startPan });
     }
-  }, [findCP, findDragFrame, ski]);
+  }, [findCP, findDragFrame, ski, tipPan, tailPan, mainPan, isVertical]);
+
+  // ── Scroll-wheel zoom (zoom the region under the cursor, keeping cursor point fixed) ──
+  const handleWheel = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const frame = findDragFrame(mx, my);
+    e.preventDefault();
+
+    // Select the zoom/pan state + pivot for the region under the cursor.
+    let z, pan, pivotX, pivotY, setZ, setP;
+    if (frame === "tip")       { z = tipZoom;  pan = tipPan;  pivotX = tipPivotX;  pivotY = tipPivotY;  setZ = setTipZoom;  setP = setTipPan; }
+    else if (frame === "tail") { z = tailZoom; pan = tailPan; pivotX = tailPivotX; pivotY = tailPivotY; setZ = setTailZoom; setP = setTailPan; }
+    else                       { z = mainZoom; pan = mainPan; pivotX = mainPivotX; pivotY = mainPivotY; setZ = setMainZoom; setP = setMainPan; }
+
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const zNew = Math.max(1, Math.min(8, z * factor));
+    if (zNew === z) return;
+
+    // Keep the point under the cursor fixed: p' = c - pv - (c - p - pv) * zNew/z
+    const panNewX = mx - pivotX - (mx - pan.x - pivotX) * (zNew / z);
+    const panNewY = my - pivotY - (my - pan.y - pivotY) * (zNew / z);
+    setZ(zNew); setP({ x: panNewX, y: panNewY });
+  }, [findDragFrame, tipZoom, tailZoom, mainZoom, tipPan, tailPan, mainPan,
+      tipPivotX, tipPivotY, tailPivotX, tailPivotY, mainPivotX, mainPivotY]);
+
+  // Double-click resets the zoom/pan of the panel under the cursor.
+  const handleDoubleClick = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const frame = findDragFrame(mx, my);
+    if (frame === "tip")  { setTipZoom(1);  setTipPan({ x: 0, y: 0 }); }
+    if (frame === "tail") { setTailZoom(1); setTailPan({ x: 0, y: 0 }); }
+    if (frame === "main") { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }
+  }, [findDragFrame]);
+
+  // Attach the wheel listener as NON-PASSIVE so preventDefault() actually stops page scroll.
+  // React's synthetic onWheel can be passive in some setups, which would let the page scroll.
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const onWheelNative = (e) => handleWheel(e);
+    canvas.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheelNative);
+  }, [handleWheel]);
 
   const handleMove = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
+    // Pan gesture takes priority (dragging empty space in the main view or a zoomed panel)
+    if (panning) {
+      const dx = mx - panning.startMx, dy = my - panning.startMy;
+      const nx = panning.startPan.x + dx, ny = panning.startPan.y + dy;
+      if (panning.frame === "tip") setTipPan({ x: nx, y: ny });
+      else if (panning.frame === "tail") setTailPan({ x: nx, y: ny });
+      else setMainPan({ x: nx, y: ny });
+      return;
+    }
+
+    // Edge-extension handle drag (contact mode). Convert along-length pointer motion to mm.
+    if ((dragging === "edgeExtTip" || dragging === "edgeExtTail") && dragStart) {
+      const scalePx = mainScale * mainZoom;
+      // Along-ski delta in mm from the drag start (respects orientation).
+      const dAlong = isVertical
+        ? -(my - dragStart.my) / scalePx   // vertical: down = toward tail (−skiY)
+        :  (mx - dragStart.mx) / scalePx;  // horizontal: right = +skiY (toward tip)
+      if (dragging === "edgeExtTip") {
+        // Tip handle sits toward the tip; dragging toward the tip (+skiY) increases extension.
+        const start = dragStart.ski.edgeExtTip || 0;
+        const maxExt = dragStart.ski.tipLength - 1;  // can't pass the physical tip end
+        setSki(s => ({ ...s, edgeExtTip: clamp(Math.round(start + dAlong), 0, Math.max(0, maxExt)) }));
+      } else {
+        // Tail handle sits toward the tail; dragging toward the tail (−skiY) increases extension.
+        const start = dragStart.ski.edgeExtTail || 0;
+        const maxExt = dragStart.ski.tailLength - 1;  // can't pass the physical tail end
+        setSki(s => ({ ...s, edgeExtTail: clamp(Math.round(start - dAlong), 0, Math.max(0, maxExt)) }));
+      }
+      return;
+    }
+
     if (dragging && dragStart) {
       const cp = cps.find(c => c.id === dragging); if (!cp) return;
 
-      // Pixel-to-mm conversion (same scale for both axes within each frame, true aspect)
+      // Pixel-to-mm conversion (same scale for both axes within each frame, true aspect).
+      // When a region is zoomed in, the on-screen scale is multiplied by the zoom factor, so
+      // divide by it to keep node dragging 1:1 with the cursor.
       let scalePx;
-      if (dragStart.frame === "tip")  scalePx = tipScale;
-      else if (dragStart.frame === "tail") scalePx = tailScale;
-      else scalePx = mainScale;
+      if (dragStart.frame === "tip")  scalePx = tipScale * tipZoom;
+      else if (dragStart.frame === "tail") scalePx = tailScale * tailZoom;
+      else scalePx = mainScale * mainZoom;
 
       const dSkiY = isVertical
         ? -(my - dragStart.my) / scalePx   // vertical: moving down on screen = toward tail = decreasing skiY
@@ -1549,20 +1745,38 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     } else {
       setHovered(findCP(mx, my));
     }
-  }, [dragging, dragStart, cps, mainScale, tailScale, tipScale, findCP, setSki]);
+  }, [dragging, dragStart, cps, mainScale, tailScale, tipScale, findCP, setSki, panning, tipZoom, tailZoom, mainZoom, isVertical]);
 
-  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); }, []);
+  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); setPanning(null); }, []);
+
+  const mainViewChanged = mainZoom > 1.01 || Math.abs(mainPan.x) > 0.5 || Math.abs(mainPan.y) > 0.5;
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "default", display: "block", touchAction: "none" }}
-      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handleDown(e); }}
-      onPointerMove={handleMove}
-      onPointerUp={handleUp}
-      onPointerCancel={handleUp}
-      onPointerLeave={() => { setHovered(null); }}
-    />
+    <div style={{ position: "relative", width, height }}>
+      <canvas
+        ref={canvasRef}
+        style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : (panning ? "grabbing" : "default"), display: "block", touchAction: "none" }}
+        onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handleDown(e); }}
+        onPointerMove={handleMove}
+        onPointerUp={handleUp}
+        onPointerCancel={handleUp}
+        onPointerLeave={() => { setHovered(null); }}
+        onDoubleClick={handleDoubleClick}
+      />
+      {mainViewChanged && (
+        <button
+          onClick={() => { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }}
+          style={{
+            position: "absolute", top: 8, right: 8, zIndex: 5,
+            background: "rgba(28,25,22,0.92)", color: C.heading,
+            border: `1px solid ${C.heading}`, borderRadius: 5,
+            padding: "6px 12px", fontSize: 11, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
+            cursor: "pointer", textTransform: "uppercase",
+          }}
+        >Reset View{mainZoom > 1.01 ? ` · ${mainZoom.toFixed(1)}×` : ""}</button>
+      )}
+    </div>
   );
 }
 // ══════════════ PROFILE VIEW (smooth continuous rise — no level-off at tips) ══════════════
@@ -2820,6 +3034,18 @@ export default function App() {
                 ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
                 : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
             </div>
+            {(ski.edgeWrap || "full") === "contact" && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
+                <div style={{ color: C.label, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Extension (mm past contact)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {inputField("Tip end", "edgeExtTip", 0, 400, 5)}
+                  {inputField("Tail end", "edgeExtTail", 0, 400, 5)}
+                </div>
+                <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 2 }}>
+                  Extends each partial edge past its contact point toward the tip / tail. Drag the square handles in the plan view to set these visually. Clamped at the physical ends.
+                </div>
+              </div>
+            )}
           </div>
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 12, marginTop: 8 }}>
