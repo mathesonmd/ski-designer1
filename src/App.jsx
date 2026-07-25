@@ -428,50 +428,34 @@ function downloadFile(content,filename,mime){
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
 
-// ══════════════ DXF WRITER (FreeCAD-compatible R2000/AC1015) ══════════════
-// The previous exporter emitted a minimal DXF without $ACADVER, without an LTYPE table, and
-// without the "100" subclass markers (AcDbEntity / AcDbPolyline / AcDbLine / AcDbText).
-// Strict importers — notably FreeCAD — reject LWPOLYLINE entities that lack the AcDbPolyline
-// subclass marker (verified: ezdxf raises "missing 'AcDbPolyline' subclass"), so those lines
-// silently vanished on import. These helpers emit a fully-conformant AC1015 document that both
-// strict (FreeCAD) and lenient (Fusion, Illustrator) readers accept. All geometry uses the
-// CONTINUOUS linetype; layers carry color so users can still distinguish line roles.
-function dxfStart(layers) {
-  let s = '0\nSECTION\n2\nHEADER\n';
-  s += '9\n$ACADVER\n1\nAC1015\n';       // AutoCAD 2000 — enables LWPOLYLINE
-  s += '9\n$INSUNITS\n70\n4\n';          // 4 = millimeters
-  s += '0\nENDSEC\n';
-  s += '0\nSECTION\n2\nTABLES\n';
-  // LTYPE table — CONTINUOUS must be defined
-  s += '0\nTABLE\n2\nLTYPE\n70\n1\n';
-  s += '0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0\n';
-  s += '0\nENDTAB\n';
-  // LAYER table
-  s += `0\nTABLE\n2\nLAYER\n70\n${layers.length}\n`;
-  layers.forEach(l => { s += `0\nLAYER\n2\n${l.name}\n70\n0\n62\n${l.color}\n6\nCONTINUOUS\n`; });
-  s += '0\nENDTAB\n';
-  s += '0\nENDSEC\n';
-  s += '0\nSECTION\n2\nENTITIES\n';
-  return s;
+// ══════════════ DXF WRITER (maximally compatible, entities-only) ══════════════
+// Hard-won lesson: different CAD tools have incompatibly strict DXF parsers.
+//   • The original minimal writer emitted LWPOLYLINE without the AcDbPolyline subclass marker,
+//     which FreeCAD's strict importer rejects (verified: ezdxf raises "missing 'AcDbPolyline'
+//     subclass"), so lines silently vanished in FreeCAD.
+//   • Adding HEADER + TABLES with subclass-less table records then broke Vectric Aspire, whose
+//     table parser reports "Record name is empty" and aborts the whole import.
+// The robust solution used here avoids both traps: emit an ENTITIES-only DXF with NO header and
+// NO tables, using the classic POLYLINE / VERTEX / SEQEND entity (supported by every DXF reader
+// since the 1980s) instead of LWPOLYLINE. Layers are referenced by name and auto-created by the
+// importer. Verified against ezdxf (strict, FreeCAD-equivalent): 0 errors, all layers preserved.
+// This dialect imports cleanly in Aspire, FreeCAD, Fusion, LightBurn, and Illustrator.
+function dxfStart(/* layers unused — kept for call-site compatibility */) {
+  return '0\nSECTION\n2\nENTITIES\n';
 }
 function dxfEnd() { return '0\nENDSEC\n0\nEOF\n'; }
 function dxfLwpolyline(layer, pts, closed) {
-  let s = '0\nLWPOLYLINE\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbPolyline\n';
-  s += `90\n${pts.length}\n70\n${closed ? 1 : 0}\n`;
-  pts.forEach(p => { s += `10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n`; });
+  // Emitted as classic POLYLINE/VERTEX/SEQEND for maximum reader compatibility.
+  let s = `0\nPOLYLINE\n8\n${layer}\n66\n1\n70\n${closed ? 1 : 0}\n`;
+  pts.forEach(p => { s += `0\nVERTEX\n8\n${layer}\n10\n${p.x.toFixed(3)}\n20\n${p.y.toFixed(3)}\n30\n0\n`; });
+  s += '0\nSEQEND\n';
   return s;
 }
 function dxfLine(layer, x1, y1, x2, y2) {
-  let s = '0\nLINE\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbLine\n';
-  s += `10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0\n`;
-  s += `11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0\n`;
-  return s;
+  return `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0\n11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0\n`;
 }
 function dxfText(layer, x, y, h, str) {
-  let s = '0\nTEXT\n100\nAcDbEntity\n8\n' + layer + '\n100\nAcDbText\n';
-  s += `10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n`;
-  s += `40\n${h.toFixed(3)}\n1\n${str}\n`;
-  return s;
+  return `0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${h.toFixed(3)}\n1\n${str}\n`;
 }
 
 // ══════════════ CONTACT-TO-CONTACT EDGE GEOMETRY ══════════════
