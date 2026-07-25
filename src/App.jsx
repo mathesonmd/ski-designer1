@@ -193,9 +193,29 @@ function parseDesignFile(jsonText) {
   }
   // Migration hook for future format versions:
   let ski = parsed.ski;
-  if (parsed.formatVersion > BCSKI_FORMAT_VERSION) {
-    // Newer file than this app knows about. Try to load anyway but caller should warn.
-    return { ok: true, ski, warning: `File was saved by a newer app version (format v${parsed.formatVersion}). Some fields may not be recognized.` };
+  const newerFile = parsed.formatVersion > BCSKI_FORMAT_VERSION;
+
+  // FORWARD-COMPATIBILITY MERGE — this is what keeps old .bcski files working in future builds.
+  // We start from the current DEFAULT_SKI and lay the file's values on top. Any field that exists
+  // in a newer app but is MISSING from an older file falls back to the default instead of becoming
+  // `undefined` (which is what breaks renders). Nested objects that gained new keys are merged one
+  // level deep so their new defaults backfill too, while the file's own values always win.
+  const mergeDefaults = (base, loaded) => {
+    const out = { ...base, ...loaded };
+    for (const k of Object.keys(base)) {
+      const bv = base[k], lv = loaded[k];
+      // If both are plain (non-array) objects, merge one level so new sub-keys backfill.
+      if (bv && lv && typeof bv === "object" && typeof lv === "object" && !Array.isArray(bv) && !Array.isArray(lv)) {
+        out[k] = { ...bv, ...lv };
+      }
+    }
+    return out;
+  };
+  ski = mergeDefaults(DEFAULT_SKI, ski);
+
+  if (newerFile) {
+    // Newer file than this app knows about. Loaded above with defaults backfilled; warn the caller.
+    return { ok: true, ski, warning: `This design was saved by a newer version of the designer. It loaded, but a field or two may not be recognized — update the app if something looks off.` };
   }
   // Ensure designName exists (older files may not have it)
   if (!ski.designName) ski.designName = parsed.designName || "Loaded Design";
@@ -2829,7 +2849,7 @@ export default function App() {
   // Persisted in localStorage so user's preferred layout sticks across sessions.
   const ACCORDION_KEY = "bcs_sections_open";
   const defaultSectionsOpen = {
-    gettingStarted: true, // brief onboarding, open on first visit
+    gettingStarted: false, // brief onboarding, collapsed by default so main controls show first
     file: true,
     views: true,
     presets: true,
