@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Black Chapel Ski Designer — Design your ski. Cut it. Ride it.</title>
+<meta name="description" content="A free browser tool for designing skis and exporting CNC-ready cut files. Shape, profile, flex simulation, and DXF/SVG export. Built by Black Chapel Studios." />
+
+<!-- ============================================================
+     BLACK CHAPEL SKI DESIGNER — LANDING PAGE
+     Self-contained. Set the LAUNCH_URL below to your app's address.
+     Palette + type are matched to the designer app for a seamless jump.
+     ============================================================ -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --forge:#141210;      /* main background */
+    --forge-deep:#0e0c0a; /* deeper insets */
+    --anvil:#1c1916;      /* raised panel */
+    --anvil2:#37322c;     /* borders */
+    --brass:#c8935a;      /* primary accent */
+    --brass-bright:#e0ad74;
+    --torch:#e8552a;      /* hot accent, used once */
+    --bone:#ede6d8;       /* primary text */
+    --bone-dim:#9b9388;   /* secondary text */
+    --bone-faint:#6f685f;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+
+  html{scroll-behavior:smooth;}
+
+  body{
+    background:var(--forge);
+    color:var(--bone);
+    font-family:'Inter',system-ui,sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  /* subtle forge texture: fine vertical grain, like brushed steel */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.010) 0 1px, transparent 1px 3px);
+    pointer-events:none; z-index:0; opacity:0.5;
+  }
+
+  .wrap{max-width:1120px;margin:0 auto;padding:0 28px;position:relative;z-index:1;}
+
+  /* ---------- type ---------- */
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px; letter-spacing:0.32em; text-transform:uppercase;
+    color:var(--brass);
+  }
+  h1,h2,h3{font-family:'Oswald',sans-serif;font-weight:600;line-height:1.04;letter-spacing:-0.01em;}
+  .display{font-family:'Anton',sans-serif;font-weight:400;letter-spacing:0.005em;text-transform:uppercase;}
+
+  /* ---------- top bar ---------- */
+  header.bar{
+    position:sticky;top:0;z-index:50;
+    background:rgba(20,18,16,0.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--anvil2);
+  }
+  .bar-inner{display:flex;align-items:center;justify-content:space-between;height:66px;}
+  .brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--bone);}
+  .brand-logo{height:38px;width:auto;display:block;}
+  @media (max-width:520px){ .brand-logo{height:30px;} }
+  .bar-cta{
+    font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.12em;
+    text-transform:uppercase;text-decoration:none;
+    color:var(--forge-deep);background:var(--brass);
+    padding:10px 18px;border-radius:3px;transition:background .18s ease, transform .18s ease;
+  }
+  .bar-cta:hover{background:var(--brass-bright);transform:translateY(-1px);}
+
+  /* ---------- hero ---------- */
+  .hero{padding:76px 0 52px;position:relative;}
+  .hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:52px;align-items:center;}
+  .hero h1{
+    font-size:clamp(42px,6.4vw,88px);
+    margin:18px 0 0;
+  }
+  .hero h1 .line2{color:var(--brass);display:block;}
+  .hero-lede{
+    color:var(--bone-dim);font-size:18px;max-width:30em;margin:22px 0 30px;line-height:1.62;
+  }
+  .hero-lede strong{color:var(--bone);font-weight:600;}
+  .cta-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .btn-primary{
+    font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;letter-spacing:0.1em;
+    text-transform:uppercase;text-decoration:none;
+    color:var(--forge-deep);background:var(--brass);
+    padding:15px 28px;border-radius:3px;display:inline-flex;align-items:center;gap:10px;
+    transition:background .18s ease, transform .18s ease, box-shadow .18s ease;
+    box-shadow:0 0 0 rgba(200,147,90,0);
+  }
+  .btn-primary:hover{background:var(--brass-bright);transform:translateY(-2px);box-shadow:0 10px 30px rgba(200,147,90,0.18);}
+  .btn-primary .arrow{transition:transform .18s ease;}
+  .btn-primary:hover .arrow{transform:translateX(4px);}
+  .btn-ghost{
+    font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;letter-spacing:0.08em;
+    text-transform:uppercase;text-decoration:none;color:var(--bone-dim);
+    padding:15px 8px;border-bottom:1px solid transparent;transition:color .18s ease,border-color .18s ease;
+  }
+  .btn-ghost:hover{color:var(--brass);border-color:var(--brass);}
+  .free-note{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.14em;color:var(--bone-faint);text-transform:uppercase;margin-top:18px;}
+
+  /* hero blueprint panel */
+  .blueprint{
+    background:var(--forge-deep);
+    border:1px solid var(--anvil2);
+    border-radius:6px;
+    padding:22px 22px 16px;
+    position:relative;
+    box-shadow:0 30px 80px rgba(0,0,0,0.45);
+  }
+  .blueprint-head{
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.18em;
+    color:var(--bone-faint);text-transform:uppercase;margin-bottom:14px;
+  }
+  .blueprint-head .dot{color:var(--brass);}
+  .blueprint svg{width:100%;height:auto;display:block;}
+
+  /* ---------- section frame ---------- */
+  section{padding:64px 0;position:relative;}
+  .section-head{max-width:36em;margin-bottom:44px;}
+  .section-head h2{font-size:clamp(28px,3.6vw,42px);margin:12px 0 0;}
+  .section-head p{color:var(--bone-dim);font-size:16.5px;margin-top:14px;}
+
+  .rule{height:1px;background:var(--anvil2);border:0;}
+
+  /* ---------- capability grid ---------- */
+  .caps{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--anvil2);border:1px solid var(--anvil2);border-radius:6px;overflow:hidden;}
+  .cap{background:var(--forge);padding:28px 24px;transition:background .2s ease;}
+  .cap:hover{background:var(--anvil);}
+  .cap-n{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--brass);letter-spacing:0.2em;}
+  .cap h3{font-size:19px;margin:14px 0 8px;color:var(--bone);}
+  .cap p{color:var(--bone-dim);font-size:14.5px;line-height:1.55;}
+
+  /* ---------- steps ---------- */
+  .steps{display:grid;grid-template-columns:1fr 1fr;gap:26px 40px;}
+  .step{display:flex;gap:18px;}
+  .step-num{
+    flex-shrink:0;width:44px;height:44px;border-radius:4px;
+    border:1px solid var(--brass);color:var(--brass);
+    font-family:'Anton',sans-serif;font-size:20px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .step h3{font-size:18px;margin:6px 0 6px;color:var(--bone);}
+  .step p{color:var(--bone-dim);font-size:14.5px;line-height:1.55;}
+  .step p code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--brass);background:var(--forge-deep);padding:1px 5px;border-radius:2px;}
+
+  /* ---------- who / for makers strip ---------- */
+  .strip{background:var(--forge-deep);border-top:1px solid var(--anvil2);border-bottom:1px solid var(--anvil2);}
+  .strip .wrap{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding-top:30px;padding-bottom:30px;}
+  .strip-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:var(--bone-faint);margin-right:8px;}
+  .tag{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.06em;color:var(--bone);border:1px solid var(--anvil2);border-radius:3px;padding:8px 13px;}
+  .tag-soon{color:var(--bone-faint);border-style:dashed;border-color:var(--anvil2);}
+
+  /* ---------- export callout ---------- */
+  .export-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:48px;align-items:center;}
+  .file-list{list-style:none;border:1px solid var(--anvil2);border-radius:6px;overflow:hidden;}
+  .file-list li{display:flex;gap:16px;align-items:baseline;padding:17px 20px;border-bottom:1px solid var(--anvil2);}
+  .file-list li:last-child{border-bottom:0;}
+  .file-list .fmt{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:0.08em;color:var(--brass);flex-shrink:0;width:92px;}
+  .file-list .fdesc{color:var(--bone-dim);font-size:14px;}
+  .file-list .fdesc b{color:var(--bone);font-weight:600;}
+
+  /* ---------- final cta ---------- */
+  .final{text-align:center;padding:88px 0 96px;}
+  .final .display{font-size:clamp(40px,7vw,104px);line-height:0.98;color:var(--bone);}
+  .final .display .brass{color:var(--brass);}
+  .final p{color:var(--bone-dim);font-size:18px;max-width:34em;margin:22px auto 34px;}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--anvil2);padding:38px 0;}
+  .foot-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:18px;}
+  .foot-tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.24em;text-transform:uppercase;color:var(--bone-faint);}
+  .foot-motto{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--brass);font-size:13px;}
+
+  /* ---------- reveal on scroll ---------- */
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease, transform .6s ease;}
+  .reveal.in{opacity:1;transform:none;}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:880px){
+    .hero-grid{grid-template-columns:1fr;gap:38px;}
+    .hero{padding:48px 0 36px;}
+    .caps{grid-template-columns:1fr;}
+    .steps{grid-template-columns:1fr;}
+    .export-grid{grid-template-columns:1fr;gap:30px;}
+    .blueprint{order:-1;}
+  }
+  @media (max-width:520px){
+    .wrap{padding:0 20px;}
+    .bar-cta{padding:9px 13px;font-size:11px;}
+    section{padding:48px 0;}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none;}
+    html{scroll-behavior:auto;}
+    .btn-primary:hover{transform:none;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== TOP BAR ====== -->
+<header class="bar">
+  <div class="wrap bar-inner">
+    <a class="brand" href="#top">
+      <img class="brand-logo" src="https://designer.blackchapelstudios.com/blackchapel-logo.png"
+           alt="Black Chapel Studios — Ski Designer" />
+    </a>
+    <a class="bar-cta" href="#launch" data-launch>Launch the Designer →</a>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<!-- ====== HERO ====== -->
+<div class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">Free browser tool · No install</div>
+      <h1 class="display">
+        Design your ski.
+        <span class="line2">Cut it. Ride it.</span>
+      </h1>
+      <p class="hero-lede">
+        A design bench for <strong>DIY ski builders</strong>. Draw the shape,
+        set the camber and flex, then export <strong>CNC-ready cut files</strong> — the base,
+        the core, and the side profile — straight from your browser.
+      </p>
+      <div class="cta-row">
+        <a class="btn-primary" href="#launch" data-launch>
+          Launch the Designer <span class="arrow">→</span>
+        </a>
+        <a class="btn-ghost" href="#how">See how it works</a>
+      </div>
+      <div class="free-note">Runs in your browser · Nothing to download · Your files stay yours</div>
+    </div>
+
+    <!-- SIGNATURE: a live ski "blueprint" drawn in the designer's own annotation style -->
+    <div class="blueprint reveal">
+      <div class="blueprint-head">
+        <span><span class="dot">◆</span> PLAN VIEW · 1800mm</span>
+        <span>132 – 98 – 120</span>
+      </div>
+      <!-- ski plan silhouette at realistic proportions: flat tail (left), wide rounded tip (right) -->
+      <svg viewBox="0 0 900 168" role="img" aria-label="Ski plan-view blueprint with dimension callouts">
+        <defs>
+          <linearGradient id="skiGlow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(237,230,216,0.11)"/>
+            <stop offset="1" stop-color="rgba(237,230,216,0.03)"/>
+          </linearGradient>
+        </defs>
+
+        <!-- centerline -->
+        <line x1="30" y1="84" x2="870" y2="84" stroke="#c8935a" stroke-opacity="0.25" stroke-width="1" stroke-dasharray="6 5"/>
+
+        <!-- contact reference lines (tail / waist / tip) -->
+        <g stroke="#e8552a" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="3 3">
+          <line x1="109" y1="48" x2="109" y2="120"/>
+          <line x1="421" y1="42" x2="421" y2="126"/>
+          <line x1="758" y1="48" x2="758" y2="120"/>
+        </g>
+
+        <!-- ski outline: long and thin, flat rounded tail + wide rounded tip, true sidecut -->
+        <path
+          d="M 30.0 84.0 L 34.0 65.5 L 37.9 59.8 L 41.9 56.9 L 45.9 56.0 L 61.7 56.0 L 85.5 56.0 L 109.3 56.0 L 155.7 56.3 L 202.0 57.1 L 248.3 58.2 L 294.7 59.3 L 341.0 60.3 L 387.3 61.0 L 415.1 61.1 L 442.9 61.0 L 489.3 60.3 L 535.6 59.0 L 581.9 57.4 L 628.3 55.8 L 674.6 54.4 L 720.9 53.5 L 758.0 53.2 L 776.7 53.6 L 795.3 55.0 L 810.3 56.8 L 825.2 59.4 L 836.4 62.0 L 847.6 65.5 L 855.1 68.6 L 862.5 72.9 L 866.3 76.1 L 870.0 84.0 L 866.3 91.9 L 862.5 95.1 L 855.1 99.4 L 847.6 102.5 L 836.4 106.0 L 825.2 108.6 L 810.3 111.2 L 795.3 113.0 L 776.7 114.4 L 758.0 114.8 L 720.9 114.5 L 674.6 113.6 L 628.3 112.2 L 581.9 110.6 L 535.6 109.0 L 489.3 107.7 L 442.9 107.0 L 415.1 106.9 L 387.3 107.0 L 341.0 107.7 L 294.7 108.7 L 248.3 109.8 L 202.0 110.9 L 155.7 111.7 L 109.3 112.0 L 85.5 112.0 L 61.7 112.0 L 45.9 112.0 L 41.9 111.1 L 37.9 108.2 L 34.0 102.5 L 30.0 84.0 Z"
+          fill="url(#skiGlow)" stroke="#ede6d8" stroke-width="1.6"/>
+
+        <!-- edge offset (inset) hint along each side, between the contact points -->
+        <path d="M 109 60 L 217 61 L 325 63.5 L 421 64.6 L 541 62 L 649 58 L 758 57"
+          fill="none" stroke="#c8935a" stroke-width="1" stroke-dasharray="4 3" stroke-opacity="0.75"/>
+        <path d="M 109 108 L 217 107 L 325 104.5 L 421 103.4 L 541 106 L 649 110 L 758 111"
+          fill="none" stroke="#c8935a" stroke-width="1" stroke-dasharray="4 3" stroke-opacity="0.75"/>
+
+        <!-- station labels + width callouts -->
+        <g font-family="'JetBrains Mono',monospace" font-size="10" fill="#9b9388">
+          <text x="109" y="140" text-anchor="middle">TAIL</text>
+          <text x="421" y="142" text-anchor="middle">WAIST</text>
+          <text x="758" y="140" text-anchor="middle">TIP</text>
+        </g>
+        <g font-family="'JetBrains Mono',monospace" font-size="11" fill="#c8935a">
+          <text x="109" y="38" text-anchor="middle">120</text>
+          <text x="421" y="32" text-anchor="middle">98</text>
+          <text x="758" y="38" text-anchor="middle">132</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- ====== FOR MAKERS STRIP ====== -->
+<div class="strip">
+  <div class="wrap">
+    <span class="strip-label">Built for</span>
+    <span class="tag">Garage ski builders</span>
+    <span class="tag">CNC &amp; hobby shops</span>
+    <span class="tag">First-time builders</span>
+    <span class="tag">Backcountry tinkerers</span>
+    <span class="tag tag-soon">Snowboards — coming soon</span>
+  </div>
+</div>
+
+<!-- ====== WHAT IT DOES ====== -->
+<section id="what">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">What it does</div>
+      <h2>Everything from shape to shop floor.</h2>
+      <p>One bench for the whole design: draw it, feel how it'll flex, and walk away with files a CNC can actually cut.</p>
+    </div>
+    <div class="caps reveal">
+      <div class="cap">
+        <div class="cap-n">01</div>
+        <h3>Shape it by hand</h3>
+        <p>Drag nodes to set width and contact points. Pull bezier handles for the exact tip and tail curve. Symmetric or fully asymmetric.</p>
+      </div>
+      <div class="cap">
+        <div class="cap-n">02</div>
+        <h3>Profile &amp; camber</h3>
+        <p>Set camber, tip rise, and tail rise. The side profile is the rocker line your press mold follows.</p>
+      </div>
+      <div class="cap">
+        <div class="cap-n">03</div>
+        <h3>Flex you can feel</h3>
+        <p>Pick your layup — wood core, glass, metal, carbon — and watch a live flex simulation rate how the ski will ride.</p>
+      </div>
+      <div class="cap">
+        <div class="cap-n">04</div>
+        <h3>Real edge geometry</h3>
+        <p>Full-wrap or contact-to-contact steel edges, with an inset base cut that exports as one continuous drag-knife path.</p>
+      </div>
+      <div class="cap">
+        <div class="cap-n">05</div>
+        <h3>Core &amp; taper</h3>
+        <p>Core outline with sidewall inset, plus a side-profile taper for milling the wood blank to thickness.</p>
+      </div>
+      <div class="cap">
+        <div class="cap-n">06</div>
+        <h3>CAD-ready export</h3>
+        <p>Clean DXF and SVG that open in Aspire, Fusion, and FreeCAD — with a combined view aligned for lofting.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule" />
+
+<!-- ====== HOW IT WORKS / STEPS ====== -->
+<section id="how">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Your first ski · start to file</div>
+      <h2>Seven steps from blank canvas to cut file.</h2>
+      <p>Work top to bottom through the panels. Here's the whole path.</p>
+    </div>
+    <div class="steps reveal">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div><h3>Start from a preset</h3><p>Pick a shape — <code>All-Mtn</code>, <code>Powder</code>, <code>Twin&nbsp;Tip</code> — as a sane starting point, then make it yours.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div><h3>Set your dimensions</h3><p>Length, tip / waist / tail width, tip and tail length. The plan view updates as you type.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div><h3>Shape the tip &amp; tail</h3><p>Drag nodes for contact points and width; pull the diamond handles in the zoom panels for the curve.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div><h3>Dial the profile</h3><p>Camber and rise define the rocker line — the shape your press mold is built to.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div><h3>Choose the layup</h3><p>Wood core, fiberglass, optional metal and carbon. Each choice changes the flex.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div><h3>Tune the flex</h3><p>Read the flex rating. Adjust core thickness, width, and materials until it rides right.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num">7</div>
+        <div><h3>Export &amp; cut</h3><p>Set edges, then export <code>Base</code>, <code>Core</code>, <code>Core&nbsp;Side</code>, or the <code>Combined</code> file for CAD and CNC.</p></div>
+      </div>
+      <div class="step">
+        <div class="step-num" style="border-color:var(--torch);color:var(--torch);">→</div>
+        <div><h3>Then build it</h3><p>Cut the base and core on a CNC, mill the taper, lay up your materials, and press. You designed it — now ride it.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule" />
+
+<!-- ====== EXPORT DETAIL ====== -->
+<section id="export">
+  <div class="wrap export-grid">
+    <div class="reveal">
+      <div class="eyebrow">The files you walk away with</div>
+      <h2 style="font-size:clamp(28px,3.4vw,40px);margin:12px 0 16px;">Files a shop can actually use.</h2>
+      <p style="color:var(--bone-dim);font-size:16px;max-width:30em;">
+        Every export is clean, unit-accurate DXF and SVG — no mangled layers, no import errors. The
+        base cut runs as a single continuous path for a drag knife. The combined file stacks every
+        view on one length axis, labeled and dimensioned, ready to loft.
+      </p>
+    </div>
+    <ul class="file-list reveal">
+      <li><span class="fmt">BASE</span><span class="fdesc"><b>Outline + edge offset.</b> One continuous drag-knife path for the P-Tex base.</span></li>
+      <li><span class="fmt">CORE</span><span class="fdesc"><b>Core outline</b> with sidewall inset and contact marks.</span></li>
+      <li><span class="fmt">CORE SIDE</span><span class="fdesc"><b>Thickness taper</b> profile for milling the wood blank.</span></li>
+      <li><span class="fmt">COMBINED</span><span class="fdesc"><b>All views aligned</b> on the length axis, labeled, with a measurements table — built for lofting in CAD.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ====== FINAL CTA ====== -->
+<a id="launch"></a>
+<div class="final">
+  <div class="wrap">
+    <div class="reveal">
+      <h2 class="display">Worship <span class="brass">the work.</span></h2>
+      <p>The bench is open and it's free. Bring a shape in your head; leave with files to cut.</p>
+      <a class="btn-primary" href="#" data-launch style="font-size:15px;padding:17px 34px;">
+        Launch the Designer <span class="arrow">→</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ====== FOOTER ====== -->
+<footer>
+  <div class="wrap foot-inner">
+    <div class="foot-tag">Black Chapel Studios · Salt Lake City</div>
+    <div class="foot-motto">Wood. Steel. Sound.</div>
+  </div>
+</footer>
+
+<script>
+  /* =========================================================
+     SET YOUR APP URL HERE ↓  (the designer's address)
+     Every "Launch the Designer" button uses this.
+     ========================================================= */
+  var LAUNCH_URL = "https://designer.blackchapelstudios.com";
+
+  document.querySelectorAll('[data-launch]').forEach(function(a){
+    a.setAttribute('href', LAUNCH_URL);
+    // open in same tab so it feels like entering the app; change to '_blank' if you prefer
+    a.setAttribute('rel','noopener');
+  });
+
+  /* reveal-on-scroll */
+  (function(){
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(reduce){ document.querySelectorAll('.reveal').forEach(function(e){e.classList.add('in');}); return; }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, {threshold:0.12});
+    document.querySelectorAll('.reveal').forEach(function(e){ io.observe(e); });
+  })();
+
+  /* ---------------------------------------------------------------
+     IFRAME AUTO-HEIGHT
+     When this page is embedded in an <iframe> (e.g. on Squarespace),
+     it reports its full content height to the parent so the iframe can
+     resize to fit — no cutoff, no empty gap, at any screen width.
+     The parent listens for messages tagged 'bcs-ski-landing'.
+     Harmless when the page is opened directly (no parent listening).
+     --------------------------------------------------------------- */
+  (function(){
+    if (window.parent === window) return; // not embedded; nothing to do
+    var last = 0;
+    function sendHeight(){
+      var h = Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight,
+        document.body.offsetHeight, document.documentElement.offsetHeight
+      );
+      if (h && h !== last){
+        last = h;
+        window.parent.postMessage({ type: 'bcs-ski-landing', action: 'setHeight', height: h }, '*');
+      }
+    }
+    // Report on the events that change layout height.
+    window.addEventListener('load', sendHeight);
+    window.addEventListener('resize', sendHeight);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(sendHeight);
+    // Watch for late layout shifts (reveal animations, image load).
+    if (window.ResizeObserver){
+      new ResizeObserver(sendHeight).observe(document.body);
+    } else {
+      // Fallback: poll briefly after load for a couple of seconds.
+      var n = 0, t = setInterval(function(){ sendHeight(); if(++n > 20) clearInterval(t); }, 150);
+    }
+    // Also send after transitions finish (reveal fade-ins).
+    document.addEventListener('transitionend', sendHeight);
+    // Respond if the parent (Squarespace) asks us to re-report (e.g. on its own resize).
+    window.addEventListener('message', function(e){
+      var d = e.data;
+      if (d && d.type === 'bcs-ski-parent' && d.action === 'requestHeight'){ last = 0; sendHeight(); }
+    });
+    sendHeight();
+  })();
+</script>
+</body>
+</html>
