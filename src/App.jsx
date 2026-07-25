@@ -536,68 +536,59 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
     }
     return out;
   };
-  return { right: offsetInward(rightRaw), left: offsetInward(leftRaw) };
+  return {
+    right: offsetInward(rightRaw), left: offsetInward(leftRaw),
+    // Raw (un-offset) source outline points at the sliced stations. The tie-in from an offset
+    // edge endpoint back to its matching raw endpoint is EXACTLY -normal*inset — i.e. perpendicular
+    // to the edge by construction. The loop builder uses these so tie-ins stay perpendicular.
+    rightRaw, leftRaw,
+  };
 }
 
 // Build a SINGLE CONTINUOUS closed loop for the contact-mode base cut, suitable for a drag knife
 // (one perimeter, no lifting).
 //
-// Robust construction that handles ASYMMETRIC tips/tails: rather than slicing the right and left
-// sides separately (which breaks when the nose is off-center, because the two sides don't meet at
-// a shared centerline point), we walk the FULL outline — which is already a correct closed loop for
-// any shape — and DETOUR inward along the edge inset in the two side regions between the edge ends.
-// Outside those regions (tip and tail) we follow the true outline. The transitions between outline
-// and inset are the perpendicular tie-ins (each inset endpoint is a normal offset of the outline at
-// the same station, so the connecting segment is perpendicular to the edge).
+// Handles ASYMMETRIC tips/tails, and keeps the tie-ins TRULY PERPENDICULAR to the edge. The trick:
+// each edge-inset endpoint was computed as (rawOutlinePoint + inwardNormal*inset). So the exact
+// perpendicular foot of that endpoint is its matching RAW outline point (rightRaw[0], rightRaw[last],
+// etc.). We tie the loop in/out at those exact raw points — connecting outline→raw→edge — so the
+// tie-in segment is precisely -normal*inset (perpendicular). Previously the loop reconnected to a
+// nearby full-outline sample at the same skiY, which is a DIFFERENT point, producing the skewed,
+// side-dependent angles. Using the raw feet fixes that.
 function getContactBaseCutLoop(ski, edgeInset, extTip, extTail) {
   extTip = extTip || 0;
   extTail = extTail || 0;
-  const tailC = ski.tailLength;
-  const tipC = ski.length - ski.tipLength;
-  const eps = 0.5;
-  const startY = Math.max(eps, tailC - extTail);          // tail end of the edge inset
-  const endY = Math.min(ski.length - eps, tipC + extTip); // tip end of the edge inset
+
+  const edges = getContactEdgeLines(ski, edgeInset, extTip, extTail);
+  const rightEdge = edges.right, leftEdge = edges.left;       // offset insets, ascending skiY
+  const rightRaw = edges.rightRaw, leftRaw = edges.leftRaw;   // exact source outline feet, ascending skiY
+  const startY = rightRaw[0].y;               // tail end of the edge slice
+  const endY = rightRaw[rightRaw.length - 1].y; // tip end of the edge slice
 
   const outline = computeOutline(ski);  // { right: [y:0→L], left: [y:0→L] }
-  const edges = getContactEdgeLines(ski, edgeInset, extTip, extTail);  // { right, left } y:startY→endY
-
-  const rightEdge = edges.right;               // ascending skiY
-  const leftEdge = edges.left;                 // ascending skiY
-  const rightEdgeRev = rightEdge.slice().reverse();
-  const leftEdgeRev = leftEdge.slice().reverse();
-
   const loop = [];
   const push = (p) => loop.push({ x: p.x, y: p.y });
 
-  // --- RIGHT SIDE: walk outline.right from tail-end (y=0) toward tip-end (y=L). ---
-  // Emit outline points where y < startY (tail region). At startY, detour onto the right edge
-  // inset (ascending), then at endY return to the outline for the tip region (y > endY).
+  // --- RIGHT SIDE: outline tail region → raw tail-foot → edge inset → raw tip-foot → outline tip.
   const R = outline.right;
   let i = 0;
-  // Tail region on the right: outline points with y <= startY
-  for (; i < R.length && R[i].y < startY; i++) push(R[i]);
-  // Detour: right edge inset (startY → endY). The tie-in from the last outline point to
-  // rightEdge[0] is implicit (straight segment); both are at ~startY on the same side.
-  rightEdge.forEach(push);
-  // Skip outline points inside (startY, endY]; resume at the first outline point with y > endY.
-  while (i < R.length && R[i].y <= endY) i++;
-  // Tip region on the right: outline points with y > endY, up to the nose.
-  for (; i < R.length; i++) push(R[i]);
+  for (; i < R.length && R[i].y < startY; i++) push(R[i]);   // tail region (below the edge slice)
+  push(rightRaw[0]);                                          // exact tie-in foot (perpendicular)
+  rightEdge.forEach(push);                                    // edge inset startY→endY
+  push(rightRaw[rightRaw.length - 1]);                        // exact tie-out foot (perpendicular)
+  while (i < R.length && R[i].y <= endY) i++;                 // skip outline inside the slice
+  for (; i < R.length; i++) push(R[i]);                       // tip region (above the edge slice)
 
-  // --- Now cross the nose to the LEFT side and walk back toward the tail. ---
-  // outline.left is stored y:0→L; we walk it in REVERSE (tip-end → tail-end).
-  const L = outline.left;
-  let j = L.length - 1;
-  // Tip region on the left: outline points with y > endY (walking down from the nose).
-  for (; j >= 0 && L[j].y > endY; j--) push(L[j]);
-  // Detour: left edge inset, walked tip→tail (endY → startY) = leftEdgeRev.
-  leftEdgeRev.forEach(push);
-  // Skip left outline points inside [startY, endY); resume at first point with y < startY.
-  while (j >= 0 && L[j].y >= startY) j--;
-  // Tail region on the left: outline points with y < startY, down to the tail-end.
-  for (; j >= 0; j--) push(L[j]);
+  // --- Cross nose, LEFT SIDE walked tip→tail: outline tip → raw tip-foot → edge inset → raw tail-foot → outline tail.
+  const Lp = outline.left;
+  let j = Lp.length - 1;
+  for (; j >= 0 && Lp[j].y > endY; j--) push(Lp[j]);          // tip region (above the edge slice)
+  push(leftRaw[leftRaw.length - 1]);                          // exact tie-in foot (perpendicular)
+  for (let k = leftEdge.length - 1; k >= 0; k--) push(leftEdge[k]); // edge inset endY→startY
+  push(leftRaw[0]);                                           // exact tie-out foot (perpendicular)
+  while (j >= 0 && Lp[j].y >= startY) j--;                    // skip outline inside the slice
+  for (; j >= 0; j--) push(Lp[j]);                            // tail region (below the edge slice)
 
-  // Loop closes back at the tail-end (outline.right[0] and outline.left[0] coincide at the tail).
   return loop;
 }
 
