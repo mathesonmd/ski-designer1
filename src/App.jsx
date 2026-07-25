@@ -2829,6 +2829,7 @@ export default function App() {
   // Persisted in localStorage so user's preferred layout sticks across sessions.
   const ACCORDION_KEY = "bcs_sections_open";
   const defaultSectionsOpen = {
+    gettingStarted: true, // brief onboarding, open on first visit
     file: true,
     views: true,
     presets: true,
@@ -3213,6 +3214,43 @@ export default function App() {
             color: loadMessage.type === "error" ? C.torch : C.value,
           }}>{loadMessage.text}</div>
         )}
+
+        <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
+          <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
+            <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
+              Build your first ski
+            </div>
+            <p style={{ margin: "0 0 12px" }}>
+              Work top to bottom through the panels on the left. Each step below matches a panel.
+            </p>
+            {[
+              ["1", "Pick a Preset", "Open Presets and choose a starting shape (All-Mtn is a safe first ski). It fills in sensible dimensions you can tweak."],
+              ["2", "Set Dimensions", "In Dimensions, set overall length, tip / waist / tail width, and tip / tail length. Watch the plan view update live."],
+              ["3", "Shape the tip & tail", "Drag the round nodes in the plan view to move contact points and widths. Drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan."],
+              ["4", "Dial the Side Profile", "In Side Profile, set camber and tip / tail rise. This is the rocker line your press mold follows."],
+              ["5", "Choose your Layup", "In Layup / Materials, pick wood core, fiberglass, optional metal and carbon. The Flex panel updates to show how stiff the ski will ride."],
+              ["6", "Check the Flex", "Read the flex rating chip. Adjust core thickness, width, or materials until it feels right for the skier."],
+              ["7", "Set edges & export", "In CNC Export, set the edge inset and choose Full Wrap or Contact-to-Contact edges. Then export Base, Core, Core Side, or the Combined file for CAD."],
+            ].map(([n, title, body]) => (
+              <div key={n} style={{ display: "flex", gap: 10, marginBottom: 11 }}>
+                <div style={{
+                  flexShrink: 0, width: 22, height: 22, borderRadius: 3,
+                  background: C.heading, color: C.bgDeep, fontWeight: 700, fontSize: 12,
+                  fontFamily: "'JetBrains Mono', monospace", display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                }}>{n}</div>
+                <div>
+                  <div style={{ color: C.heading, fontWeight: 600, marginBottom: 2 }}>{title}</div>
+                  <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5 }}>{body}</div>
+                </div>
+              </div>
+            ))}
+            <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 4, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
+              <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>.bcski</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
+              <b style={{ color: C.heading }}>What comes next?</b> The exported DXFs are cut on a CNC (the Base file runs as one continuous drag-knife path), and the Core Side profile shapes the wood core for pressing. See External Tools for cutting and press notes.
+            </div>
+          </div>
+        </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.file} onToggle={() => toggleSection("file")} title="File">
           <div style={{ marginBottom: 10 }}>
