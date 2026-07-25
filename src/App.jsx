@@ -540,13 +540,15 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
 }
 
 // Build a SINGLE CONTINUOUS closed loop for the contact-mode base cut, suitable for a drag knife
-// (one perimeter, no lifting). Walking the loop:
-//   tail-end outline → [tie-in ⟂] → right edge inset (tail→tip) → [tie-out ⟂] → tip outline arc
-//   → [tie-in ⟂] → left edge inset (tip→tail) → [tie-out ⟂] → tail outline arc → close.
-// The tie-ins are perpendicular connectors: because each edge-inset endpoint is a normal offset
-// of the outline at the same station, connecting the inset endpoint straight to the outline point
-// at that station IS perpendicular to the edge. This yields the closed base perimeter the knife
-// follows, with the notch cut in where the metal edges sit.
+// (one perimeter, no lifting).
+//
+// Robust construction that handles ASYMMETRIC tips/tails: rather than slicing the right and left
+// sides separately (which breaks when the nose is off-center, because the two sides don't meet at
+// a shared centerline point), we walk the FULL outline — which is already a correct closed loop for
+// any shape — and DETOUR inward along the edge inset in the two side regions between the edge ends.
+// Outside those regions (tip and tail) we follow the true outline. The transitions between outline
+// and inset are the perpendicular tie-ins (each inset endpoint is a normal offset of the outline at
+// the same station, so the connecting segment is perpendicular to the edge).
 function getContactBaseCutLoop(ski, edgeInset, extTip, extTail) {
   extTip = extTip || 0;
   extTail = extTail || 0;
@@ -556,55 +558,46 @@ function getContactBaseCutLoop(ski, edgeInset, extTip, extTail) {
   const startY = Math.max(eps, tailC - extTail);          // tail end of the edge inset
   const endY = Math.min(ski.length - eps, tipC + extTip); // tip end of the edge inset
 
-  const outline = computeOutline(ski);              // full outline, both sides, y: 0→length
-  const edges = getContactEdgeLines(ski, edgeInset, extTip, extTail);  // inset lines, y: startY→endY
+  const outline = computeOutline(ski);  // { right: [y:0→L], left: [y:0→L] }
+  const edges = getContactEdgeLines(ski, edgeInset, extTip, extTail);  // { right, left } y:startY→endY
 
-  // Outline points for one side within a skiY sub-range, ascending in skiY, with exact endpoints.
-  const outlineSlice = (pts, y0, y1) => {
-    const asc = pts[0].y <= pts[pts.length - 1].y ? pts : pts.slice().reverse();
-    const interp = (a, b, y) => { const t = (y - a.y) / (b.y - a.y); return { x: a.x + (b.x - a.x) * t, y }; };
-    const out = [];
-    for (let i = 0; i < asc.length; i++) {
-      const p = asc[i];
-      if (i > 0) {
-        const q = asc[i - 1];
-        if (q.y < y0 && p.y >= y0 && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, y0));
-        if (q.y < y1 && p.y >= y1 && Math.abs(p.y - q.y) > 1e-9) out.push(interp(q, p, y1));
-      }
-      if (p.y >= y0 && p.y <= y1) out.push({ x: p.x, y: p.y });
-    }
-    out.sort((a, b) => a.y - b.y);
-    return out;
-  };
+  const rightEdge = edges.right;               // ascending skiY
+  const leftEdge = edges.left;                 // ascending skiY
+  const rightEdgeRev = rightEdge.slice().reverse();
+  const leftEdgeRev = leftEdge.slice().reverse();
 
-  // Sub-arcs of the outline in the tip and tail regions (past the edge-inset ends).
-  const tailArcR = outlineSlice(outline.right, 0, startY);   // tail-end → startY (right side)
-  const tipArcR  = outlineSlice(outline.right, endY, ski.length); // endY → tip-end (right side)
-  const tailArcL = outlineSlice(outline.left, 0, startY);    // tail-end → startY (left side)
-  const tipArcL  = outlineSlice(outline.left, endY, ski.length);  // endY → tip-end (left side)
-
-  const rightEdge = edges.right;  // ascending y: startY→endY
-  const leftEdge = edges.left;    // ascending y: startY→endY
-
-  // Assemble the loop. All sub-arrays are ascending in skiY; reverse where the walk goes tip→tail.
   const loop = [];
-  const pushAll = (arr) => arr.forEach(p => loop.push({ x: p.x, y: p.y }));
+  const push = (p) => loop.push({ x: p.x, y: p.y });
 
-  // 1. Tail outline arc, right side: from tail-end (y=0) UP to startY.
-  pushAll(tailArcR);
-  // 2. Tie-in ⟂ to right edge inset start (rightEdge[0]) — implicit straight segment to next point.
-  // 3. Right edge inset: startY → endY.
-  pushAll(rightEdge);
-  // 4. Tie-out ⟂ to right outline at endY, then tip arc right: endY → tip-end.
-  pushAll(tipArcR);
-  // 5. Around the tip to the left side: tip arc left reversed (tip-end → endY).
-  pushAll(tipArcL.slice().reverse());
-  // 6. Tie-in ⟂ to left edge inset end (leftEdge last), then left edge inset reversed: endY → startY.
-  pushAll(leftEdge.slice().reverse());
-  // 7. Tie-out ⟂ to left outline at startY, then tail arc left reversed: startY → tail-end.
-  pushAll(tailArcL.slice().reverse());
-  // Loop closes back at the tail-end (tailArcR[0] and tailArcL[0] are both the x=0 tail tip).
+  // --- RIGHT SIDE: walk outline.right from tail-end (y=0) toward tip-end (y=L). ---
+  // Emit outline points where y < startY (tail region). At startY, detour onto the right edge
+  // inset (ascending), then at endY return to the outline for the tip region (y > endY).
+  const R = outline.right;
+  let i = 0;
+  // Tail region on the right: outline points with y <= startY
+  for (; i < R.length && R[i].y < startY; i++) push(R[i]);
+  // Detour: right edge inset (startY → endY). The tie-in from the last outline point to
+  // rightEdge[0] is implicit (straight segment); both are at ~startY on the same side.
+  rightEdge.forEach(push);
+  // Skip outline points inside (startY, endY]; resume at the first outline point with y > endY.
+  while (i < R.length && R[i].y <= endY) i++;
+  // Tip region on the right: outline points with y > endY, up to the nose.
+  for (; i < R.length; i++) push(R[i]);
 
+  // --- Now cross the nose to the LEFT side and walk back toward the tail. ---
+  // outline.left is stored y:0→L; we walk it in REVERSE (tip-end → tail-end).
+  const L = outline.left;
+  let j = L.length - 1;
+  // Tip region on the left: outline points with y > endY (walking down from the nose).
+  for (; j >= 0 && L[j].y > endY; j--) push(L[j]);
+  // Detour: left edge inset, walked tip→tail (endY → startY) = leftEdgeRev.
+  leftEdgeRev.forEach(push);
+  // Skip left outline points inside [startY, endY); resume at first point with y < startY.
+  while (j >= 0 && L[j].y >= startY) j--;
+  // Tail region on the left: outline points with y < startY, down to the tail-end.
+  for (; j >= 0; j--) push(L[j]);
+
+  // Loop closes back at the tail-end (outline.right[0] and outline.left[0] coincide at the tail).
   return loop;
 }
 
@@ -1039,6 +1032,162 @@ function exportRockerSVG(ski){
 </svg>`;
   downloadFile(svg, `bcs-ski-rocker-${ski.length}mm.svg`, "image/svg+xml");
 }
+
+// ══════════════ COMBINED "ALL VIEWS" EXPORT ══════════════
+// One file containing the base outline, the core outline (core-inset), and the core-side thickness
+// profile — all aligned on the same length (X) axis and vertically stacked with a small gap, so a
+// CAD user can import once and have every view registered for lofting. Each view sits on its own
+// layer. The length axis runs along X (0 = tail, ski.length = tip); the base and core outlines are
+// centered on their own horizontal band, and the side profile sits below, thickness growing upward.
+function buildCombinedGeometry(ski){
+  const L = ski.length;
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
+  const edgeWrap = ski.edgeWrap || "full";
+  const marks = getRegistrationMarks(ski);
+
+  // Base outline points (X = along-ski, Y = lateral). computeOutline returns skiX lateral / skiY
+  // along-ski, so we swap to put length on X for a horizontal layout.
+  const outline = computeOutline(ski);
+  const baseRight = outline.right.map(p => ({ x: p.y, y: p.x }));
+  const baseLeft = outline.left.map(p => ({ x: p.y, y: p.x }));
+  const baseLoopPts = baseRight.concat(baseLeft.slice().reverse());
+
+  // Base edge offset (contact loop or full-wrap inset), also swapped to X=length.
+  let baseEdge = null;
+  if (edgeInset > 0) {
+    if (edgeWrap === "contact") {
+      baseEdge = getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0)
+        .map(p => ({ x: p.y, y: p.x }));
+    } else {
+      const full = getFullOutlinePoints(ski);
+      baseEdge = offsetPolygonInward(full, edgeInset).map(p => ({ x: p.y, y: p.x }));
+    }
+  }
+
+  // Core outline (core-inset), X=length.
+  const N = 200;
+  const coreR = [], coreL = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N, xmm = pos * L;
+    const hw = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+    coreR.push({ x: xmm, y: hw });
+    coreL.push({ x: xmm, y: -hw });
+  }
+  const coreLoopPts = coreR.concat(coreL.slice().reverse());
+
+  // Core side profile (X=length, Y=thickness).
+  const sideTop = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    sideTop.push({ x: pos * L, y: getCoreThickAt(ski.coreProfile, pos) });
+  }
+  const sideLoop = [{ x: 0, y: 0 }, ...sideTop, { x: L, y: 0 }];
+
+  return { L, marks, baseLoopPts, baseEdge, coreLoopPts, coreR, coreL, sideLoop, sideTop, coreInset };
+}
+
+function exportCombinedDXF(ski){
+  const g = buildCombinedGeometry(ski);
+  const { L, marks } = g;
+
+  // Vertical layout bands (Y offsets). Base on top, core in middle, side profile at bottom.
+  const halfBaseW = Math.max(...g.baseLoopPts.map(p => Math.abs(p.y)));
+  const halfCoreW = Math.max(...g.coreLoopPts.map(p => Math.abs(p.y)));
+  const maxThick = Math.max(...g.sideTop.map(p => p.y));
+  const gap = 40;
+  const baseYoff = 0;
+  const coreYoff = -(halfBaseW + gap + halfCoreW);
+  const sideYoff = coreYoff - (halfCoreW + gap + maxThick);
+
+  const shift = (pts, dy) => pts.map(p => ({ x: p.x, y: p.y + dy }));
+
+  const layers = [
+    { name: 'BASE_OUTLINE', color: 7 },
+    { name: 'BASE_EDGE', color: 3 },
+    { name: 'CORE_OUTLINE', color: 3 },
+    { name: 'CORE_SIDE', color: 5 },
+    { name: 'REFERENCE', color: 1 },
+    { name: 'CENTERLINE', color: 5 },
+    { name: 'TEXT', color: 2 },
+  ];
+  let dxf = dxfStart(layers);
+
+  // Base band
+  const edgeWrap = ski.edgeWrap || "full";
+  if (edgeWrap === "contact" && g.baseEdge) {
+    dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);  // the cut loop IS the base
+  } else {
+    dxf += dxfLwpolyline('BASE_OUTLINE', shift(g.baseLoopPts, baseYoff), true);
+    if (g.baseEdge) dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);
+  }
+  dxf += dxfLine('CENTERLINE', 0, baseYoff, L, baseYoff);
+
+  // Core band
+  dxf += dxfLwpolyline('CORE_OUTLINE', shift(g.coreLoopPts, coreYoff), true);
+  dxf += dxfLine('CENTERLINE', 0, coreYoff, L, coreYoff);
+
+  // Core side band (thickness up from its baseline)
+  dxf += dxfLwpolyline('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
+
+  // Shared reference lines at tail/waist/tip contact — full vertical lines spanning all three bands
+  // so the views stay registered for lofting.
+  const topY = baseYoff + halfBaseW + 6;
+  const botY = sideYoff - 6;
+  g.marks.forEach(m => {
+    dxf += dxfLine('REFERENCE', m.skiY, botY, m.skiY, topY);
+    dxf += dxfText('TEXT', m.skiY + 2, topY + 2, 6, m.label);
+  });
+
+  dxf += dxfEnd();
+  downloadFile(dxf, `bcs-ski-combined-${ski.length}mm.dxf`, "application/dxf");
+}
+
+function exportCombinedSVG(ski){
+  const g = buildCombinedGeometry(ski);
+  const { L } = g;
+  const halfBaseW = Math.max(...g.baseLoopPts.map(p => Math.abs(p.y)));
+  const halfCoreW = Math.max(...g.coreLoopPts.map(p => Math.abs(p.y)));
+  const maxThick = Math.max(...g.sideTop.map(p => p.y));
+  const gap = 40, pad = 15;
+  // Compute band centers in a top-down SVG (Y grows down). Base at top.
+  const baseCY = pad + halfBaseW;
+  const coreCY = baseCY + halfBaseW + gap + halfCoreW;
+  const sideTopY = coreCY + halfCoreW + gap;          // side profile baseline
+  const totalH = sideTopY + maxThick + pad;
+  const totalW = L + pad * 2;
+
+  const pathFrom = (pts, cy, close) => pts.map((p,i) =>
+    `${i===0?'M':'L'}${(p.x + pad).toFixed(2)},${(cy - p.y).toFixed(2)}`
+  ).join(' ') + (close ? ' Z' : '');
+
+  const edgeWrap = ski.edgeWrap || "full";
+  const baseGroup = (edgeWrap === "contact" && g.baseEdge)
+    ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>`
+    : `<path d="${pathFrom(g.baseLoopPts, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
+      (g.baseEdge ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#005000" stroke-width="0.5" stroke-dasharray="2,1.5"/>` : '');
+
+  const coreGroup = `<path d="${pathFrom(g.coreLoopPts, coreCY, true)}" fill="none" stroke="#C8935A" stroke-width="0.6"/>`;
+  const sideGroup = `<path d="${pathFrom(g.sideLoop, sideTopY, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
+
+  const refLines = g.marks.map(m => {
+    const x = m.skiY + pad;
+    return `<line x1="${x.toFixed(2)}" y1="${(baseCY - halfBaseW - 6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(sideTopY + maxThick + 4).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="4,3"/>
+    <text x="${(x + 2).toFixed(2)}" y="${(baseCY - halfBaseW - 8).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+  }).join('\n    ');
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
+  <title>Black Chapel Studios — Combined Views ${ski.length}mm</title>
+  <desc>Base outline, core outline, and core side profile — aligned on the length axis for lofting. Units: mm, 1:1.</desc>
+  <g id="base">${baseGroup}</g>
+  <g id="core">${coreGroup}</g>
+  <g id="core_side">${sideGroup}</g>
+  <g id="reference">${refLines}</g>
+</svg>`;
+  downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
+}
+
 // ══════════════ PLAN VIEW ══════════════
 // Layout:
 //   ROW 1 (top, ~38% of height): Full ski plan at TRUE aspect ratio. Long and thin.
@@ -3160,22 +3309,31 @@ export default function App() {
             <b style={{color: C.heading}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
             <b style={{color: C.heading}}>Core inset:</b> width reduction per side for sidewall material on core blank.
           </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Base — ski outline + edge offset</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-            <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Plan DXF</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Plan SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Base DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Base SVG</button>
+          </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — core-inset outline + contact marks</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>Core DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>Core SVG</button>
+          </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core Side — thickness taper profile</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideSVG)} style={expBtn}>Core Side SVG</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>Core Plan DXF</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>Core Plan SVG</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportRockerDXF)} style={expBtn}>Rocker DXF</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportRockerSVG)} style={expBtn}>Rocker SVG</button>
+          </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Combined — all views aligned for lofting</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+            <button onClick={() => exportWithFeedbackPrompt(exportCombinedDXF)} style={expBtn}>Combined DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCombinedSVG)} style={expBtn}>Combined SVG</button>
           </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5 }}>
-            <b style={{color: C.heading}}>Plan</b>: outer edge line + edge offset line (top-down).<br/>
-            <b style={{color: C.heading}}>Core Side</b>: closed flat-bottom side profile for extrusion in 3D (XZ plane).<br/>
-            <b style={{color: C.heading}}>Core Plan</b>: top-down core outline for boolean cut (XY plane).<br/>
-            <b style={{color: C.heading}}>Rocker</b>: side-view line for press mold.<br/>
-            Reference lines: vertical centerline + horizontal lines at tail / waist / tip contact.
+            <b style={{color: C.heading}}>Base</b>: top-down ski outline with the edge offset (single continuous cut path in contact mode).<br/>
+            <b style={{color: C.heading}}>Core</b>: top-down core outline narrowed by core inset, with tail/waist/tip contact marks.<br/>
+            <b style={{color: C.heading}}>Core Side</b>: side thickness profile (flat bottom) for the taper.<br/>
+            <b style={{color: C.heading}}>Combined</b>: base, core, and side profile stacked and aligned on the length axis so they can be lofted together in CAD.
           </div>
         </AccordionSection>
 
