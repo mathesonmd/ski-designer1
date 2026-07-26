@@ -2555,6 +2555,20 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
       ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
     });
+    // WAIST reference line (boot center) — solid brass, so you can align the thickest part of the
+    // core to it. Sits between the contacts at the waist position.
+    {
+      const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
+      const x = padL + waistPos * plotW;
+      ctx.strokeStyle = C.handle || "#c8935a";
+      ctx.lineWidth = 1.2; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
+      ctx.fillStyle = C.handle || "#c8935a";
+      ctx.font = "7px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, -2); ctx.restore();
+    }
 
     // Smooth profile
     const nPts = 400;
@@ -2728,6 +2742,19 @@ function FlexView({ ski, flex, width, height }) {
       ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
       ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
     });
+    // WAIST reference line (boot center) — solid brass, matches the core view.
+    {
+      const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
+      const x = padL + waistPos * plotW;
+      ctx.strokeStyle = C.handle || "#c8935a";
+      ctx.lineWidth = 1.2; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseYF); ctx.stroke();
+      ctx.fillStyle = C.handle || "#c8935a";
+      ctx.font = "7px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, -2); ctx.restore();
+    }
 
     const drawSmoothCurve = (points, fillStyle, strokeStyle, lineWidth, glow) => {
       // Fill
@@ -3014,31 +3041,63 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
 function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   return (
     <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
-      <button
-        onClick={onToggle}
-        style={{
-          width: "100%", padding: "9px 12px", background: "transparent", border: "none",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          cursor: "pointer", textAlign: "left",
-        }}
-      >
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 12 }}>
+        <button
+          onClick={onToggle}
+          style={{
+            flex: 1, padding: "9px 12px", background: "transparent", border: "none",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
           <span style={{
             color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
             fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase",
           }}>{title}</span>
-          {accent}
-        </span>
-        <span style={{ color: C.heading, fontSize: 16, fontFamily: "monospace", lineHeight: 1, marginLeft: 9 }}>
-          {isOpen ? "\u25BC" : "\u25B6"}
-        </span>
-      </button>
+          <span style={{ color: C.heading, fontSize: 16, fontFamily: "monospace", lineHeight: 1, marginLeft: 9 }}>
+            {isOpen ? "\u25BC" : "\u25B6"}
+          </span>
+        </button>
+        {accent && <span style={{ marginLeft: 6, display: "inline-flex" }}>{accent}</span>}
+      </div>
       {isOpen && (
         <div style={{ padding: "2px 12px 10px" }}>
           {children}
         </div>
       )}
     </div>
+  );
+}
+
+// ══════════════ INFO BUBBLE ══════════════
+// A small "i" icon that reveals a tooltip on hover (or tap on touch). Used to tuck away edit tips and
+// other help text so it's discoverable but out of the way. `children` is the tooltip content.
+function InfoBubble({ C, children, align = "left", width = 240 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="Help"
+        style={{
+          width: 16, height: 16, borderRadius: "50%", border: `1px solid ${C.labelDim}`,
+          background: open ? C.heading : "transparent", color: open ? C.bgDeep : C.labelDim,
+          fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, lineHeight: 1,
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+        }}>i</button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", [align]: 0, zIndex: 60, width,
+          background: C.panel || "#1c1916", border: `1px solid ${C.panelBorder || "#37322c"}`,
+          borderRadius: 5, padding: "9px 11px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+          color: C.value, fontSize: 11.5, lineHeight: 1.5, fontFamily: "'Inter', system-ui, sans-serif",
+          textTransform: "none", letterSpacing: 0, fontWeight: 400,
+        }}>
+          {children}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -3771,7 +3830,36 @@ export default function App() {
                 </div>
               </div>
             ))}
-            <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 4, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
+            <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 4, paddingTop: 10 }}>
+              <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
+                Matching a published ski
+              </div>
+              <div style={{ color: C.label, fontSize: 12, lineHeight: 1.55 }}>
+                Two toggles let you reproduce a real ski from its spec sheet — because on a real ski the
+                sidecut radius and the rocker profile describe different geometry, and can't both be
+                matched with a single set of numbers.
+                <div style={{ marginTop: 8 }}>
+                  <b style={{ color: C.heading }}>Sidecut R "adjusts" (Dimensions):</b> pick what flexes
+                  when you type a radius.
+                  <br />• <b>Waist</b> — holds the contacts, moves the waist. Good for designing from scratch.
+                  <br />• <b>Tip/Tail</b> — holds every width (incl. waist), moves the contact points to hit
+                  the radius. Use this to keep a published waist <i>and</i> radius at the same time.
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <b style={{ color: C.heading }}>Rocker link (Side Profile):</b> controls whether the
+                  rocker takeoff follows the contact points.
+                  <br />• <b>🔗 Linked</b> — rocker begins at the contact (Snocad-style). Editing rocker %
+                  moves the contacts and the radius. Simple.
+                  <br />• <b>⛓ Unlinked</b> — rocker takeoff is independent and sits inboard of the contact.
+                  Editing rocker % changes only the side profile; contacts and radius stay put.
+                </div>
+                <div style={{ marginTop: 8, color: C.labelDim, fontStyle: "italic" }}>
+                  Spec-match recipe: enter length + 3 widths, set R adjusts → Tip/Tail and type the radius,
+                  then set rocker → Unlinked and enter the published rocker %. All the numbers hold at once.
+                </div>
+              </div>
+            </div>
+            <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 10, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
               <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>.bcski</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
               <b style={{ color: C.heading }}>What comes next?</b> The exported DXFs are cut on a CNC (the Base file runs as one continuous drag-knife path), and the Core Side profile shapes the wood core for pressing. See External Tools for cutting and press notes.
             </div>
@@ -3820,7 +3908,16 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title="Views">
+        <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title="Views"
+          accent={
+            <InfoBubble C={C} width={250}>
+              <b style={{ color: C.heading }}>Editing the shape</b><br />
+              • Drag the round nodes on the plan view to reshape and adjust dimensions.<br />
+              • Drag the diamond tangent handles in the tip/tail zoom panels for fine bezier control.<br />
+              • Drag the square width handles at the contacts to set tip/tail width.<br />
+              • Scroll to zoom, drag empty space to pan; double-click to reset.
+            </InfoBubble>
+          }>
           <div style={{ display: "flex", gap: 4 }}>
             {isCompact ? (
               <>
@@ -3989,12 +4086,6 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
-          <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
-            <b style={{color: C.heading}}>Edit tips:</b><br/>
-            • Drag nodes (circles) on the main view to reshape & adjust dimensions.<br/>
-            • Drag tangent handles (diamonds) in the zoom panels for fine bezier control.<br/>
-            • Width handles on contacts adjust tip/tail width.
-          </div>
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
