@@ -508,6 +508,18 @@ function computeDerived(ski){
   const depth=(avg-ski.waistWidth)/2,radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
   return{effectiveEdge:ee,sidecutRadius:radius};
 }
+// Inverse of the sidecut-radius formula: given a target radius (meters), return the WAIST WIDTH (mm)
+// that produces it, holding length / tip-length / tail-length / tip-width / tail-width fixed. Setting
+// the radius adjusts the waist because that's the free variable — the ends and running edge are
+// things you set deliberately. R = ee²/(8·depth)/1000, depth = (avg − waist)/2, so:
+//   depth = ee² / (8·R·1000),  waist = avg − 2·depth.
+function waistWidthForRadius(ski, radiusM){
+  const ee = ski.length - ski.tipLength - ski.tailLength;
+  const avg = (ski.tipWidth + ski.tailWidth) / 2;
+  if (!(radiusM > 0)) return avg;              // non-positive / blank → straight (no sidecut)
+  const depth = (ee * ee) / (8 * radiusM * 1000);
+  return avg - 2 * depth;
+}
 
 // Side-profile rocker curve. Real ski tips/tails follow a smooth parabolic rise —
 // they begin curving immediately at the contact point and continue accelerating gradually
@@ -2929,6 +2941,49 @@ function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   );
 }
 
+// ══════════════ SIDECUT RADIUS FIELD ══════════════
+// A two-way input for sidecut radius (meters). It DISPLAYS the live derived radius (which updates as
+// you change any other dimension), and when you type a value it solves back for the WAIST WIDTH that
+// produces that radius and updates it — clamped to the waist's valid range, so an impossible radius
+// can't break the shape (the field just self-corrects to the achievable value on blur). Local text
+// state lets you type freely (e.g. "17." mid-keystroke) without the field fighting you.
+function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
+  const derived = computeDerived(ski);
+  const liveR = isFinite(derived.sidecutRadius) ? derived.sidecutRadius : null;
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState(false);
+  // When not actively editing, mirror the live derived radius.
+  const shown = editing ? text : (liveR != null ? liveR.toFixed(1) : "flat");
+
+  const commit = (raw) => {
+    const r = parseFloat(raw);
+    setEditing(false);
+    if (!isFinite(r) || r <= 0) return;               // blank/garbage → leave shape unchanged
+    let w = waistWidthForRadius(ski, r);
+    w = Math.max(WAIST_MIN, Math.min(WAIST_MAX, w));  // clamp to valid waist range
+    w = Math.round(w * 10) / 10;
+    setSki(s => ({ ...s, waistWidth: w }));
+  };
+
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+        Sidecut R (m)
+      </div>
+      <input
+        type="number" min={4} max={60} step={0.5}
+        value={shown === "flat" ? "" : shown}
+        placeholder={shown === "flat" ? "flat" : undefined}
+        onFocus={e => { setEditing(true); setText(liveR != null ? liveR.toFixed(1) : ""); e.target.style.borderColor = C.inputFocus; }}
+        onChange={e => setText(e.target.value)}
+        onBlur={e => { commit(e.target.value); e.target.style.borderColor = C.inputBorder; }}
+        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
+      />
+    </div>
+  );
+}
+
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
@@ -3517,6 +3572,7 @@ export default function App() {
           {inputField("Tip W", "tipWidth", 60, 200)}
           {inputField("Waist", "waistWidth", 50, 180)}
           {inputField("Tail W", "tailWidth", 60, 200)}
+          <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={50} WAIST_MAX={180} />
           {inputField("Tip Len", "tipLength", 80, 500)}
           {inputField("Tail Len", "tailLength", 60, 400)}
           {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
