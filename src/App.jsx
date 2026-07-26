@@ -188,6 +188,7 @@ const DEFAULT_SKI={
   // sits INBOARD of the contacts, set independently by tipRockerLen/tailRockerLen, so a published
   // rocker % and a published sidecut radius can both be matched at once (they're different locations).
   rockerLinked:true,
+  radiusTarget:"waist",  // what the Sidecut R input adjusts: "waist" (design) or "tiptail" (spec-match).
   tipRockerLen:240,   // mm from tip end to rocker takeoff. When linked, mirrors tipLength.
   tailRockerLen:170,  // mm from tail end to rocker takeoff. When linked, mirrors tailLength.
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
@@ -542,6 +543,25 @@ function waistWidthForRadius(ski, radiusM){
   if (!(radiusM > 0)) return avg;              // non-positive / blank → straight (no sidecut)
   const depth = (ee * ee) / (8 * radiusM * 1000);
   return avg - 2 * depth;
+}
+// Alternative inversion: given a target radius, return the tip/tail LENGTHS (a partial patch) that
+// produce it while HOLDING the waist and end widths fixed — by solving for the contact span and
+// splitting it across tip/tail by their current ratio. This is the one you want for matching a spec
+// sheet: keep the published widths (incl. waist) and let the contacts move to hit the published radius.
+function tipTailForRadius(ski, radiusM){
+  const avg = (ski.tipWidth + ski.tailWidth) / 2;
+  const depth = (avg - ski.waistWidth) / 2;
+  if (!(radiusM > 0) || depth <= 0) return null;   // no sidecut / invalid
+  const span = Math.sqrt(radiusM * 8 * depth * 1000);   // contact-to-contact distance (mm)
+  const totalEnds = ski.length - span;
+  if (totalEnds < 80) return null;                  // radius too large to fit (contacts past the ends)
+  const curTip = ski.tipLength, curTail = ski.tailLength;
+  const curTotal = curTip + curTail || 1;
+  const tipFrac = curTip / curTotal;
+  return {
+    tipLength: Math.max(40, Math.round(totalEnds * tipFrac)),
+    tailLength: Math.max(40, Math.round(totalEnds * (1 - tipFrac))),
+  };
 }
 
 // ── Rocker-profile ↔ tip/tail-length conversions ──
@@ -3023,33 +3043,60 @@ function AccordionSection({ isOpen, onToggle, title, accent, children }) {
 }
 
 // ══════════════ SIDECUT RADIUS FIELD ══════════════
-// A two-way input for sidecut radius (meters). It DISPLAYS the live derived radius (which updates as
-// you change any other dimension), and when you type a value it solves back for the WAIST WIDTH that
-// produces that radius and updates it — clamped to the waist's valid range, so an impossible radius
-// can't break the shape (the field just self-corrects to the achievable value on blur). Local text
-// state lets you type freely (e.g. "17." mid-keystroke) without the field fighting you.
+// Two-way sidecut radius (m). Displays the live derived radius and, when you type one, solves back
+// for it. The "R adjusts" selector chooses the FREE VARIABLE that flexes to hit the radius:
+//   • Waist  — hold contacts, move the waist width (design-from-scratch feel; original behavior).
+//   • Tip/Tail — hold ALL widths (incl. waist), move the contact span via tip/tail lengths. This is
+//     the one for MATCHING A SPEC SHEET: enter the published length + widths + radius and they all
+//     stay, with the contacts settling where they must. Choice persists in the save (ski.radiusTarget).
 function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   const derived = computeDerived(ski);
   const liveR = isFinite(derived.sidecutRadius) ? derived.sidecutRadius : null;
+  const target = ski.radiusTarget || "waist";
   const [text, setText] = useState("");
   const [editing, setEditing] = useState(false);
-  // When not actively editing, mirror the live derived radius.
   const shown = editing ? text : (liveR != null ? liveR.toFixed(1) : "flat");
 
   const commit = (raw) => {
     const r = parseFloat(raw);
     setEditing(false);
-    if (!isFinite(r) || r <= 0) return;               // blank/garbage → leave shape unchanged
-    let w = waistWidthForRadius(ski, r);
-    w = Math.max(WAIST_MIN, Math.min(WAIST_MAX, w));  // clamp to valid waist range
-    w = Math.round(w * 10) / 10;
-    setSki(s => ({ ...s, waistWidth: w }));
+    if (!isFinite(r) || r <= 0) return;
+    setSki(s => {
+      if ((s.radiusTarget || "waist") === "tiptail") {
+        const patch = tipTailForRadius(s, r);
+        if (!patch) return s;                    // radius not achievable with these widths → no-op
+        const next = { ...s, ...patch };
+        next.coreProfile = syncCoreContacts(next);
+        if (next.rockerLinked !== false) { next.tipRockerLen = next.tipLength; next.tailRockerLen = next.tailLength; }
+        return next;
+      }
+      // default: adjust waist
+      let w = waistWidthForRadius(s, r);
+      w = Math.max(WAIST_MIN, Math.min(WAIST_MAX, w));
+      w = Math.round(w * 10) / 10;
+      return { ...s, waistWidth: w };
+    });
   };
+
+  const setTarget = (t) => setSki(s => ({ ...s, radiusTarget: t }));
+  const segBtn = (t, lbl) => (
+    <button onClick={() => setTarget(t)}
+      style={{ flex: 1, padding: "3px 4px", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3,
+        background: target === t ? C.heading : "transparent", color: target === t ? C.bgDeep : C.labelDim,
+        border: `1px solid ${target === t ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", textTransform: "uppercase" }}>
+      {lbl}
+    </button>
+  );
 
   return (
     <div style={{ marginBottom: 7 }}>
-      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-        Sidecut R (m)
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m)</span>
+        <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+          <span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
+          {segBtn("waist", "Waist")}
+          {segBtn("tiptail", "Tip/Tail")}
+        </span>
       </div>
       <input
         type="number" min={4} max={60} step={0.5}
