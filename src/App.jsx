@@ -276,11 +276,44 @@ function getWidthAtPos(ski,pos){
   if(xmm<=waistPos){const t=(xmm-tailC)/(waistPos-tailC);return ski.tailWidth+t*t*(3-2*t)*(ski.waistWidth-ski.tailWidth);}
   const t=(xmm-waistPos)/(tipC-waistPos);return ski.waistWidth+t*t*(3-2*t)*(ski.tipWidth-ski.waistWidth);
 }
-function getCoreThickAt(profile,pos){
-  if(pos<=profile[0].pos)return profile[0].thick;if(pos>=profile[profile.length-1].pos)return profile[profile.length-1].thick;
-  for(let i=0;i<profile.length-1;i++){if(pos>=profile[i].pos&&pos<=profile[i+1].pos){
-    const t=(pos-profile[i].pos)/(profile[i+1].pos-profile[i].pos);return profile[i].thick+t*t*(3-2*t)*(profile[i+1].thick-profile[i].thick);}}
-  return 0;
+// Fritsch–Carlson monotone cubic Hermite spline. Unlike per-segment smootherstep (which forces the
+// slope to ZERO at every control point and so makes a smooth rise look like a row of moguls), this is
+// C1-continuous ACROSS the knots — a rising core section reads as one clean rise — while still being
+// guaranteed monotone between monotone data, so it never overshoots (a physical core never gains a
+// phantom bulge or dips below a control value). Used for BOTH the on-screen core/flex curves and the
+// exported DXF, so what you see matches what gets cut.
+function makeMonotoneCubic(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return () => (ys[0] || 0);
+  const dx = [], dy = [], m = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = xs[i + 1] - xs[i]; dy[i] = ys[i + 1] - ys[i]; m[i] = dy[i] / dx[i]; }
+  const t = new Array(n);
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (m[i - 1] * m[i] <= 0) t[i] = 0; // local extremum → flat tangent prevents overshoot
+    else { const w1 = 2 * dx[i] + dx[i - 1], w2 = dx[i] + 2 * dx[i - 1]; t[i] = (w1 + w2) / (w1 / m[i - 1] + w2 / m[i]); }
+  }
+  return (x) => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0; while (x > xs[i + 1]) i++;
+    const h = dx[i], tt = (x - xs[i]) / h, t2 = tt * tt, t3 = t2 * tt;
+    const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + tt, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+    return h00 * ys[i] + h10 * h * t[i] + h01 * ys[i + 1] + h11 * h * t[i + 1];
+  };
+}
+// Cache the built spline per profile array so we don't rebuild it on every sample.
+let _coreSplineCache = { profile: null, fn: null };
+function getCoreThickAt(profile, pos) {
+  if (pos <= profile[0].pos) return profile[0].thick;
+  if (pos >= profile[profile.length - 1].pos) return profile[profile.length - 1].thick;
+  if (_coreSplineCache.profile !== profile) {
+    _coreSplineCache = {
+      profile,
+      fn: makeMonotoneCubic(profile.map(p => p.pos), profile.map(p => p.thick)),
+    };
+  }
+  return _coreSplineCache.fn(pos);
 }
 function computeEIAtStation(skiWidth,coreThick,layup){
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
@@ -2155,16 +2188,25 @@ function ProfileView({ ski, width, height }) {
     const plotW = width - padX * 2;
     const plotH = height - padTop - padBot;
     const xScale = plotW / L;
-    // Profile heights are tiny vs length → apply mild Y exaggeration (3-6×).
+    // Profile heights are tiny vs length, so we exaggerate Y for readability — but with a HARD CAP
+    // so the rocker never stretches into an unrealistic shape when the panel is tall. We cap both the
+    // exaggeration factor AND the resulting pixel-scale, then anchor the baseline low and let the
+    // profile occupy only the space it truly needs. This keeps the rocker looking like a rocker at
+    // any panel size (viewed alone or stacked with the other views).
+    const MAX_Y_EXAGG = 3.0;         // never exaggerate height more than 3× the true aspect
     const maxH = Math.max(TH, TAH, CH) + 5;
     const trueHpx = maxH * xScale;
-    const idealHpx = plotH * 0.75;
+    const idealHpx = plotH * 0.72;   // how much height we'd LIKE the profile to use
     let yExagg = 1.0, yScale = xScale;
     if (trueHpx < idealHpx) {
-      yExagg = Math.min(8.0, idealHpx / trueHpx);
+      // Exaggerate toward the ideal, but never beyond MAX_Y_EXAGG.
+      yExagg = Math.min(MAX_Y_EXAGG, idealHpx / trueHpx);
       yScale = xScale * yExagg;
     }
-    const baseY = padTop + plotH * 0.92;
+    // Baseline: anchor so the (capped) profile sits comfortably; if the panel is taller than the
+    // profile needs, the extra space stays empty below rather than stretching the curve.
+    const profileHpx = maxH * yScale;
+    const baseY = Math.min(padTop + plotH * 0.92, padTop + profileHpx + plotH * 0.12);
     const toC = (xmm, ymm) => ({ x: padX + xmm * xScale, y: baseY - ymm * yScale });
 
     // Snow line
@@ -2267,28 +2309,24 @@ function CoreView({ ski, setSki, width, height }) {
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
   const maxThick = 16;
+  // Cap the vertical scale (pixels per mm) so a tall panel doesn't stretch the core out of realistic
+  // proportion. Beyond the cap, the drawing height stays fixed and the core anchors to the baseline;
+  // extra panel height becomes empty space above rather than a stretched curve. MAX_PX_PER_MM is
+  // chosen so the 16mm range reads at a believable thickness even in a short/independent panel.
+  const MAX_PX_PER_MM = 9;
+  const vScale = Math.min(plotH / maxThick, MAX_PX_PER_MM); // px per mm
+  const drawH = maxThick * vScale;                          // actual pixel height used by the plot
+  const baseY = padT + plotH;                               // baseline stays at the bottom
   const toC2 = useCallback((pos, thick) => ({
     x: padL + pos * plotW,
-    y: padT + plotH - (thick / maxThick) * plotH,
-  }), [plotW, plotH]);
-  const baseY = padT + plotH;
+    y: baseY - thick * vScale,
+  }), [plotW, vScale, baseY, padL]);
   const fromC2 = useCallback((cx2, cy2) => ({
     pos: (cx2 - padL) / plotW,
-    thick: ((baseY - cy2) / plotH) * maxThick,
-  }), [plotW, plotH, baseY]);
+    thick: (baseY - cy2) / vScale,
+  }), [plotW, vScale, baseY, padL]);
 
-  const getThickAt = useCallback((pos) => {
-    if (pos <= cp[0].pos) return cp[0].thick;
-    if (pos >= cp[cp.length - 1].pos) return cp[cp.length - 1].thick;
-    for (let i = 0; i < cp.length - 1; i++) {
-      if (pos >= cp[i].pos && pos <= cp[i+1].pos) {
-        const t = (pos - cp[i].pos) / (cp[i+1].pos - cp[i].pos);
-        const s = t * t * t * (t * (t * 6 - 15) + 10);  // smootherstep
-        return cp[i].thick + s * (cp[i+1].thick - cp[i].thick);
-      }
-    }
-    return 0;
-  }, [cp]);
+  const getThickAt = useCallback((pos) => getCoreThickAt(cp, pos), [cp]);
 
   const cps = useMemo(() => cp.map((n, i) => {
     const c = toC2(n.pos, n.thick);
@@ -2439,18 +2477,23 @@ function FlexView({ ski, flex, width, height }) {
     const st = flex.stations;
     const maxK = Math.max(...st.map(s => s.kCant)) * 1.15;
     const maxEI = Math.max(...st.map(s => s.ei)) * 1.15;
+    // Cap the drawing height so tall panels don't stretch the curves vertically out of proportion.
+    // The baseline stays at the bottom; beyond the cap, extra panel height is empty space on top.
+    const MAX_PLOT_H = 260;
+    const drawH = Math.min(plotH, MAX_PLOT_H);
+    const baseYF = padT + plotH;                 // baseline anchored to bottom of the panel
     const toC3 = (pos, val, mv) => ({
       x: padL + pos * plotW,
-      y: padT + plotH - (val / mv) * plotH,
+      y: baseYF - (val / mv) * drawH,
     });
 
     ctx.strokeStyle = C.gridLine; ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
-      const y = padT + (plotH / 4) * i;
+      const y = baseYF - (drawH / 4) * i;
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
     }
     ctx.strokeStyle = C.snow; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, baseYF); ctx.lineTo(padL + plotW, baseYF); ctx.stroke();
 
     const drawSmoothCurve = (points, fillStyle, strokeStyle, lineWidth, glow) => {
       // Fill
@@ -2462,8 +2505,8 @@ function FlexView({ ski, flex, width, height }) {
         ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
       }
       ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
-      ctx.lineTo(padL + plotW, padT + plotH);
-      ctx.lineTo(padL, padT + plotH);
+      ctx.lineTo(padL + plotW, baseYF);
+      ctx.lineTo(padL, baseYF);
       ctx.closePath();
       ctx.fillStyle = fillStyle; ctx.fill();
       // Stroke
@@ -2488,11 +2531,11 @@ function FlexView({ ski, flex, width, height }) {
     ctx.fillStyle = C.flexStroke; ctx.font = "8px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
     for (let i = 0; i <= 4; i++) {
-      ctx.fillText(`${Math.round(maxK * i / 4)}`, padL - 4, padT + plotH - (i / 4) * plotH + 3);
+      ctx.fillText(`${Math.round(maxK * i / 4)}`, padL - 4, baseYF - (i / 4) * drawH + 3);
     }
     ctx.fillStyle = C.eiStroke; ctx.textAlign = "left";
     for (let i = 0; i <= 4; i++) {
-      ctx.fillText(`${(maxEI * i / 4 / 1e6).toFixed(0)}`, padL + plotW + 4, padT + plotH - (i / 4) * plotH + 3);
+      ctx.fillText(`${(maxEI * i / 4 / 1e6).toFixed(0)}`, padL + plotW + 4, baseYF - (i / 4) * drawH + 3);
     }
     ctx.fillStyle = C.flexStroke;
     ctx.save();
