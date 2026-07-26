@@ -13,6 +13,7 @@ const C = {
   gridMajor:    "#37322c",
   center:       "rgba(200,147,90,0.20)",
   snow:         "rgba(237,230,216,0.30)",
+  contactLine:  "rgba(232,85,42,0.55)",  // torch, for tip/tail contact reference lines
   skiFill:      "rgba(237,230,216,0.08)",
   skiStroke:    "#ede6d8",  // bone
   skiGlow:      "rgba(237,230,216,0.20)",
@@ -120,11 +121,58 @@ function makeSwallowTailR() { return [
 ];}
 function makeSwallowTailL() { return makeSwallowTailR(); }
 
-function makeDefaultCore(){return[
-  {pos:0.0,thick:2.0},{pos:0.10,thick:2.5},{pos:0.20,thick:6.0},
-  {pos:0.35,thick:10.0},{pos:0.50,thick:11.5},{pos:0.65,thick:10.0},
-  {pos:0.80,thick:6.0},{pos:0.90,thick:2.5},{pos:1.0,thick:2.0},
-];}
+// Default core thickness profile. The wood core proper runs between the tip and tail CONTACT points;
+// past the contacts it stays flat & thin (filler territory), so we taper to 2mm at each contact and
+// hold 2mm out to the ends. Two nodes are flagged `contact:'tail'|'tip'` — these are pinned to the
+// live contact positions (see syncCoreContacts) so they track the ski when tip/tail length changes.
+// The end nodes (pos 0 and 1) are flagged `end:true` and also stay pinned to 0/1.
+function makeDefaultCore(ski){
+  const L = ski ? ski.length : 1800;
+  const tailC = ski ? ski.tailLength : 170;
+  const tipC = ski ? (ski.length - ski.tipLength) : 1560;
+  const tailPos = tailC / L;         // tail contact, as a fraction of length
+  const tipPos = tipC / L;           // tip contact
+  const mid = (tailPos + tipPos) / 2;
+  // Interior rise nodes, spaced between the contacts (fractions of the contact-to-contact span).
+  const lerp = (a, b, t) => a + (b - a) * t;
+  return [
+    { pos: 0.0,   thick: 2.0, end: true },                 // tail end (flat 2mm past contact)
+    { pos: tailPos, thick: 2.0, contact: 'tail' },         // TAIL CONTACT — taper target
+    { pos: lerp(tailPos, mid, 0.45), thick: 6.0 },
+    { pos: lerp(tailPos, mid, 0.85), thick: 10.0 },
+    { pos: mid,   thick: 11.5 },                            // underfoot peak
+    { pos: lerp(tipPos, mid, 0.85), thick: 10.0 },
+    { pos: lerp(tipPos, mid, 0.45), thick: 6.0 },
+    { pos: tipPos, thick: 2.0, contact: 'tip' },           // TIP CONTACT — taper target
+    { pos: 1.0,   thick: 2.0, end: true },                 // tip end (flat 2mm past contact)
+  ];
+}
+
+// Keep the contact-flagged core nodes sitting exactly on the live contact positions, and the
+// end-flagged nodes pinned at 0/1. Call after any change to length / tipLength / tailLength.
+// Interior (unflagged) nodes are re-parameterised proportionally within the new contact span so a
+// dimension tweak doesn't shove them past a contact. Returns a new coreProfile array.
+function syncCoreContacts(ski){
+  const cp = ski.coreProfile;
+  if (!cp || !cp.length) return cp;
+  const L = ski.length;
+  const tailPos = ski.tailLength / L;
+  const tipPos = (L - ski.tipLength) / L;
+  // Old contact positions (from the flagged nodes) to remap interior nodes proportionally.
+  const oldTail = cp.find(n => n.contact === 'tail');
+  const oldTip = cp.find(n => n.contact === 'tip');
+  const oT = oldTail ? oldTail.pos : tailPos;
+  const oP = oldTip ? oldTip.pos : tipPos;
+  const span = (oP - oT) || 1;
+  return cp.map(n => {
+    if (n.end) return { ...n, pos: n.pos <= 0.5 ? 0.0 : 1.0 };
+    if (n.contact === 'tail') return { ...n, pos: tailPos };
+    if (n.contact === 'tip') return { ...n, pos: tipPos };
+    // interior: remap its fractional position within the old span onto the new span
+    const frac = (n.pos - oT) / span;
+    return { ...n, pos: tailPos + frac * (tipPos - tailPos) };
+  });
+}
 const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,metal:"none",carbon:"none",carbonLayers:1};
 const DEFAULT_SKI={
   designName: "Untitled Design",
@@ -135,7 +183,8 @@ const DEFAULT_SKI={
   edgeWrap:"full",  // "full" = edges wrap around tip/tail; "contact" = edges only tail-contact→tip-contact.
   edgeExtTip:0,     // mm. In contact mode, extend the edge past the TIP contact point toward the tip.
   edgeExtTail:0,    // mm. In contact mode, extend the edge past the TAIL contact point toward the tail.
-  coreInset:2.0,    // mm. Core top-profile width reduction per side for sidewall material.
+  coreInset:0,      // mm. Core top-profile width reduction per side for sidewall material. Default 0
+                    // (flush / cap-construction or wood sidewalls); users doing sidewalls set 5-10.
   tipNodesR:makeRoundedTip(),tipNodesL:makeRoundedTip(),
   tailNodesR:makeRoundedTail(),tailNodesL:makeRoundedTail(),
   tipSymmetric:true,tailSymmetric:true,
@@ -212,6 +261,26 @@ function parseDesignFile(jsonText) {
     return out;
   };
   ski = mergeDefaults(DEFAULT_SKI, ski);
+
+  // Migrate older core profiles that predate contact-pinned nodes: if none of the nodes carry a
+  // `contact`/`end` flag, flag the endpoints and the two nodes nearest the current contact points,
+  // then snap them onto the contacts. Existing thickness values are preserved; this just upgrades the
+  // profile so the new contact behaviour works. Skipped if the file already has flags.
+  if (Array.isArray(ski.coreProfile) && ski.coreProfile.length >= 2 &&
+      !ski.coreProfile.some(n => n.contact || n.end)) {
+    const cp = ski.coreProfile.map(n => ({ ...n }));
+    cp[0].end = true; cp[cp.length - 1].end = true;
+    const tailPos = ski.tailLength / ski.length;
+    const tipPos = (ski.length - ski.tipLength) / ski.length;
+    const nearest = (target) => {
+      let bi = 1, bd = Infinity;
+      for (let i = 1; i < cp.length - 1; i++) { const d = Math.abs(cp[i].pos - target); if (d < bd) { bd = d; bi = i; } }
+      return bi;
+    };
+    const ti = nearest(tailPos); cp[ti].contact = 'tail';
+    let pi = nearest(tipPos); if (pi === ti) pi = Math.min(cp.length - 2, ti + 1); cp[pi].contact = 'tip';
+    ski.coreProfile = syncCoreContacts({ ...ski, coreProfile: cp });
+  }
 
   if (newerFile) {
     // Newer file than this app knows about. Loaded above with defaults backfilled; warn the caller.
@@ -458,9 +527,12 @@ function rockerHeight(s, totalHeight) {
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
-  return{name,waistPosition:0.48,edgeInset:2.0,coreInset:2.0,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
+  const base={name,waistPosition:0.48,edgeInset:2.0,coreInset:0,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
     tipSymmetric:tipSym!==false,tailSymmetric:tailSym!==false,...profile,
     coreProfile:core||makeDefaultCore(),layup:layup||{...DEFAULT_LAYUP}};
+  // Pin the core's contact/end nodes to THIS preset's contact positions (its tip/tail length differ).
+  base.coreProfile = syncCoreContacts(base);
+  return base;
 }
 const rT=makeRoundedTip(),rTa=makeRoundedTail();
 // Spatula: extra-long forward tangent → curve stays wide for most of tip length, tightens fast at end
@@ -925,7 +997,7 @@ function exportCoreSideSVG(ski){
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
 function exportCorePlanDXF(ski){
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
   const planPts = [];
   for (let i = 0; i <= N; i++) {
@@ -968,7 +1040,7 @@ function exportCorePlanDXF(ski){
 }
 
 function exportCorePlanSVG(ski){
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
   const right = [], left = [];
   for (let i = 0; i <= N; i++) {
@@ -1094,7 +1166,7 @@ function exportRockerSVG(ski){
 // centered on their own horizontal band, and the side profile sits below, thickness growing upward.
 function buildCombinedGeometry(ski){
   const L = ski.length;
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 2.0;
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
   const edgeWrap = ski.edgeWrap || "full";
   const marks = getRegistrationMarks(ski);
@@ -2330,7 +2402,7 @@ function CoreView({ ski, setSki, width, height }) {
 
   const cps = useMemo(() => cp.map((n, i) => {
     const c = toC2(n.pos, n.thick);
-    return { id: `core_${i}`, cx: c.x, cy: c.y, idx: i };
+    return { id: `core_${i}`, cx: c.x, cy: c.y, idx: i, contact: n.contact, end: n.end };
   }), [cp, toC2]);
 
   useEffect(() => {
@@ -2354,6 +2426,22 @@ function CoreView({ ski, setSki, width, height }) {
       const p = toC2(0, mm);
       ctx.fillText(`${mm}`, padL - 4, p.y + 3);
     }
+
+    // Vertical CONTACT reference lines — mark where the running edge (and the structural wood core)
+    // begins and ends. Past these, the core is a thin flat tab / filler. These track the ski dims.
+    const tailContactPos = ski.tailLength / ski.length;
+    const tipContactPos = (ski.length - ski.tipLength) / ski.length;
+    [["TAIL CONTACT", tailContactPos], ["TIP CONTACT", tipContactPos]].forEach(([lbl, pos]) => {
+      const x = padL + pos * plotW;
+      ctx.strokeStyle = C.contactLine || "rgba(232,85,42,0.55)";
+      ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.contactLine || "rgba(232,85,42,0.8)";
+      ctx.font = "7px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
+    });
 
     // Smooth profile
     const nPts = 400;
@@ -2399,9 +2487,22 @@ function CoreView({ ski, setSki, width, height }) {
         ctx.fillStyle = "rgba(200,147,90,0.30)";
         ctx.fill();
       }
-      ctx.beginPath();
-      ctx.arc(cpObj.cx, cpObj.cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = isD ? C.controlActive : isH ? C.controlHover : C.coreNode;
+      const isContact = !!cpObj.contact;
+      const fill = isD ? C.controlActive
+        : isH ? C.controlHover
+        : isContact ? (C.contactLine || "#e8552a")   // contact taper targets stand out (torch)
+        : C.coreNode;
+      if (isContact) {
+        // Draw a diamond for the pinned contact taper nodes so they read as special.
+        ctx.beginPath();
+        ctx.moveTo(cpObj.cx, cpObj.cy - r); ctx.lineTo(cpObj.cx + r, cpObj.cy);
+        ctx.lineTo(cpObj.cx, cpObj.cy + r); ctx.lineTo(cpObj.cx - r, cpObj.cy);
+        ctx.closePath();
+      } else {
+        ctx.beginPath();
+        ctx.arc(cpObj.cx, cpObj.cy, r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = fill;
       ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = C.heading;
@@ -2435,7 +2536,11 @@ function CoreView({ ski, setSki, width, height }) {
       const dy = cur.thick - start.thick;
       const newCore = JSON.parse(JSON.stringify(dragStart.core));
       newCore[cpObj.idx].thick = clamp(dragStart.core[cpObj.idx].thick + dy, 0.5, 15);
-      if (cpObj.idx > 0 && cpObj.idx < newCore.length - 1) {
+      // Contact-pinned and end nodes move in THICKNESS only — their position is locked to the
+      // contact points / ends. Interior nodes can also slide horizontally.
+      const node = newCore[cpObj.idx];
+      const pinned = node.contact || node.end;
+      if (!pinned && cpObj.idx > 0 && cpObj.idx < newCore.length - 1) {
         const dx = cur.pos - start.pos;
         newCore[cpObj.idx].pos = clamp(
           dragStart.core[cpObj.idx].pos + dx,
@@ -2494,6 +2599,22 @@ function FlexView({ ski, flex, width, height }) {
     }
     ctx.strokeStyle = C.snow; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, baseYF); ctx.lineTo(padL + plotW, baseYF); ctx.stroke();
+
+    // Vertical CONTACT reference lines — same stations as the core view, so you can read stiffness
+    // relative to where the running edge / structural core begins and ends.
+    const tailContactPos = ski.tailLength / ski.length;
+    const tipContactPos = (ski.length - ski.tipLength) / ski.length;
+    [["TAIL CONTACT", tailContactPos], ["TIP CONTACT", tipContactPos]].forEach(([lbl, pos]) => {
+      const x = padL + pos * plotW;
+      ctx.strokeStyle = C.contactLine || "rgba(232,85,42,0.55)";
+      ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseYF); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.contactLine || "rgba(232,85,42,0.8)";
+      ctx.font = "7px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
+    });
 
     const drawSmoothCurve = (points, fillStyle, strokeStyle, lineWidth, glow) => {
       // Fill
@@ -2571,7 +2692,7 @@ function FlexView({ ski, flex, width, height }) {
     ctx.fillStyle = C.controlActive; ctx.font = "bold 9px 'JetBrains Mono', monospace";
     ctx.textAlign = "center";
     ctx.fillText(`${Math.round(pk.kCant)}`, pp.x, pp.y - 8);
-  }, [flex, width, height]);
+  }, [ski, flex, width, height]);
   return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
 }
 // ══════════════ FEEDBACK MODAL ══════════════
@@ -3032,7 +3153,15 @@ export default function App() {
       <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
       <input
         type="number" value={ski[param]} min={min} max={max} step={step || 1}
-        onChange={e => setSki(s => ({ ...s, [param]: parseFloat(e.target.value) || 0 }))}
+        onChange={e => setSki(s => {
+          const next = { ...s, [param]: parseFloat(e.target.value) || 0 };
+          // Contact positions depend on length / tipLength / tailLength — keep the contact-pinned
+          // core nodes sitting on the contacts when any of those change.
+          if (param === "length" || param === "tipLength" || param === "tailLength") {
+            next.coreProfile = syncCoreContacts(next);
+          }
+          return next;
+        })}
         style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
         onFocus={e => e.target.style.borderColor = C.inputFocus}
         onBlur={e => e.target.style.borderColor = C.inputBorder}
