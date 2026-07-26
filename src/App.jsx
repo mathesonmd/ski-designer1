@@ -132,19 +132,22 @@ function makeDefaultCore(ski){
   const tipC = ski ? (ski.length - ski.tipLength) : 1560;
   const tailPos = tailC / L;         // tail contact, as a fraction of length
   const tipPos = tipC / L;           // tip contact
-  const mid = (tailPos + tipPos) / 2;
-  // Interior rise nodes, spaced between the contacts (fractions of the contact-to-contact span).
-  const lerp = (a, b, t) => a + (b - a) * t;
+  // Thickness values across the running (contact-to-contact) region, tail→tip. The two ends are the
+  // pinned contact nodes at 2mm; the interior nodes rise to the underfoot peak. Positions are spread
+  // EVENLY between the contacts so the adjustment dots are uniformly distributed.
+  const runThk = [2.0, 6.0, 10.0, 11.5, 10.0, 6.0, 2.0];
+  const nSeg = runThk.length - 1;    // 6 segments → 7 evenly spaced nodes
+  const nodes = runThk.map((thick, i) => {
+    const pos = tailPos + (tipPos - tailPos) * (i / nSeg);
+    const node = { pos, thick };
+    if (i === 0) node.contact = 'tail';
+    if (i === nSeg) node.contact = 'tip';
+    return node;
+  });
   return [
-    { pos: 0.0,   thick: 2.0, end: true },                 // tail end (flat 2mm past contact)
-    { pos: tailPos, thick: 2.0, contact: 'tail' },         // TAIL CONTACT — taper target
-    { pos: lerp(tailPos, mid, 0.45), thick: 6.0 },
-    { pos: lerp(tailPos, mid, 0.85), thick: 10.0 },
-    { pos: mid,   thick: 11.5 },                            // underfoot peak
-    { pos: lerp(tipPos, mid, 0.85), thick: 10.0 },
-    { pos: lerp(tipPos, mid, 0.45), thick: 6.0 },
-    { pos: tipPos, thick: 2.0, contact: 'tip' },           // TIP CONTACT — taper target
-    { pos: 1.0,   thick: 2.0, end: true },                 // tip end (flat 2mm past contact)
+    { pos: 0.0, thick: 2.0, end: true },   // tail end (flat 2mm past contact)
+    ...nodes,
+    { pos: 1.0, thick: 2.0, end: true },   // tip end (flat 2mm past contact)
   ];
 }
 
@@ -179,6 +182,14 @@ const DEFAULT_SKI={
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
+  // Rocker takeoff (where the base lifts) vs contact point (widest point / sidecut extent).
+  // rockerLinked=true (default, Snocad-style): takeoff = contact, so the rocker/camber boundary in
+  // the side profile sits exactly at the tip/tail contact points. When false (advanced): the takeoff
+  // sits INBOARD of the contacts, set independently by tipRockerLen/tailRockerLen, so a published
+  // rocker % and a published sidecut radius can both be matched at once (they're different locations).
+  rockerLinked:true,
+  tipRockerLen:240,   // mm from tip end to rocker takeoff. When linked, mirrors tipLength.
+  tailRockerLen:170,  // mm from tail end to rocker takeoff. When linked, mirrors tailLength.
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
   edgeWrap:"full",  // "full" = edges wrap around tip/tail; "contact" = edges only tail-contact→tip-contact.
   edgeExtTip:0,     // mm. In contact mode, extend the edge past the TIP contact point toward the tip.
@@ -261,6 +272,18 @@ function parseDesignFile(jsonText) {
     return out;
   };
   ski = mergeDefaults(DEFAULT_SKI, ski);
+
+  // Rocker-link migration: files saved before the linked/unlinked feature won't have rockerLinked or
+  // the takeoff lengths. Default them to LINKED with takeoff = the file's own contacts, so old designs
+  // look and behave exactly as before (rocker begins at the contact points).
+  if (ski.rockerLinked === undefined) ski.rockerLinked = true;
+  if (ski.rockerLinked !== false) {
+    ski.tipRockerLen = ski.tipLength;
+    ski.tailRockerLen = ski.tailLength;
+  } else {
+    if (ski.tipRockerLen == null) ski.tipRockerLen = ski.tipLength;
+    if (ski.tailRockerLen == null) ski.tailRockerLen = ski.tailLength;
+  }
 
   // Migrate older core profiles that predate contact-pinned nodes: if none of the nodes carry a
   // `contact`/`end` flag, flag the endpoints and the two nodes nearest the current contact points,
@@ -521,6 +544,59 @@ function waistWidthForRadius(ski, radiusM){
   return avg - 2 * depth;
 }
 
+// ── Rocker-profile ↔ tip/tail-length conversions ──
+// Manufacturers publish the profile as three percentages of the OVERALL length: tip rocker / camber /
+// tail rocker (e.g. 20 / 64 / 16). These are just the zone lengths as % of length. The camber zone is
+// the running (contact-to-contact) edge; the tip/tail zones are the tipLength/tailLength here. So the
+// rocker percentages and tipLength/tailLength are two views of the same geometry, and both drive the
+// running edge that sets the sidecut radius.
+function rockerPercents(ski){
+  const tip = (ski.tipLength / ski.length) * 100;
+  const tail = (ski.tailLength / ski.length) * 100;
+  const camber = 100 - tip - tail;   // running edge as % of length
+  return { tip, camber, tail };
+}
+// Effective rocker-takeoff lengths (mm from each end). When rocker is LINKED to the contacts, the
+// takeoff equals the tip/tail length (Snocad-style: rocker begins at the contact/widest point). When
+// UNLINKED, the takeoff is the independent tipRockerLen/tailRockerLen — the base lifts inboard of the
+// contact, so the side-profile rocker/camber boundary and the top-down contact/radius are decoupled.
+function rockerTakeoffLens(ski){
+  if (ski.rockerLinked === false) {
+    return {
+      tip: ski.tipRockerLen != null ? ski.tipRockerLen : ski.tipLength,
+      tail: ski.tailRockerLen != null ? ski.tailRockerLen : ski.tailLength,
+    };
+  }
+  return { tip: ski.tipLength, tail: ski.tailLength };
+}
+// Rocker profile as % of length, based on the TAKEOFF points (what manufacturers publish). When
+// linked this equals rockerPercents(); when unlinked it reflects the independent takeoff lengths.
+function rockerProfilePercents(ski){
+  const t = rockerTakeoffLens(ski);
+  const tip = (t.tip / ski.length) * 100;
+  const tail = (t.tail / ski.length) * 100;
+  return { tip, camber: 100 - tip - tail, tail };
+}
+// Set tip/tail lengths from a tip% and tail% (camber% is the remainder). Returns a partial ski patch.
+function tipTailFromRocker(ski, tipPct, tailPct){
+  return {
+    tipLength: Math.round(ski.length * (tipPct / 100)),
+    tailLength: Math.round(ski.length * (tailPct / 100)),
+  };
+}
+// Set the running (effective) edge to a target mm by adjusting tip & tail lengths together, keeping
+// their current ratio so the profile balance is preserved. Returns a partial ski patch.
+function tipTailFromRunningEdge(ski, runMm){
+  const curTip = ski.tipLength, curTail = ski.tailLength;
+  const totalEnds = ski.length - runMm;              // combined tip+tail length needed
+  const curTotal = curTip + curTail || 1;
+  const tipFrac = curTip / curTotal;
+  return {
+    tipLength: Math.round(totalEnds * tipFrac),
+    tailLength: Math.round(totalEnds * (1 - tipFrac)),
+  };
+}
+
 // Side-profile rocker curve. Real ski tips/tails follow a smooth parabolic rise —
 // they begin curving immediately at the contact point and continue accelerating gradually
 // to the very end. NO leveling off, NO acute "hockey-stick" bend.
@@ -536,6 +612,26 @@ function waistWidthForRadius(ski, radiusM){
 // in commercial CNC ski-core molds, and exports cleanly to CAM software.
 function rockerHeight(s, totalHeight) {
   return totalHeight * s * s;
+}
+// Side-profile height (mm) at a given along-ski position (mm from tail end). Rocker rises from each
+// end to its takeoff point; camber arcs between the two takeoffs. The takeoff points are the contacts
+// when rocker is linked, or independent (inboard) points when unlinked — so this one function drives
+// the on-screen side view, the rocker DXF, and the combined export consistently in both modes.
+function sideProfileHeightAt(ski, xmm) {
+  const t = rockerTakeoffLens(ski);
+  const tailTakeoff = t.tail;                 // mm from tail end
+  const tipTakeoff = ski.length - t.tip;      // absolute x where tip rocker begins
+  if (xmm <= tailTakeoff) {
+    const s = tailTakeoff > 0 ? 1 - (xmm / tailTakeoff) : 0;
+    return rockerHeight(s, ski.tailHeight);
+  }
+  if (xmm >= tipTakeoff) {
+    const s = t.tip > 0 ? (xmm - tipTakeoff) / t.tip : 0;
+    return rockerHeight(s, ski.tipHeight);
+  }
+  const span = tipTakeoff - tailTakeoff;
+  const tt = span > 0 ? (xmm - tailTakeoff) / span : 0.5;
+  return ski.camberHeight * 4 * tt * (1 - tt);
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
@@ -1098,15 +1194,10 @@ function exportCorePlanSVG(ski){
 // Includes registration marks (vertical lines at tail contact, waist, tip contact) and a baseline.
 function exportRockerDXF(ski){
   const N = 400;
-  const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
   const pts = [];
   for (let i = 0; i <= N; i++) {
     const xmm = (i / N) * ski.length;
-    let ymm;
-    if (xmm <= tailC)        { const s = 1 - (xmm / tailC); ymm = rockerHeight(s, ski.tailHeight); }
-    else if (xmm >= tipC)    { const s = (xmm - tipC) / ski.tipLength; ymm = rockerHeight(s, ski.tipHeight); }
-    else                     { const t = (xmm - tailC) / (tipC - tailC); ymm = ski.camberHeight * 4 * t * (1 - t); }
-    pts.push({ x: xmm, y: ymm });
+    pts.push({ x: xmm, y: sideProfileHeightAt(ski, xmm) });
   }
   const marks = getRegistrationMarks(ski);
   const maxY = Math.max(...pts.map(p => p.y));
@@ -1137,15 +1228,10 @@ function exportRockerDXF(ski){
 
 function exportRockerSVG(ski){
   const N = 400;
-  const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
   const pts = [];
   for (let i = 0; i <= N; i++) {
     const xmm = (i / N) * ski.length;
-    let ymm;
-    if (xmm <= tailC)        { const s = 1 - (xmm / tailC); ymm = rockerHeight(s, ski.tailHeight); }
-    else if (xmm >= tipC)    { const s = (xmm - tipC) / ski.tipLength; ymm = rockerHeight(s, ski.tipHeight); }
-    else                     { const t = (xmm - tailC) / (tipC - tailC); ymm = ski.camberHeight * 4 * t * (1 - t); }
-    pts.push({ x: xmm, y: ymm });
+    pts.push({ x: xmm, y: sideProfileHeightAt(ski, xmm) });
   }
   const maxY = Math.max(...pts.map(p => p.y));
   const L = ski.length, pad = 10;
@@ -1306,6 +1392,12 @@ function exportCombinedDXF(ski){
   row("Tip length (shovel)", `${ski.tipLength}`);
   row("Tail length", `${ski.tailLength}`);
   row("Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`);
+  const rk = rockerPercents(ski);
+  row("Rocker profile (T/C/T %)", `${rk.tip.toFixed(0)} / ${rk.camber.toFixed(0)} / ${rk.tail.toFixed(0)}`);
+  if (ski.rockerLinked === false) {
+    const rp = rockerProfilePercents(ski);
+    row("Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`);
+  }
   row("Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`);
   row("Tip height (rocker)", `${ski.tipHeight}`);
   row("Tail height (rocker)", `${ski.tailHeight}`);
@@ -1376,6 +1468,7 @@ function exportCombinedSVG(ski){
     ["Tip length (shovel)", `${ski.tipLength}`],
     ["Tail length", `${ski.tailLength}`],
     ["Running edge", `${derived.effectiveEdge.toFixed(0)}`],
+    ["Rocker T/C/T %", `${rockerPercents(ski).tip.toFixed(0)}/${rockerPercents(ski).camber.toFixed(0)}/${rockerPercents(ski).tail.toFixed(0)}`],
     ["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`],
     ["Tip height", `${ski.tipHeight}`],
     ["Tail height", `${ski.tailHeight}`],
@@ -2300,29 +2393,13 @@ function ProfileView({ ski, width, height }) {
     ctx.lineTo(padX + plotW, baseY);
     ctx.stroke();
 
-    // Build the profile points using the new rockerHeight() formula which gives a continuous,
-    // upward-curving rise (no leveling off at the very ends).
-    const tailC = TAIL, tipC = L - TL, runL = tipC - tailC;
+    // Build the profile points via the shared side-profile function so the rocker takeoff points
+    // (linked to contacts, or independent when unlinked) are honored consistently with the exports.
     const pts = [];
     const n = 400;
     for (let i = 0; i <= n; i++) {
       const xmm = (i / n) * L;
-      let ymm;
-      if (xmm <= tailC) {
-        // Tail rocker: rise from 0 at the contact (xmm=tailC) up to TAH at the tail-end (xmm=0).
-        // Define s so that s=0 at contact and s=1 at tail-end — same convention as the tip.
-        const s = 1 - (xmm / tailC);
-        ymm = rockerHeight(s, TAH);
-      } else if (xmm >= tipC) {
-        // Tip rocker: from 0 at xmm=tipC up to tipHeight at xmm=L.
-        const s = (xmm - tipC) / TL;  // s=0 at contact, s=1 at tip-end
-        ymm = rockerHeight(s, TH);
-      } else {
-        // Camber arch in the middle
-        const t = (xmm - tailC) / runL;
-        ymm = CH * 4 * t * (1 - t);
-      }
-      pts.push(toC(xmm, ymm));
+      pts.push(toC(xmm, sideProfileHeightAt(ski, xmm)));
     }
 
     // Fill profile
@@ -2364,7 +2441,11 @@ function ProfileView({ ski, width, height }) {
     };
     drawV(0, TAH, "left");
     drawV(L, TH, "right");
-    if (CH > 0) drawV(tailC + runL/2, CH, "center");
+    if (CH > 0) {
+      const tk = rockerTakeoffLens(ski);
+      const camberMidX = (tk.tail + (L - tk.tip)) / 2;  // midpoint between takeoffs (camber peak)
+      drawV(camberMidX, CH, "center");
+    }
 
     ctx.fillStyle = C.dimText;
     ctx.font = "10px 'JetBrains Mono', monospace";
@@ -2984,6 +3065,152 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   );
 }
 
+// ══════════════ RUNNING EDGE FIELD ══════════════
+// Editable running (contact-to-contact) edge in mm. Typing a value splits the change across tip &
+// tail lengths (keeping their ratio) so the contact points move to give that running edge, then
+// re-syncs the core contact nodes. Displays live and mirrors any other dimension change.
+function RunningEdgeField({ ski, setSki, C }) {
+  const liveEE = ski.length - ski.tipLength - ski.tailLength;
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState(false);
+  const shown = editing ? text : String(Math.round(liveEE));
+
+  const commit = (raw) => {
+    const mm = parseFloat(raw);
+    setEditing(false);
+    if (!isFinite(mm) || mm <= 0) return;
+    // Keep the running edge within what tip+tail can physically allow (leave at least 40mm each end).
+    const clamped = Math.max(200, Math.min(ski.length - 80, mm));
+    setSki(s => {
+      const patch = tipTailFromRunningEdge(s, clamped);
+      const next = { ...s, ...patch };
+      next.coreProfile = syncCoreContacts(next);
+      return next;
+    });
+  };
+
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+        Running Edge (mm)
+      </div>
+      <input
+        type="number" min={200} max={2000} step={5}
+        value={shown}
+        onFocus={e => { setEditing(true); setText(String(Math.round(liveEE))); e.target.style.borderColor = C.inputFocus; }}
+        onChange={e => setText(e.target.value)}
+        onBlur={e => { commit(e.target.value); e.target.style.borderColor = C.inputBorder; }}
+        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
+      />
+    </div>
+  );
+}
+
+// ══════════════ ROCKER PROFILE FIELD ══════════════
+// Three percentages of overall length: tip rocker / camber / tail rocker (e.g. 20 / 64 / 16) — the way
+// manufacturers publish a profile. A LINK toggle controls what the percentages drive:
+//   • Linked (default, Snocad-style): rocker takeoff = contact point. Editing % moves the tip/tail
+//     lengths (and thus the contacts and the sidecut radius). Simple and familiar.
+//   • Unlinked (advanced): rocker takeoff is independent and sits inboard of the contact. Editing %
+//     moves ONLY the rocker takeoff (the side-profile lift point); the contacts, widths, and sidecut
+//     radius are untouched. This lets you match a published rocker % AND a published radius at once —
+//     which is impossible when they're linked, because on a real ski those are different locations.
+function RockerProfileField({ ski, setSki, C }) {
+  const linked = ski.rockerLinked !== false;
+  const live = linked ? rockerPercents(ski) : rockerProfilePercents(ski);
+  const [tipT, setTipT] = useState(""); const [tailT, setTailT] = useState("");
+  const [editing, setEditing] = useState(null); // 'tip' | 'tail' | null
+
+  const tipShown = editing === 'tip' ? tipT : live.tip.toFixed(0);
+  const tailShown = editing === 'tail' ? tailT : live.tail.toFixed(0);
+  const camberShown = Math.max(0, 100 - parseFloat(tipShown || live.tip) - parseFloat(tailShown || live.tail));
+
+  const commit = (which, raw) => {
+    const v = parseFloat(raw);
+    setEditing(null);
+    if (!isFinite(v) || v < 0) return;
+    setSki(s => {
+      const isLinked = s.rockerLinked !== false;
+      const cur = isLinked ? rockerPercents(s) : rockerProfilePercents(s);
+      const tipPct = which === 'tip' ? v : cur.tip;
+      const tailPct = which === 'tail' ? v : cur.tail;
+      if (tipPct + tailPct > 90) return s;  // leave some camber zone
+      if (isLinked) {
+        // Move the contacts (tip/tail length), keep takeoff mirrored, resync core.
+        const patch = tipTailFromRocker(s, tipPct, tailPct);
+        const next = { ...s, ...patch, tipRockerLen: patch.tipLength, tailRockerLen: patch.tailLength };
+        next.coreProfile = syncCoreContacts(next);
+        return next;
+      }
+      // Unlinked: move only the rocker takeoff lengths (side profile), leave contacts/radius alone.
+      return {
+        ...s,
+        tipRockerLen: Math.round(s.length * (tipPct / 100)),
+        tailRockerLen: Math.round(s.length * (tailPct / 100)),
+      };
+    });
+  };
+
+  const toggleLink = () => setSki(s => {
+    const goingUnlinked = s.rockerLinked !== false;   // currently linked → will unlink
+    if (goingUnlinked) {
+      // Seed the independent takeoff from the current contacts so nothing visually jumps.
+      return { ...s, rockerLinked: false, tipRockerLen: s.tipLength, tailRockerLen: s.tailLength };
+    }
+    // Re-linking: snap takeoff back to the contacts.
+    return { ...s, rockerLinked: true, tipRockerLen: s.tipLength, tailRockerLen: s.tailLength };
+  });
+
+  const cellStyle = { flex: 1, minWidth: 0 };
+  const inputStyle = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", textAlign: "center" };
+  const subLabel = { color: C.labelDim, fontSize: 9, textAlign: "center", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" };
+
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+          Rocker Profile (% of length)
+        </span>
+        <button onClick={toggleLink} title={linked ? "Rocker takeoff is locked to the contact points (Snocad-style). Click to unlink." : "Rocker takeoff is independent of the contacts (advanced). Click to relink."}
+          style={{ background: linked ? "transparent" : (C.contactLine || "#e8552a") + "22", border: `1px solid ${linked ? C.inputBorder : (C.contactLine || "#e8552a")}`, borderRadius: 3, padding: "2px 7px", color: linked ? C.labelDim : (C.contactLine || "#e8552a"), fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>
+          {linked ? "🔗 Linked" : "⛓ Unlinked"}
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 5 }}>
+        <div style={cellStyle}>
+          <input type="number" min={0} max={45} step={1} value={tipShown}
+            onFocus={e => { setEditing('tip'); setTipT(live.tip.toFixed(0)); e.target.style.borderColor = C.inputFocus; }}
+            onChange={e => setTipT(e.target.value)}
+            onBlur={e => { commit('tip', e.target.value); e.target.style.borderColor = C.inputBorder; }}
+            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+            style={inputStyle} />
+          <div style={subLabel}>TIP</div>
+        </div>
+        <div style={cellStyle}>
+          <input type="number" value={camberShown.toFixed(0)} disabled readOnly
+            style={{ ...inputStyle, color: C.labelDim, cursor: "default", opacity: 0.8 }} />
+          <div style={subLabel}>CAMBER</div>
+        </div>
+        <div style={cellStyle}>
+          <input type="number" min={0} max={45} step={1} value={tailShown}
+            onFocus={e => { setEditing('tail'); setTailT(live.tail.toFixed(0)); e.target.style.borderColor = C.inputFocus; }}
+            onChange={e => setTailT(e.target.value)}
+            onBlur={e => { commit('tail', e.target.value); e.target.style.borderColor = C.inputBorder; }}
+            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+            style={inputStyle} />
+          <div style={subLabel}>TAIL</div>
+        </div>
+      </div>
+      <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+        {linked
+          ? "Linked: % sets tip/tail length (moves contacts + radius)."
+          : "Unlinked: % sets rocker takeoff only. Contacts + radius stay fixed."}
+      </div>
+    </div>
+  );
+}
+
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
@@ -3214,6 +3441,11 @@ export default function App() {
           // core nodes sitting on the contacts when any of those change.
           if (param === "length" || param === "tipLength" || param === "tailLength") {
             next.coreProfile = syncCoreContacts(next);
+            // When rocker is linked to the contacts, the takeoff follows the tip/tail length.
+            if (next.rockerLinked !== false) {
+              next.tipRockerLen = next.tipLength;
+              next.tailRockerLen = next.tailLength;
+            }
           }
           return next;
         })}
@@ -3575,10 +3807,12 @@ export default function App() {
           <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={50} WAIST_MAX={180} />
           {inputField("Tip Len", "tipLength", 80, 500)}
           {inputField("Tail Len", "tailLength", 60, 400)}
+          <RunningEdgeField ski={ski} setSki={setSki} C={C} />
           {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.sideProfile} onToggle={() => toggleSection("sideProfile")} title="Side Profile">
+          <RockerProfileField ski={ski} setSki={setSki} C={C} />
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
           {inputField("Camber", "camberHeight", 0, 10, 0.5)}
