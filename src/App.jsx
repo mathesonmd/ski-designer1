@@ -191,6 +191,13 @@ const DEFAULT_SKI={
   stanceWidth:560,   // mm, center-to-center of the two binding insert packs (rider reference stance).
   setback:0,         // mm the stance center sits BEHIND the effective-edge center (0 = true twin).
   insertPattern:"2x4", // "2x4" (40mm across × 20mm along, modern standard), "4x4" (40×40), "channel".
+  // ── Core tip/tail V-cut fill (skis + boards) ──
+  // A symmetric V notch where the wood core ENDS: base runs edge-to-edge across the core at the
+  // contact point, two equal sides converge to an apex pointing toward the tip/tail end. The
+  // triangular region beyond the V is fill material. Each end is independent (on/off + extension mm
+  // past the contact toward the end).
+  vcutTip:false, vcutTipExt:120,
+  vcutTail:false, vcutTailExt:120,
   // Rocker takeoff (where the base lifts) vs contact point (widest point / sidecut extent).
   // rockerLinked=true (default, Snocad-style): takeoff = contact, so the rocker/camber boundary in
   // the side profile sits exactly at the tip/tail contact points. When false (advanced): the takeoff
@@ -1319,18 +1326,24 @@ function exportCoreSideSVG(ski){
 function exportCorePlanDXF(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
-  const planPts = [];
-  for (let i = 0; i <= N; i++) {
-    const pos = i / N;
-    const xmm = pos * ski.length;
-    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-    planPts.push({ x: halfW, y: xmm });
-  }
-  for (let i = N; i >= 0; i--) {
-    const pos = i / N;
-    const xmm = pos * ski.length;
-    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-    planPts.push({ x: -halfW, y: xmm });
+  let planPts;
+  if (ski.vcutTip || ski.vcutTail) {
+    // V-cut core: use the shared helper (X=length space) and swap to this export's X=width/Y=length.
+    planPts = applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }));
+  } else {
+    planPts = [];
+    for (let i = 0; i <= N; i++) {
+      const pos = i / N;
+      const xmm = pos * ski.length;
+      const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+      planPts.push({ x: halfW, y: xmm });
+    }
+    for (let i = N; i >= 0; i--) {
+      const pos = i / N;
+      const xmm = pos * ski.length;
+      const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+      planPts.push({ x: -halfW, y: xmm });
+    }
   }
   const marks = getRegistrationMarks(ski);
 
@@ -1344,6 +1357,16 @@ function exportCorePlanDXF(ski){
 
   // Closed core outline
   dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts, true);
+
+  // V-cut note: mark the fill triangle(s) so the builder knows the core ends at the V.
+  if (ski.vcutTip) {
+    const apexY = (ski.length - ski.tipLength) + (ski.vcutTipExt || 0);
+    dxf += dxfText('TEXT', 6, Math.min(apexY, ski.length - 4), 6, "TIP V-CUT (fill beyond)");
+  }
+  if (ski.vcutTail) {
+    const apexY = ski.tailLength - (ski.vcutTailExt || 0);
+    dxf += dxfText('TEXT', 6, Math.max(apexY, 8), 6, "TAIL V-CUT (fill beyond)");
+  }
 
   // Vertical centerline
   dxf += dxfLine('CENTERLINE', 0, 0, 0, ski.length);
@@ -1468,6 +1491,50 @@ function exportRockerSVG(ski){
   downloadFile(svg, `bcs-ski-rocker-${ski.length}mm.svg`, "image/svg+xml");
 }
 
+// Apply the tip/tail V-cut to a core outline expressed as right/left rails in X=length space
+// (arrays of {x,y}, x along ski 0→L, y = ±half-width). Where a V-cut is enabled, the core is
+// TERMINATED in an isosceles V: base edge-to-edge at the contact, apex on the centerline extending
+// `ext` mm toward that end. Points beyond the contact are dropped (that triangular region is fill).
+// Returns a single closed loop of points. `coreInset` matches how the rails were built.
+function applyVCutToCore(ski) {
+  const L = ski.length;
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
+  const tailContactX = ski.tailLength;
+  const tipContactX = L - ski.tipLength;
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const tipExt = ski.vcutTipExt || 0, tailExt = ski.vcutTailExt || 0;
+  const hwAt = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+
+  // Sample the core rails only within the (possibly clipped) X range.
+  const xStart = vTail ? tailContactX : 0;
+  const xEnd = vTip ? tipContactX : L;
+  const N = 200;
+  const rightRail = [], leftRail = [];
+  for (let i = 0; i <= N; i++) {
+    const xmm = xStart + (xEnd - xStart) * (i / N);
+    const hw = hwAt(xmm);
+    rightRail.push({ x: xmm, y: hw });
+    leftRail.push({ x: xmm, y: -hw });
+  }
+
+  // Build the closed loop. Order: right rail (tail→tip), tip cap, left rail (tip→tail), tail cap.
+  const loop = [];
+  // Right rail tail→tip
+  rightRail.forEach(p => loop.push(p));
+  // Tip end
+  if (vTip) {
+    // from right contact → apex (pointing toward tip) → left contact
+    loop.push({ x: tipContactX + tipExt, y: 0 });
+  }
+  // Left rail tip→tail (reverse)
+  for (let i = leftRail.length - 1; i >= 0; i--) loop.push(leftRail[i]);
+  // Tail end
+  if (vTail) {
+    loop.push({ x: tailContactX - tailExt, y: 0 });
+  }
+  return loop;
+}
+
 // ══════════════ COMBINED "ALL VIEWS" EXPORT ══════════════
 // One file containing the base outline, the core outline (core-inset), and the core-side thickness
 // profile — all aligned on the same length (X) axis and vertically stacked with a small gap, so a
@@ -1500,7 +1567,7 @@ function buildCombinedGeometry(ski){
     }
   }
 
-  // Core outline (core-inset), X=length.
+  // Core outline (core-inset), X=length. When a tip/tail V-cut is enabled the core terminates in a V.
   const N = 200;
   const coreR = [], coreL = [];
   for (let i = 0; i <= N; i++) {
@@ -1509,7 +1576,9 @@ function buildCombinedGeometry(ski){
     coreR.push({ x: xmm, y: hw });
     coreL.push({ x: xmm, y: -hw });
   }
-  const coreLoopPts = coreR.concat(coreL.slice().reverse());
+  const coreLoopPts = (ski.vcutTip || ski.vcutTail)
+    ? applyVCutToCore(ski)
+    : coreR.concat(coreL.slice().reverse());
 
   // Core side profile (X=length, Y=thickness).
   const sideTop = [];
@@ -1850,11 +1919,11 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     // Note: dedicated tip/tail width handles were removed — the bezier contact-nodes (idx 0)
     // now handle dimension edits (along-ski drag → tipLength/tailLength; lateral → tipWidth/tailWidth),
     // so separate width handles were redundant at contact points.
-    // Waist dots are KEPT and editable — the `"width"` type drag handler responds only to lateral
-    // motion (it uses dSkiX, ignoring dSkiY), so the waist position stays fixed fore/aft. Width
-    // changes via these dots OR via the sidebar input — either way only waistWidth changes.
-    cps.push({ id:"ww_r",  skiX: ski.waistWidth/2, skiY: waistY, type:"width", param:"waistWidth", mult:2,  frames:["main"] });
-    cps.push({ id:"ww_l",  skiX:-ski.waistWidth/2, skiY: waistY, type:"width", param:"waistWidth", mult:-2, frames:["main"] });
+    // Waist dots are editable in BOTH axes: lateral drag → waistWidth, along-ski drag → waistPosition
+    // (so you can slide the waist fore/aft right on the plan view instead of hunting for the sidebar
+    // setting). Handled by the dedicated "waist" drag type below.
+    cps.push({ id:"ww_r",  skiX: ski.waistWidth/2, skiY: waistY, type:"waist", param:"waistWidth", mult:2,  frames:["main"] });
+    cps.push({ id:"ww_l",  skiX:-ski.waistWidth/2, skiY: waistY, type:"waist", param:"waistWidth", mult:-2, frames:["main"] });
 
     // Bezier nodes and tangent handles — handles ONLY appear in zoom panels (not main view)
     // to keep the main view uncluttered.
@@ -1971,6 +2040,35 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
         const s = toMain(x, y);
         ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill();
       });
+    }
+
+    // ── V-cut core-fill preview ──────────────────────────────────
+    // Only shown when a tip/tail V-cut is enabled (keeps the view clean otherwise). Draws the core
+    // outline terminating in the V at the cut end(s), in brass, so you can see where the wood core
+    // ends and the fill triangle begins.
+    if (ski.vcutTip || ski.vcutTail) {
+      const loop = applyVCutToCore(ski);   // X=length space; swap to plan (skiX=y, skiY=x)
+      ctx.save();
+      ctx.strokeStyle = C.coreStroke || "#c8935a";
+      ctx.lineWidth = 1.6; ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      loop.forEach((p, i) => {
+        const s = toMain(p.y, p.x);   // p.x is along-length, p.y is lateral → toMain(lateral, along)
+        if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+      });
+      ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+      // Label the fill triangles
+      ctx.fillStyle = C.coreStroke || "#c8935a";
+      ctx.font = "8px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+      if (ski.vcutTip) {
+        const apex = toMain(0, (ski.length - ski.tipLength) + (ski.vcutTipExt || 0));
+        ctx.fillText("FILL", apex.x, apex.y - 4);
+      }
+      if (ski.vcutTail) {
+        const apex = toMain(0, ski.tailLength - (ski.vcutTailExt || 0));
+        ctx.fillText("FILL", apex.x, apex.y + 10);
+      }
+      ctx.restore();
     }
 
     // ── Edge offset preview (live) ──────────────────────────────
@@ -2517,6 +2615,18 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
         ?  (mx - dragStart.mx) / scalePx   // vertical: moving right on screen = increasing skiX (right of centerline)
         :  (my - dragStart.my) / scalePx;  // horizontal: moving down = increasing skiX
 
+      if (cp.type === "waist") {
+        // Lateral drag → waistWidth; along-ski drag → waistPosition (0.30–0.70).
+        const ee = dragStart.ski.length - dragStart.ski.tipLength - dragStart.ski.tailLength;
+        const startWP = dragStart.ski.waistPosition !== undefined ? dragStart.ski.waistPosition : 0.48;
+        setSki(s => ({
+          ...s,
+          waistWidth: clamp(Math.round(dragStart.ski.waistWidth + dSkiX * cp.mult), 50, 320),
+          waistPosition: ee > 0 ? clamp(startWP + dSkiY / ee, 0.30, 0.70) : startWP,
+        }));
+        return;
+      }
+
       if (cp.type === "width") {
         setSki(s => ({ ...s, [cp.param]: clamp(Math.round(dragStart.ski[cp.param] + dSkiX * cp.mult), 50, 220) }));
         return;
@@ -2536,31 +2646,22 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
 
       const newNodes = JSON.parse(JSON.stringify(nodes));
       if (cp.type.includes("Tangent")) {
-        // Tangent handle drag — pure bezier shape edit, no dimension changes.
-        let ntx = nodes[cp.idx].tx + dNx;
-        let nty = nodes[cp.idx].ty + dNy;
-        // ── Angle detents ── Snap the handle's PHYSICAL direction to notable angles (0/45/90/…)
-        // when within a few degrees, so you can't accidentally sit 1° past 90° and get a dimple.
-        // Convert normalized tangent → physical vector (mm) to measure the true on-ski angle.
-        const physX = ntx * wHalf * sign;
-        const physY = nty * ySpan;
-        const mag = Math.hypot(physX, physY);
-        let angleDeg = Math.atan2(physY, physX) * 180 / Math.PI;   // -180..180
-        let snapped = false;
+        // Tangent handle drag — pure bezier shape edit, no dimension changes. The handle follows the
+        // cursor 1:1 (no forced snapping — that fought the drag). We only REPORT the physical angle so
+        // you can see when you cross 90° (past which the curve can dimple), and flag when you're
+        // sitting within a couple degrees of a notable angle.
+        const ntx = nodes[cp.idx].tx + dNx;
+        const nty = nodes[cp.idx].ty + dNy;
+        // Physical direction of the handle on the ski (mm space). Screen angle: atan2(lateral, along).
+        const physAlong = nty * ySpan;              // along-ski component (mm)
+        const physLat = ntx * wHalf * sign;          // lateral component (mm)
+        const mag = Math.hypot(physAlong, physLat);
         if (mag > 1e-6) {
-          const detents = [-180, -135, -90, -45, 0, 45, 90, 135, 180];
-          const SNAP_DEG = 4;
-          let best = null, bestD = SNAP_DEG;
-          detents.forEach(d => { const diff = Math.abs(((angleDeg - d + 540) % 360) - 180); const dd = 180 - diff; if (dd < bestD) { bestD = dd; best = d; } });
-          if (best !== null) {
-            angleDeg = best; snapped = true;
-            const rad = best * Math.PI / 180;
-            const sx = Math.cos(rad) * mag, sy = Math.sin(rad) * mag;
-            ntx = (sx / wHalf) * sign;
-            nty = sy / ySpan;
-          }
+          let deg = Math.atan2(physLat, physAlong) * 180 / Math.PI;  // 0° = straight along ski toward end
+          deg = ((deg % 360) + 360) % 360;
+          const near = [0, 45, 90, 135, 180, 225, 270, 315, 360].some(d => Math.abs(((deg - d + 540) % 360) - 180) < 2.5);
+          setHandleAngle({ deg: Math.round(deg), snapped: near });
         }
-        setHandleAngle({ deg: Math.round(((angleDeg % 360) + 360) % 360), snapped });
         newNodes[cp.idx].tx = ntx;
         newNodes[cp.idx].ty = nty;
         const updates = { [arrKey]: newNodes };
@@ -3779,6 +3880,7 @@ export default function App() {
     presets: true,
     dimensions: true,
     snowboard: true,
+    coreFill: false,
     sideProfile: false,
     symmetry: false,
     layup: false,
@@ -4397,6 +4499,24 @@ export default function App() {
         <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
           {toggleBtn("Tip Symmetric", "tipSymmetric")}
           {toggleBtn("Tail Symmetric", "tailSymmetric")}
+        </AccordionSection>
+
+        <AccordionSection isOpen={sectionsOpen.coreFill !== false} onToggle={() => toggleSection("coreFill")}
+          title="Core Fill (V-cut)"
+          accent={<InfoBubble C={C} width={250}>
+            The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
+            across the core at the contact point, and the two sides converge to an apex pointing toward
+            the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
+            extension sets how far the apex reaches past the contact. Shows in the Core view and exports
+            to the Core / Combined DXF.
+          </InfoBubble>}>
+          {toggleBtn("Tip V-cut", "vcutTip")}
+          {ski.vcutTip && inputField("Tip ext (mm)", "vcutTipExt", 10, Math.max(20, ski.tipLength))}
+          {toggleBtn("Tail V-cut", "vcutTail")}
+          {ski.vcutTail && inputField("Tail ext (mm)", "vcutTailExt", 10, Math.max(20, ski.tailLength))}
+          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Core terminates at the V; region beyond is fill. Preview in the Core view.
+          </div>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
