@@ -3595,8 +3595,10 @@ export default function App() {
   }, [ski]);
 
   const handleSave = useCallback(() => {
-    if (!ski.designName || ski.designName === "Untitled Design") {
-      const name = window.prompt("Name this design before saving:", "My Ski Design");
+    const isBoard = ski.mode === "snowboard";
+    const isUnnamed = !ski.designName || ski.designName === "Untitled Design" || ski.designName === "Untitled Board";
+    if (isUnnamed) {
+      const name = window.prompt("Name this design before saving:", isBoard ? "My Snowboard" : "My Ski Design");
       if (!name) return;
       const named = { ...ski, designName: name };
       setSki(named);
@@ -3919,7 +3921,8 @@ export default function App() {
           {!isCompact && <div style={{ width: 1, height: 26, background: C.panelBorder, flexShrink: 0 }} />}
           <div style={{ overflow: "hidden" }}>
             <div style={{ color: C.label, fontSize: 11, letterSpacing: "0.22em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              Ski Designer{ski.designName && ski.designName !== "Untitled Design" ? ` · ${ski.designName}` : ""}
+              {(ski.mode === "snowboard" ? "Snowboard Designer" : "Ski Designer")}
+              {ski.designName && ski.designName !== "Untitled Design" && ski.designName !== "Untitled Board" ? ` · ${ski.designName}` : ""}
             </div>
           </div>
         </div>
@@ -4122,7 +4125,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 10, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
-              <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>.bcski</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
+              <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
               <b style={{ color: C.heading }}>What comes next?</b> The exported DXFs are cut on a CNC (the Base file runs as one continuous drag-knife path), and the Core Side profile shapes the wood core for pressing. See External Tools for cutting and press notes.
             </div>
           </div>
@@ -4166,7 +4169,7 @@ export default function App() {
             </>
           )}
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
-            Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>.bcski</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
+            Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
           </div>
         </AccordionSection>
 
@@ -4464,4 +4467,4 @@ export default function App() {
       />
     </div>
   );
-} 
+}
