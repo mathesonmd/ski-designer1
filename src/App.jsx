@@ -58,6 +58,12 @@ const WOODS = {
 const GLASS = {
   triax23:{name:"Triax 23oz",E:26900,thick:0.57},triax19:{name:"Triax 19oz",E:24200,thick:0.48},
   biax:{name:"Biaxial \u00B145",E:12000,thick:0.45},
+  // bcomp natural-fibre flax (ampliTex). Laminate moduli from bcomp/measured data (see notes):
+  //  - 2x2 twill 0/90 (e.g. 5040): ~9 GPa tensile / 7 GPa flexural at ~40% Vf. Replaces 495gsm glass 0/90.
+  //  - UD 0° (e.g. 5009): ~11 GPa along fibres. Replaces 500gsm glass UD. User uses it for tip/tail torsion.
+  // Flax is damper and softer than glass — these lower E values reflect the real, mellower ride.
+  flaxTwill:{name:"Flax 2\u00D72 Twill (bcomp)",E:9000,thick:0.45},
+  flaxUD:{name:"Flax UD (bcomp)",E:11000,thick:0.35},
 };
 const METALS = {
   none:{name:"None",E:0,thick:0},titanal:{name:"Titanal 0.4mm",E:71700,thick:0.4},
@@ -4536,9 +4542,9 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
-          {selectField("Fiberglass", ski.layup.glass, GLASS, v => setLayup("glass", v))}
+          {selectField("Fiber Layer", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 7 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Glass Layers / side</div>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Fiber Layers / side</div>
             <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
               onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
               style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
