@@ -1001,6 +1001,47 @@ ${refMarks}
 }
 
 // ══════════════ PLAN DXF EXPORT ══════════════
+// Appends the measurements table (as TEXT rows) to a DXF string, on the 'TABLE' layer, with its top
+// at (tblX, tblTopY). Shared by the combined AND base exports so both carry identical spec data.
+// Returns the DXF text to append.
+function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
+  const derived = computeDerived(ski);
+  const edgeWrap = ski.edgeWrap || "full";
+  const rowH = 16, th = 7;
+  let tblY = tblTopY;
+  let out = dxfText('TABLE', tblX, tblY + rowH, 9, "MEASUREMENTS (mm)");
+  const row = (label, value) => {
+    out += dxfText('TABLE', tblX, tblY, th, label);
+    out += dxfText('TABLE', tblX + 190, tblY, th, value);
+    tblY -= rowH;
+  };
+  row("Overall length", `${ski.length}`);
+  row("Tip width", `${ski.tipWidth}`);
+  row("Waist width", `${ski.waistWidth}`);
+  row("Tail width", `${ski.tailWidth}`);
+  row("Tip length (shovel)", `${ski.tipLength}`);
+  row("Tail length", `${ski.tailLength}`);
+  row("Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`);
+  const rk = rockerPercents(ski);
+  row("Rocker profile (T/C/T %)", `${rk.tip.toFixed(0)} / ${rk.camber.toFixed(0)} / ${rk.tail.toFixed(0)}`);
+  if (ski.rockerLinked === false) {
+    const rp = rockerProfilePercents(ski);
+    row("Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`);
+  }
+  row("Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`);
+  row("Tip height (rocker)", `${ski.tipHeight}`);
+  row("Tail height (rocker)", `${ski.tailHeight}`);
+  row("Camber height", `${ski.camberHeight}`);
+  row("Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`);
+  row("Edge inset", `${ski.edgeInset}`);
+  row("Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap");
+  if (edgeWrap === "contact") {
+    row("Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`);
+  }
+  if (extra.coreInset !== undefined) row("Core inset", `${extra.coreInset}`);
+  return out;
+}
+
 function exportPlanDXF(ski){
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
   const edgeWrap = ski.edgeWrap || "full";
@@ -1015,6 +1056,7 @@ function exportPlanDXF(ski){
     { name: 'CENTERLINE', color: 5 },
     { name: 'REFERENCE', color: 1 },
     { name: 'TEXT', color: 2 },
+    { name: 'TABLE', color: 2 },
   ];
   let dxf = dxfStart(layers);
 
@@ -1044,6 +1086,10 @@ function exportPlanDXF(ski){
     dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
     dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
   });
+
+  // Measurements table — to the right of the ski outline, same spec data as the combined export.
+  const maxHalfW = Math.max(...pts.map(p => Math.abs(p.x)));
+  dxf += buildMeasurementsTable(ski, maxHalfW + 60, ski.length, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-plan-${ski.length}mm.dxf`, "application/dxf");
@@ -1398,40 +1444,8 @@ function exportCombinedDXF(ski){
   // Core side: in the gap between the core and side bands (just above the side profile).
   dxf += dxfText('LABEL', lblX, sideYoff + maxThick + 12, lblH, "CORE SIDE: thickness taper (flat bottom)");
 
-  // ── MEASUREMENTS TABLE ── (as TEXT rows to the right of the drawing)
-  const tblX = L + 60;
-  let tblY = baseYoff + halfBaseW;       // start near the top
-  const rowH = 16, th = 7;
-  const row = (label, value) => {
-    dxf += dxfText('TABLE', tblX, tblY, th, label);
-    dxf += dxfText('TABLE', tblX + 190, tblY, th, value);
-    tblY -= rowH;
-  };
-  dxf += dxfText('TABLE', tblX, tblY + rowH, 9, "MEASUREMENTS (mm)");
-  row("Overall length", `${ski.length}`);
-  row("Tip width", `${ski.tipWidth}`);
-  row("Waist width", `${ski.waistWidth}`);
-  row("Tail width", `${ski.tailWidth}`);
-  row("Tip length (shovel)", `${ski.tipLength}`);
-  row("Tail length", `${ski.tailLength}`);
-  row("Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`);
-  const rk = rockerPercents(ski);
-  row("Rocker profile (T/C/T %)", `${rk.tip.toFixed(0)} / ${rk.camber.toFixed(0)} / ${rk.tail.toFixed(0)}`);
-  if (ski.rockerLinked === false) {
-    const rp = rockerProfilePercents(ski);
-    row("Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`);
-  }
-  row("Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`);
-  row("Tip height (rocker)", `${ski.tipHeight}`);
-  row("Tail height (rocker)", `${ski.tailHeight}`);
-  row("Camber height", `${ski.camberHeight}`);
-  row("Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`);
-  row("Edge inset", `${ski.edgeInset}`);
-  row("Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap");
-  if (edgeWrap === "contact") {
-    row("Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`);
-  }
-  row("Core inset", `${g.coreInset}`);
+  // ── MEASUREMENTS TABLE ── (shared helper; identical to the base DXF)
+  dxf += buildMeasurementsTable(ski, L + 60, baseYoff + halfBaseW, { coreInset: g.coreInset });
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-combined-${ski.length}mm.dxf`, "application/dxf");
