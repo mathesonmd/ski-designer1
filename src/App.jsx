@@ -182,9 +182,15 @@ function syncCoreContacts(ski){
 const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,metal:"none",carbon:"none",carbonLayers:1};
 const DEFAULT_SKI={
   designName: "Untitled Design",
+  mode: "ski",       // "ski" | "snowboard". Snowboard mode reveals stance/setback/insert controls
+                     // and renders + exports binding inserts; the geometry engine is shared.
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
+  // ── Snowboard-only (ignored in ski mode) ──
+  stanceWidth:560,   // mm, center-to-center of the two binding insert packs (rider reference stance).
+  setback:0,         // mm the stance center sits BEHIND the effective-edge center (0 = true twin).
+  insertPattern:"2x4", // "2x4" (40mm across × 20mm along, modern standard), "4x4" (40×40), "channel".
   // Rocker takeoff (where the base lifts) vs contact point (widest point / sidecut extent).
   // rockerLinked=true (default, Snocad-style): takeoff = contact, so the rocker/camber boundary in
   // the side profile sits exactly at the tip/tail contact points. When false (advanced): the takeoff
@@ -535,6 +541,47 @@ function computeDerived(ski){
   const depth=(avg-ski.waistWidth)/2,radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
   return{effectiveEdge:ee,sidecutRadius:radius};
 }
+// Binding-insert geometry for snowboard mode. Coordinates match the plan view: X = width (centered on
+// 0), Y = along the board (tail end = 0, tip end = length). Two packs are placed symmetrically about
+// the stance center, which sits at the effective-edge center shifted back by `setback` (toward tail).
+// Standard spacings: 2x4 = 40mm across (heel↔toe) × 20mm along (nose↔tail); 4x4 = 40×40. Each foot's
+// pack is 2 columns (±20mm) × 4 rows so there are multiple mountable stance positions, matching a real
+// board. Channel mode returns one centered lengthwise slot per foot instead of discrete holes.
+function computeInserts(ski){
+  if (ski.mode !== "snowboard") return { holes: [], slots: [], packs: [] };
+  const tailC = ski.tailLength;
+  const tipC = ski.length - ski.tipLength;
+  const eeCenter = (tailC + tipC) / 2;               // effective-edge center along Y
+  const stanceCenter = eeCenter - (ski.setback || 0); // setback shifts toward tail (−Y)
+  const half = (ski.stanceWidth || 560) / 2;
+  const backCenterY = stanceCenter - half;           // rear foot (toward tail)
+  const frontCenterY = stanceCenter + half;          // front foot (toward tip)
+  const packCenters = [
+    { foot: "back", y: backCenterY },
+    { foot: "front", y: frontCenterY },
+  ];
+
+  if (ski.insertPattern === "channel") {
+    const slotLen = 160;   // Burton-style centered channel per foot (~6 in)
+    const slots = packCenters.map(p => ({
+      foot: p.foot, x: 0, y0: p.y - slotLen / 2, y1: p.y + slotLen / 2, width: 10,
+    }));
+    return { holes: [], slots, packs: packCenters };
+  }
+
+  const alongPitch = ski.insertPattern === "4x4" ? 40 : 20;  // Y spacing
+  const acrossHalf = 20;    // 40mm apart across width → ±20mm columns
+  const rows = 4;           // 4 rows → several stance positions
+  const holes = [];
+  packCenters.forEach(p => {
+    for (let r = 0; r < rows; r++) {
+      const dy = (r - (rows - 1) / 2) * alongPitch;   // center the rows on the pack
+      holes.push({ foot: p.foot, x: -acrossHalf, y: p.y + dy });
+      holes.push({ foot: p.foot, x:  acrossHalf, y: p.y + dy });
+    }
+  });
+  return { holes, slots: [], packs: packCenters };
+}
 // Inverse of the sidecut-radius formula: given a target radius (meters), return the WAIST WIDTH (mm)
 // that produces it, holding length / tip-length / tail-length / tip-width / tail-width fixed. Setting
 // the radius adjusts the waist because that's the free variable — the ends and running edge are
@@ -679,6 +726,16 @@ const PRESETS=[
     rT,null,makeSwallowTailR(),makeSwallowTailL(),true,false,{tipHeight:45,tailHeight:25,camberHeight:3}),
   makePreset("Twin Tip",{length:1720,tipWidth:118,waistWidth:90,tailWidth:118,tipLength:220,tailLength:220},rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:3,waistPosition:0.50}),
 ];
+// Snowboard presets — wide, board-appropriate geometry with stance/setback/insert defaults. The
+// engine is shared with skis; these just carry mode:"snowboard" plus the board-only fields.
+const SNOWBOARD_PRESETS=[
+  makePreset("True Twin",{mode:"snowboard",length:1560,tipWidth:290,waistWidth:250,tailWidth:290,tipLength:230,tailLength:230,stanceWidth:560,setback:0,insertPattern:"2x4"},
+    rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:4,waistPosition:0.50}),
+  makePreset("Dir. Twin",{mode:"snowboard",length:1580,tipWidth:295,waistWidth:252,tailWidth:292,tipLength:250,tailLength:220,stanceWidth:570,setback:20,insertPattern:"2x4"},
+    rT,null,rTa,null,true,true,{tipHeight:45,tailHeight:38,camberHeight:4,waistPosition:0.50}),
+  makePreset("Directional",{mode:"snowboard",length:1600,tipWidth:300,waistWidth:255,tailWidth:290,tipLength:275,tailLength:205,stanceWidth:570,setback:30,insertPattern:"2x4"},
+    rT,null,rTa,null,true,true,{tipHeight:50,tailHeight:32,camberHeight:3,waistPosition:0.48}),
+];
 // ══════════════ EXPORTS ══════════════
 function downloadFile(content,filename,mime){
   const blob=new Blob([content],{type:mime});const url=URL.createObjectURL(blob);
@@ -714,6 +771,35 @@ function dxfLine(layer, x1, y1, x2, y2) {
 }
 function dxfText(layer, x, y, h, str) {
   return `0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${h.toFixed(3)}\n1\n${str}\n`;
+}
+function dxfCircle(layer, x, y, r) {
+  return `0\nCIRCLE\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${r.toFixed(3)}\n`;
+}
+// Appends binding-insert geometry to a DXF on the INSERTS layer (snowboard mode only): a circle at
+// each drill center (2x4 / 4x4) or a closed slot outline per foot (channel), plus a small cross at
+// each pack center. `tf(x,y)` maps ski coords (x=width, y=length) to the target layout (default:
+// identity, used by the base DXF; the combined DXF passes a swap+offset). Empty string in ski mode.
+function buildInsertsDXF(ski, tf) {
+  if ((ski.mode || "ski") !== "snowboard") return "";
+  const T = tf || ((x, y) => ({ x, y }));
+  const ins = computeInserts(ski);
+  let out = "";
+  const holeR = 3.2;  // ~M6 insert (6.4mm dia). Drill centers.
+  ins.holes.forEach(h => { const p = T(h.x, h.y); out += dxfCircle('INSERTS', p.x, p.y, holeR); });
+  ins.slots.forEach(sl => {
+    const hw = sl.width / 2;
+    const pts = [
+      T(sl.x - hw, sl.y0), T(sl.x + hw, sl.y0), T(sl.x + hw, sl.y1), T(sl.x - hw, sl.y1),
+    ];
+    out += dxfLwpolyline('INSERTS', pts, true);
+  });
+  ins.packs.forEach(p => {
+    const c = T(0, p.y), a1 = T(-7, p.y), a2 = T(7, p.y), b1 = T(0, p.y - 7), b2 = T(0, p.y + 7), lbl = T(10, p.y - 2);
+    out += dxfLine('INSERTS', a1.x, a1.y, a2.x, a2.y);
+    out += dxfLine('INSERTS', b1.x, b1.y, b2.x, b2.y);
+    out += dxfText('INSERTS', lbl.x, lbl.y, 6, p.foot === "front" ? "FRONT" : "BACK");
+  });
+  return out;
 }
 
 // ══════════════ CONTACT-TO-CONTACT EDGE GEOMETRY ══════════════
@@ -1039,6 +1125,11 @@ function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
     row("Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`);
   }
   if (extra.coreInset !== undefined) row("Core inset", `${extra.coreInset}`);
+  if ((ski.mode || "ski") === "snowboard") {
+    row("Stance width", `${ski.stanceWidth} (${(ski.stanceWidth/10).toFixed(1)}cm)`);
+    row("Setback", `${ski.setback}`);
+    row("Insert pattern", `${ski.insertPattern || "2x4"}`);
+  }
   return out;
 }
 
@@ -1057,6 +1148,7 @@ function exportPlanDXF(ski){
     { name: 'REFERENCE', color: 1 },
     { name: 'TEXT', color: 2 },
     { name: 'TABLE', color: 2 },
+    { name: 'INSERTS', color: 4 },
   ];
   let dxf = dxfStart(layers);
 
@@ -1086,6 +1178,9 @@ function exportPlanDXF(ski){
     dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
     dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
   });
+
+  // Binding inserts (snowboard mode) on the INSERTS layer.
+  dxf += buildInsertsDXF(ski);
 
   // Measurements table — to the right of the ski outline, same spec data as the combined export.
   const maxHalfW = Math.max(...pts.map(p => Math.abs(p.x)));
@@ -1405,6 +1500,7 @@ function exportCombinedDXF(ski){
     { name: 'LABEL', color: 4 },          // view labels (cyan)
     { name: 'TABLE', color: 2 },          // measurements table (yellow)
     { name: 'TEXT', color: 2 },           // contact labels (yellow)
+    { name: 'INSERTS', color: 4 },        // binding inserts, snowboard mode (cyan)
   ];
   let dxf = dxfStart(layers);
 
@@ -1445,6 +1541,8 @@ function exportCombinedDXF(ski){
   dxf += dxfText('LABEL', lblX, sideYoff + maxThick + 12, lblH, "CORE SIDE: thickness taper (flat bottom)");
 
   // ── MEASUREMENTS TABLE ── (shared helper; identical to the base DXF)
+  // Combined layout swaps axes (length→X, width→Y) and shifts the base band by baseYoff.
+  dxf += buildInsertsDXF(ski, (x, y) => ({ x: y, y: x + baseYoff }));
   dxf += buildMeasurementsTable(ski, L + 60, baseYoff + halfBaseW, { coreInset: g.coreInset });
 
   dxf += dxfEnd();
@@ -1853,6 +1951,42 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       }
     } else {
       edgeHandleRef.current = null;
+    }
+
+    // ── Binding inserts (snowboard mode) ──────────────────────────
+    // Drill-center circles (2x4 / 4x4) or centered channel slots per foot, positioned by stance
+    // width + setback. Drawn in torch so they stand out on the base. A short cross marks each pack
+    // center (the mount reference).
+    if ((ski.mode || "ski") === "snowboard") {
+      const ins = computeInserts(ski);
+      ctx.save();
+      // Holes
+      ctx.strokeStyle = C.control; ctx.fillStyle = "rgba(232,85,42,0.20)"; ctx.lineWidth = 1.4;
+      ins.holes.forEach(h => {
+        const s = toMain(h.x, h.y);
+        const r = 3.2 * mainScale > 3 ? 3.2 * mainScale : 4;  // ~6.4mm insert, min 4px
+        ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+      // Channel slots
+      ins.slots.forEach(sl => {
+        const a = toMain(sl.x, sl.y0), b = toMain(sl.x, sl.y1);
+        const w = Math.max(4, sl.width * mainScale);
+        ctx.strokeStyle = C.control; ctx.lineWidth = w;
+        ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.lineCap = "butt";
+      });
+      // Pack-center crosses + foot labels
+      ctx.strokeStyle = C.heading; ctx.fillStyle = C.heading; ctx.lineWidth = 1;
+      ctx.font = "8px 'JetBrains Mono', monospace";
+      ins.packs.forEach(p => {
+        const c = toMain(0, p.y);
+        ctx.beginPath();
+        ctx.moveTo(c.x - 7, c.y); ctx.lineTo(c.x + 7, c.y);
+        ctx.moveTo(c.x, c.y - 7); ctx.lineTo(c.x, c.y + 7);
+        ctx.stroke();
+      });
+      ctx.restore();
     }
 
     // TAIL/TIP labels and length dimension label
@@ -3457,6 +3591,7 @@ export default function App() {
     views: true,
     presets: true,
     dimensions: true,
+    snowboard: true,
     sideProfile: false,
     symmetry: false,
     layup: false,
@@ -3851,6 +3986,32 @@ export default function App() {
           }}>{loadMessage.text}</div>
         )}
 
+        {/* ── Ski / Snowboard mode toggle ── shared engine; snowboard reveals stance/insert controls */}
+        <div style={{ display: "flex", gap: 5, margin: "8px 12px 10px" }}>
+          {[["ski", "🎿 Ski"], ["snowboard", "🏂 Snowboard"]].map(([m, lbl]) => {
+            const active = (ski.mode || "ski") === m;
+            return (
+              <button key={m}
+                onClick={() => {
+                  if ((ski.mode || "ski") === m) return;
+                  if (m === "snowboard") {
+                    // Switching to a board: start from the True Twin preset so the shape makes sense,
+                    // keeping the current layup. (Save first if you want to keep a ski in progress.)
+                    setSki({ ...SNOWBOARD_PRESETS[0], designName: "Untitled Board", layup: ski.layup });
+                  } else {
+                    setSki(s => ({ ...s, mode: "ski" }));
+                  }
+                }}
+                style={{
+                  flex: 1, padding: "7px 4px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+                  letterSpacing: 0.5, fontWeight: 700, cursor: "pointer", borderRadius: 4,
+                  background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                  border: `1px solid ${active ? C.heading : C.inputBorder}`,
+                }}>{lbl}</button>
+            );
+          })}
+        </div>
+
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -3984,7 +4145,7 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-            {PRESETS.map(p => (
+            {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
               <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
                 style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 11px", color: C.label, fontSize: 12, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}
                 onMouseOver={e => { e.currentTarget.style.borderColor = C.heading; e.currentTarget.style.color = C.heading; }}
@@ -3995,16 +4156,57 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.dimensions} onToggle={() => toggleSection("dimensions")} title="Dimensions (mm)">
-          {inputField("Length", "length", 1200, 2200)}
-          {inputField("Tip W", "tipWidth", 60, 200)}
-          {inputField("Waist", "waistWidth", 50, 180)}
-          {inputField("Tail W", "tailWidth", 60, 200)}
-          <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={50} WAIST_MAX={180} />
-          {inputField("Tip Len", "tipLength", 80, 500)}
-          {inputField("Tail Len", "tailLength", 60, 400)}
-          <RunningEdgeField ski={ski} setSki={setSki} C={C} />
-          {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
+          {(() => {
+            const board = (ski.mode || "ski") === "snowboard";
+            const wMax = board ? 340 : 200;      // widths: boards run ~250-300mm
+            const waistMin = board ? 180 : 50, waistMax = board ? 320 : 180;
+            const lenMin = board ? 1000 : 1200, lenMax = 2200;
+            return (
+              <>
+                {inputField("Length", "length", lenMin, lenMax)}
+                {inputField(board ? "Nose W" : "Tip W", "tipWidth", 60, wMax)}
+                {inputField("Waist", "waistWidth", waistMin, waistMax)}
+                {inputField("Tail W", "tailWidth", 60, wMax)}
+                <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />
+                {inputField(board ? "Nose Len" : "Tip Len", "tipLength", 80, 500)}
+                {inputField("Tail Len", "tailLength", 60, 400)}
+                <RunningEdgeField ski={ski} setSki={setSki} C={C} />
+                {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
+              </>
+            );
+          })()}
         </AccordionSection>
+
+        {(ski.mode || "ski") === "snowboard" && (
+          <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title="Snowboard">
+            {inputField("Stance W", "stanceWidth", 400, 720)}
+            {inputField("Setback", "setback", -40, 80)}
+            <div style={{ marginBottom: 7 }}>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+                Insert Pattern
+              </div>
+              <div style={{ display: "flex", gap: 5 }}>
+                {[["2x4", "2×4"], ["4x4", "4×4"], ["channel", "Channel"]].map(([val, lbl]) => {
+                  const active = (ski.insertPattern || "2x4") === val;
+                  return (
+                    <button key={val} onClick={() => setSki(s => ({ ...s, insertPattern: val }))}
+                      style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+                        background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                        border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                {(ski.insertPattern || "2x4") === "channel"
+                  ? "Burton-style centered channel per foot."
+                  : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
+                {" "}Stance {(ski.stanceWidth/10).toFixed(1)}cm · setback from effective-edge center.
+              </div>
+            </div>
+          </AccordionSection>
+        )}
 
         <AccordionSection isOpen={sectionsOpen.sideProfile} onToggle={() => toggleSection("sideProfile")} title="Side Profile">
           <RockerProfileField ski={ski} setSki={setSki} C={C} />
