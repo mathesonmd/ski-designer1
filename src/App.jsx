@@ -230,7 +230,10 @@ function saveDesignToFile(ski) {
   };
   const json = JSON.stringify(envelope, null, 2);
   const safeName = (ski.designName || "untitled").replace(/[^a-z0-9-]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "");
-  const filename = `bcs-${safeName}-${ski.length}mm.bcski`;
+  // Snowboards save as .bcboard, skis as .bcski. Both are the same JSON format (mode is stored inside);
+  // the extension is just a friendlier label, and Load accepts either and routes by the mode field.
+  const ext = (ski.mode === "snowboard") ? "bcboard" : "bcski";
+  const filename = `bcs-${safeName}-${ski.length}mm.${ext}`;
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -334,25 +337,38 @@ function loadDesignFromFile(file) {
 }
 
 // ══════════════ AUTOSAVE TO LOCALSTORAGE ══════════════
-const AUTOSAVE_KEY = "bcs_autosave";
+// Two slots — one per mode — so a ski AND a board can each be auto-saved without clobbering the other.
+// A separate key records which mode was last active, so a page reload reopens that one.
+const AUTOSAVE_KEY = "bcs_autosave";          // legacy single-slot key (migrated on read)
 const AUTOSAVE_META_KEY = "bcs_autosave_meta";
+const autosaveKey = (mode) => `bcs_autosave_${mode === "snowboard" ? "board" : "ski"}`;
+const autosaveMetaKey = (mode) => `bcs_autosave_${mode === "snowboard" ? "board" : "ski"}_meta`;
+const LAST_MODE_KEY = "bcs_last_mode";
 
 function writeAutosave(ski) {
+  const mode = ski.mode === "snowboard" ? "snowboard" : "ski";
   try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(ski));
-    localStorage.setItem(AUTOSAVE_META_KEY, JSON.stringify({
+    localStorage.setItem(autosaveKey(mode), JSON.stringify(ski));
+    localStorage.setItem(autosaveMetaKey(mode), JSON.stringify({
       savedAt: new Date().toISOString(),
       designName: ski.designName || "Untitled Design",
     }));
+    localStorage.setItem(LAST_MODE_KEY, mode);
   } catch (e) {
     // localStorage may be unavailable or full — ignore
   }
 }
 
-function readAutosave() {
+// Read the autosave for a specific mode ("ski" | "snowboard"). Falls back to the legacy single slot
+// (only for ski) so designs saved before dual-slot autosave aren't lost.
+function readAutosave(mode = "ski") {
   try {
-    const raw = localStorage.getItem(AUTOSAVE_KEY);
-    const metaRaw = localStorage.getItem(AUTOSAVE_META_KEY);
+    let raw = localStorage.getItem(autosaveKey(mode));
+    let metaRaw = localStorage.getItem(autosaveMetaKey(mode));
+    if (!raw && mode === "ski") {           // migrate legacy single slot → ski slot
+      raw = localStorage.getItem(AUTOSAVE_KEY);
+      metaRaw = localStorage.getItem(AUTOSAVE_META_KEY);
+    }
     if (!raw) return null;
     const ski = JSON.parse(raw);
     const meta = metaRaw ? JSON.parse(metaRaw) : {};
@@ -362,10 +378,24 @@ function readAutosave() {
   }
 }
 
-function clearAutosave() {
+function readLastMode() {
+  try { return localStorage.getItem(LAST_MODE_KEY) === "snowboard" ? "snowboard" : "ski"; }
+  catch (e) { return "ski"; }
+}
+
+function clearAutosave(mode) {
   try {
-    localStorage.removeItem(AUTOSAVE_KEY);
-    localStorage.removeItem(AUTOSAVE_META_KEY);
+    if (mode) {
+      localStorage.removeItem(autosaveKey(mode));
+      localStorage.removeItem(autosaveMetaKey(mode));
+    } else {
+      ["ski", "snowboard"].forEach(m => {
+        localStorage.removeItem(autosaveKey(m));
+        localStorage.removeItem(autosaveMetaKey(m));
+      });
+      localStorage.removeItem(AUTOSAVE_KEY);
+      localStorage.removeItem(AUTOSAVE_META_KEY);
+    }
   } catch (e) {}
 }
 // ══════════════ EI ENGINE ══════════════
@@ -3505,6 +3535,9 @@ function RockerProfileField({ ski, setSki, C }) {
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
+  // Per-mode in-memory stash: when you toggle away from a mode, its design is parked here so toggling
+  // back restores it (rather than mutating one shared design). Keyed "ski" / "snowboard".
+  const modeStash = useRef({});
   // Default view depends on viewport at mount: mobile/tablet → "plan" (interactive rotated
   // ski is the primary experience), desktop → "all" (see everything at once).
   const [activeView, setActiveView] = useState(() => {
@@ -3521,11 +3554,13 @@ export default function App() {
   const [loadMessage, setLoadMessage] = useState(null);  // { type: "ok"|"error"|"warn", text }
   const [recoverBanner, setRecoverBanner] = useState(null);
 
-  // On mount: check for an autosave session that doesn't match the initial state.
+  // On mount: restore the last-active mode's autosave if it differs from that mode's default.
   useEffect(() => {
-    const saved = readAutosave();
-    if (saved && saved.ski && JSON.stringify(saved.ski) !== JSON.stringify(DEFAULT_SKI)) {
-      setRecoverBanner(saved);
+    const lastMode = readLastMode();
+    const saved = readAutosave(lastMode);
+    const baseline = lastMode === "snowboard" ? SNOWBOARD_PRESETS[0] : DEFAULT_SKI;
+    if (saved && saved.ski && JSON.stringify(saved.ski) !== JSON.stringify(baseline)) {
+      setRecoverBanner({ ...saved, mode: lastMode });
     }
   }, []);
 
@@ -3533,6 +3568,30 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => writeAutosave(ski), 1000);
     return () => clearTimeout(t);
+  }, [ski]);
+
+  // Toggle between ski and snowboard, parking the current design in the stash and restoring the other
+  // mode's design if we have one (in the stash or its autosave slot); otherwise start from that mode's
+  // default. This makes the toggle feel like switching between two workbenches — both shapes and names
+  // persist independently.
+  const switchMode = useCallback((targetMode) => {
+    const current = ski.mode === "snowboard" ? "snowboard" : "ski";
+    if (targetMode === current) return;
+    // Park the current design.
+    modeStash.current[current] = ski;
+    writeAutosave(ski);
+    // Restore the target design: stash first, then its autosave slot, then a fresh default.
+    let next = modeStash.current[targetMode];
+    if (!next) {
+      const saved = readAutosave(targetMode);
+      if (saved && saved.ski) next = saved.ski;
+    }
+    if (!next) {
+      next = targetMode === "snowboard"
+        ? { ...SNOWBOARD_PRESETS[0], designName: "Untitled Board", layup: ski.layup }
+        : { ...DEFAULT_SKI, layup: ski.layup };
+    }
+    setSki(next);
   }, [ski]);
 
   const handleSave = useCallback(() => {
@@ -3928,7 +3987,7 @@ export default function App() {
           type="file"
           ref={fileInputRef}
           onChange={handleFileSelected}
-          accept=".bcski,.json,application/json"
+          accept=".bcski,.bcboard,.json,application/json"
           style={{ display: "none" }}
         />
 
@@ -3992,16 +4051,7 @@ export default function App() {
             const active = (ski.mode || "ski") === m;
             return (
               <button key={m}
-                onClick={() => {
-                  if ((ski.mode || "ski") === m) return;
-                  if (m === "snowboard") {
-                    // Switching to a board: start from the True Twin preset so the shape makes sense,
-                    // keeping the current layup. (Save first if you want to keep a ski in progress.)
-                    setSki({ ...SNOWBOARD_PRESETS[0], designName: "Untitled Board", layup: ski.layup });
-                  } else {
-                    setSki(s => ({ ...s, mode: "ski" }));
-                  }
-                }}
+                onClick={() => switchMode(m)}
                 style={{
                   flex: 1, padding: "7px 4px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
                   letterSpacing: 0.5, fontWeight: 700, cursor: "pointer", borderRadius: 4,
