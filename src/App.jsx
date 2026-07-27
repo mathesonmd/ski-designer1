@@ -1081,10 +1081,17 @@ function exportPlanSVG(ski){
   const baseCutLoop = isContact ? getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
   const marks = getRegistrationMarks(ski);
 
-  // SVG bounds — encompass outer outline plus a small margin
+  // SVG bounds — encompass outer outline plus a small margin. Reference labels sit to the RIGHT of
+  // the widest point at each station and can extend well past the geometry, so include their text
+  // extent in maxX or they get clipped (monospace ≈ 0.6em per char at font-size 4).
   const pad = 10;
+  const labelFont = 4, labelCharW = labelFont * 0.6;
+  const labelRightExtent = Math.max(0, ...marks.map(m => {
+    const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
+    return halfW + 4 + m.label.length * labelCharW;
+  }));
   const minX = Math.min(...pts.map(p=>p.x)) - pad;
-  const maxX = Math.max(...pts.map(p=>p.x)) + pad;
+  const maxX = Math.max(Math.max(...pts.map(p=>p.x)) + pad, labelRightExtent + pad);
   const minY = Math.min(...pts.map(p=>p.y)) - pad;
   const maxY = Math.max(...pts.map(p=>p.y)) + pad;
   const w = maxX - minX, h = maxY - minY;
@@ -1296,13 +1303,15 @@ function exportCoreSideSVG(ski){
     topPts.push({ x: pos * ski.length, y: getCoreThickAt(ski.coreProfile, pos) });
   }
   const maxT = Math.max(...topPts.map(p => p.y));
+  const marks = getRegistrationMarks(ski);
   const L = ski.length, pad = 10, sz = 8;
-  const w = L + pad * 2, h = maxT * sz + pad * 2;
+  // Labels sit to the right of each station line; include the rightmost label's text extent in width.
+  const labelRightExtent = Math.max(0, ...marks.map(m => pad + m.skiY + 2 + m.label.length * 4 * 0.6));
+  const w = Math.max(L + pad * 2, labelRightExtent + pad), h = maxT * sz + pad * 2;
   const topPath = topPts.map((p, i) =>
     `${i === 0 ? 'M' : 'L'}${(p.x + pad).toFixed(2)},${(pad + (maxT - p.y) * sz).toFixed(2)}`
   ).join(' ');
   const fillPath = topPath + ` L${L + pad},${pad + maxT * sz} L${pad},${pad + maxT * sz} Z`;
-  const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
     const x = pad + m.skiY;
     return `<line x1="${x.toFixed(2)}" y1="${pad}" x2="${x.toFixed(2)}" y2="${(pad + maxT * sz).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
@@ -1394,9 +1403,16 @@ function exportCorePlanSVG(ski){
     left.unshift({ x: -halfW, y: xmm });
   }
   const all = [...right, ...left];
+  const marks = getRegistrationMarks(ski);
   const pad = 10;
+  // Reference labels extend right of the geometry; include their text extent so they aren't clipped.
+  const labelCharW = 4 * 0.6;
+  const labelRightExtent = Math.max(0, ...marks.map(m => {
+    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
+    return hw + 3 + m.label.length * labelCharW;
+  }));
   const minX = Math.min(...all.map(p => p.x)) - pad;
-  const maxX = Math.max(...all.map(p => p.x)) + pad;
+  const maxX = Math.max(Math.max(...all.map(p => p.x)) + pad, labelRightExtent + pad);
   const minY = Math.min(...all.map(p => p.y)) - pad;
   const maxY = Math.max(...all.map(p => p.y)) + pad;
   const w = maxX - minX, h = maxY - minY;
@@ -1404,7 +1420,6 @@ function exportCorePlanSVG(ski){
   const pathD = all.map((p, i) =>
     `${i === 0 ? 'M' : 'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
   ).join(' ') + ' Z';
-  const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
     const cy = toSvgY(m.skiY);
