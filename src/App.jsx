@@ -3070,15 +3070,40 @@ function AccordionSection({ isOpen, onToggle, title, accent, children }) {
 }
 
 // ══════════════ INFO BUBBLE ══════════════
-// A small "i" icon that reveals a tooltip on hover (or tap on touch). Used to tuck away edit tips and
-// other help text so it's discoverable but out of the way. `children` is the tooltip content.
-function InfoBubble({ C, children, align = "left", width = 240 }) {
+// A small "i" icon that reveals a tooltip on hover (or tap on touch). The tooltip is rendered as a
+// FIXED-position layer anchored to the button's on-screen rect, so it floats OVER the main view and
+// is never clipped by the sidebar's overflow (a plain absolute tooltip gets cropped by the scrolling
+// sidebar; a high z-index alone can't fix that because clipping happens before stacking).
+function InfoBubble({ C, children, width = 250 }) {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    // Prefer opening to the right of the icon; flip left if it would overflow the viewport.
+    let left = r.right + 6;
+    if (left + width + margin > window.innerWidth) left = r.left - width - 6;
+    if (left < margin) left = margin;
+    let top = r.top;
+    // Keep within the viewport vertically (tooltip is short, but guard the bottom).
+    const maxTop = window.innerHeight - 160;
+    if (top > maxTop) top = Math.max(margin, maxTop);
+    setPos({ top, left });
+  }, [width]);
+
+  const show = useCallback(() => { place(); setOpen(true); }, [place]);
+  const hide = useCallback(() => setOpen(false), []);
+
   return (
-    <span style={{ position: "relative", display: "inline-flex" }}
-      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <span style={{ display: "inline-flex" }}
+      onMouseEnter={show} onMouseLeave={hide}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={btnRef}
+        onClick={() => (open ? hide() : show())}
         aria-label="Help"
         style={{
           width: 16, height: 16, borderRadius: "50%", border: `1px solid ${C.labelDim}`,
@@ -3086,13 +3111,13 @@ function InfoBubble({ C, children, align = "left", width = 240 }) {
           fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, lineHeight: 1,
           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
         }}>i</button>
-      {open && (
+      {open && pos && (
         <div style={{
-          position: "absolute", top: "calc(100% + 6px)", [align]: 0, zIndex: 60, width,
+          position: "fixed", top: pos.top, left: pos.left, zIndex: 9999, width,
           background: C.panel || "#1c1916", border: `1px solid ${C.panelBorder || "#37322c"}`,
-          borderRadius: 5, padding: "9px 11px", boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+          borderRadius: 5, padding: "9px 11px", boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
           color: C.value, fontSize: 11.5, lineHeight: 1.5, fontFamily: "'Inter', system-ui, sans-serif",
-          textTransform: "none", letterSpacing: 0, fontWeight: 400,
+          textTransform: "none", letterSpacing: 0, fontWeight: 400, pointerEvents: "none",
         }}>
           {children}
         </div>
