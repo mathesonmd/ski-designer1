@@ -193,6 +193,11 @@ const DEFAULT_SKI={
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
+  // How waistPosition is interpreted: false (default) = fraction of the contact-to-contact span
+  // (0.5 = midway between the contacts); true = fraction of the FULL tip-to-tail length (0.5 =
+  // geometric center of the ski). Full-length is handy when matching a spec that quotes boot-center
+  // from the tail, independent of tip/tail lengths.
+  waistFullLength:false,
   // ── Snowboard-only (ignored in ski mode) ──
   stanceWidth:560,   // mm, center-to-center of the two binding insert packs (rider reference stance).
   setback:0,         // mm the stance center sits BEHIND the effective-edge center (0 = true twin).
@@ -518,11 +523,25 @@ function sampleShape(nodes, nPts) {
 // Coordinates:
 //   skiX = lateral mm, 0 = centerline, positive = "right" side
 //   skiY = along-ski mm, 0 = tail end, ski.length = tip end (nose)
+// Resolve the waist's actual along-ski position (mm) from waistPosition, honoring waistFullLength.
+//   • span mode (default): 0..1 maps across the contact-to-contact span (0.5 = midway between contacts)
+//   • full-length mode:     0..1 maps across the whole tail-end..tip-end length (0.5 = geometric center),
+//     then clamped to stay strictly between the contacts (the sidecut must live inside the running edge)
+function resolveWaistY(ski) {
+  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+  const tipContactY = ski.length - ski.tipLength, tailContactY = ski.tailLength;
+  if (ski.waistFullLength) {
+    const y = wp * ski.length;                       // fraction of full length, 0 = tail end
+    const margin = 1;                                // keep off the exact contact points
+    return Math.max(tailContactY + margin, Math.min(tipContactY - margin, y));
+  }
+  return tailContactY + (tipContactY - tailContactY) * wp;
+}
 function computeOutline(ski) {
   const { length: L, tipWidth: TW, waistWidth: WW, tailWidth: TAW, tipLength: TL, tailLength: TAIL } = ski;
   const tipContactY = L - TL, tailContactY = TAIL;
   const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
-  const waistY = tailContactY + (tipContactY - tailContactY) * wp;
+  const waistY = resolveWaistY(ski);
   const nSamplesSidecut = 60, nSamplesShape = 60;
 
   const tipR = sampleShape(ski.tipNodesR, nSamplesShape);
@@ -588,8 +607,11 @@ function computeDerived(ski){
   // end widths are equal — but when the waist is off-center (or ends differ), the two sides genuinely
   // have different radii (a tighter arc on the short side, looser on the long side), which the single
   // number hides. `asymmetric` flags when the two diverge enough to be worth surfacing.
-  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
-  const backRun = ee * wp, frontRun = ee * (1 - wp);
+  // Per-side runs are measured from the ACTUAL waist position (which may be full-length-referenced),
+  // as the fraction of the effective edge on each side of the waist.
+  const tipC = ski.length - ski.tipLength, tailC = ski.tailLength;
+  const waistY = resolveWaistY(ski);
+  const backRun = waistY - tailC, frontRun = tipC - waistY;
   const sideR = (runLen, endW) => {
     const d = (endW - ski.waistWidth) / 2;
     return d > 0.01 ? runLen * runLen / (2 * d) / 1000 : Infinity;
@@ -1068,8 +1090,7 @@ function getFullOutlinePoints(ski){
 function getRegistrationMarks(ski) {
   const tailC = ski.tailLength;
   const tipC = ski.length - ski.tipLength;
-  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
-  const waistY = tailC + (tipC - tailC) * wp;
+  const waistY = resolveWaistY(ski);
   return [
     { skiY: tailC,  label: "TAIL CONTACT", halfWidthAt: getWidthAtPos(ski, tailC / ski.length) / 2 + 6 },
     { skiY: waistY, label: "WAIST",         halfWidthAt: getWidthAtPos(ski, waistY / ski.length) / 2 + 6 },
@@ -2637,13 +2658,18 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
         :  (my - dragStart.my) / scalePx;  // horizontal: moving down = increasing skiX
 
       if (cp.type === "waist") {
-        // Lateral drag → waistWidth; along-ski drag → waistPosition (0.30–0.70).
-        const ee = dragStart.ski.length - dragStart.ski.tipLength - dragStart.ski.tailLength;
+        // Lateral drag → waistWidth; along-ski drag → waistPosition. The along-ski divisor matches the
+        // reference frame: full length in full-length mode, else the contact-to-contact span.
+        const full = dragStart.ski.waistFullLength;
+        const span = full
+          ? dragStart.ski.length
+          : (dragStart.ski.length - dragStart.ski.tipLength - dragStart.ski.tailLength);
         const startWP = dragStart.ski.waistPosition !== undefined ? dragStart.ski.waistPosition : 0.48;
+        const lo = full ? 0.10 : 0.30, hi = full ? 0.90 : 0.70;
         setSki(s => ({
           ...s,
           waistWidth: clamp(Math.round(dragStart.ski.waistWidth + dSkiX * cp.mult), 50, 320),
-          waistPosition: ee > 0 ? clamp(startWP + dSkiY / ee, 0.30, 0.70) : startWP,
+          waistPosition: span > 0 ? clamp(startWP + dSkiY / span, lo, hi) : startWP,
         }));
         return;
       }
@@ -2985,10 +3011,11 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.textAlign = "left"; ctx.fillText(lbl, 0, 0); ctx.restore();
     });
     // WAIST reference line (boot center) — light bone, so you can align the thickest part of the
-    // core to it. Sits between the contacts at the waist position.
+    // core to it. Sits between the contacts at the resolved waist position.
     {
-      const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
-      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
+      const wY = resolveWaistY(ski);
+      const tailCmm = ski.tailLength, tipCmm = ski.length - ski.tipLength;
+      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * ((wY - tailCmm) / (tipCmm - tailCmm));
       const x = padL + waistPos * plotW;
       ctx.strokeStyle = C.waistLine || "rgba(237,230,216,0.65)";
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
@@ -3173,8 +3200,9 @@ function FlexView({ ski, flex, width, height }) {
     });
     // WAIST reference line (boot center) — light bone, matches the core view.
     {
-      const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
-      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
+      const wY = resolveWaistY(ski);
+      const tailCmm = ski.tailLength, tipCmm = ski.length - ski.tipLength;
+      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * ((wY - tailCmm) / (tipCmm - tailCmm));
       const x = padL + waistPos * plotW;
       ctx.strokeStyle = C.waistLine || "rgba(237,230,216,0.65)";
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
@@ -4473,7 +4501,35 @@ export default function App() {
                 {inputField(board ? "Nose Len" : "Tip Len", "tipLength", 80, 500)}
                 {inputField("Tail Len", "tailLength", 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
-                {inputField("Waist Pos", "waistPosition", 0.30, 0.70, 0.01)}
+                {inputField("Waist Pos", "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
+                <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
+                  {[["span", false], ["full length", true]].map(([lbl, val]) => {
+                    const active = !!ski.waistFullLength === val;
+                    return (
+                      <button key={lbl} onClick={() => setSki(s => {
+                        if (!!s.waistFullLength === val) return s;
+                        // Convert waistPosition so the waist stays at the same physical spot when the
+                        // reference frame changes (span ↔ full length).
+                        const tailC = s.tailLength, tipC = s.length - s.tipLength;
+                        const wY = resolveWaistY(s);   // current absolute position
+                        let wp;
+                        if (val) wp = wY / s.length;                       // → fraction of full length
+                        else wp = (wY - tailC) / (tipC - tailC);            // → fraction of span
+                        return { ...s, waistFullLength: val, waistPosition: Math.round(wp * 100) / 100 };
+                      })}
+                        style={{ flex: 1, padding: "4px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                          background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                          border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                        {lbl}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {ski.waistFullLength
+                    ? "0.5 = geometric center of the ski (fraction of full length)."
+                    : "0.5 = midway between the contact points (fraction of running edge)."}
+                </div>
               </>
             );
           })()}
