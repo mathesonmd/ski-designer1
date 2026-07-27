@@ -569,7 +569,25 @@ function computeOutline(ski) {
 function computeDerived(ski){
   const ee=ski.length-ski.tipLength-ski.tailLength,avg=(ski.tipWidth+ski.tailWidth)/2;
   const depth=(avg-ski.waistWidth)/2,radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
-  return{effectiveEdge:ee,sidecutRadius:radius};
+  // Per-side sidecut radii. The waist is the apex (edge tangent to centerline); each side is an arc
+  // from a contact to the waist. Over a side run Ls the edge moves in by d=(endW−waist)/2, giving
+  // R = Ls²/(2d). This reduces to the standard whole-edge formula when the waist is centered AND the
+  // end widths are equal — but when the waist is off-center (or ends differ), the two sides genuinely
+  // have different radii (a tighter arc on the short side, looser on the long side), which the single
+  // number hides. `asymmetric` flags when the two diverge enough to be worth surfacing.
+  const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+  const backRun = ee * wp, frontRun = ee * (1 - wp);
+  const sideR = (runLen, endW) => {
+    const d = (endW - ski.waistWidth) / 2;
+    return d > 0.01 ? runLen * runLen / (2 * d) / 1000 : Infinity;
+  };
+  const backRadius = sideR(backRun, ski.tailWidth);
+  const frontRadius = sideR(frontRun, ski.tipWidth);
+  const finiteBoth = isFinite(backRadius) && isFinite(frontRadius);
+  const ratio = finiteBoth ? Math.max(backRadius, frontRadius) / Math.min(backRadius, frontRadius) : 1;
+  const asymmetric = finiteBoth && ratio > 1.15;   // >15% apart → worth showing per-side
+  return { effectiveEdge: ee, sidecutRadius: radius, backRadius, frontRadius, asymmetric,
+           backRun, frontRun };
 }
 // Binding-insert geometry for snowboard mode. Coordinates match the plan view: X = width (centered on
 // 0), Y = along the board (tail end = 0, tip end = length). Two packs are placed symmetrically about
@@ -1680,6 +1698,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
   const [hovered, setHovered] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [dragStart, setDragStart] = useState(null);
+  const [handleAngle, setHandleAngle] = useState(null);  // live tangent-handle angle readout during drag
   // Per-panel zoom (scale multiplier) and pan (screen-pixel offset). Default: 1× / no offset.
   const [tipZoom, setTipZoom] = useState(1);
   const [tailZoom, setTailZoom] = useState(1);
@@ -1920,6 +1939,39 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.fillStyle = C.skiFill; ctx.fill();
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     ctx.restore();
+
+    // ── Effective-edge highlight ──────────────────────────────────
+    // Overlay the contact-to-contact portion of each edge (the actual turning section / sidecut) in
+    // torch so you can see where the running edge starts and ends — and, with an off-center waist,
+    // how much shorter the sidecut is on one side. Also marks the waist apex on each edge.
+    {
+      const eps = 0.5;
+      const drawEdgeSpan = (side) => {
+        ctx.beginPath();
+        let started = false;
+        side.forEach(p => {
+          if (p.y >= tailContactY - eps && p.y <= tipContactY + eps) {
+            const s = toMain(p.x, p.y);
+            if (!started) { ctx.moveTo(s.x, s.y); started = true; } else ctx.lineTo(s.x, s.y);
+          }
+        });
+        ctx.stroke();
+      };
+      ctx.save();
+      ctx.strokeStyle = C.contactLabel || "#f0895c";
+      ctx.lineWidth = 2.6;
+      ctx.shadowColor = "rgba(232,85,42,0.5)"; ctx.shadowBlur = 6;
+      drawEdgeSpan(right);
+      drawEdgeSpan(left);
+      ctx.restore();
+      // Contact-point dots on each edge (4: both sides × tip/tail contact)
+      ctx.fillStyle = C.contactLabel || "#f0895c";
+      [[ski.tailWidth / 2, tailContactY], [ski.tipWidth / 2, tipContactY],
+       [-ski.tailWidth / 2, tailContactY], [-ski.tipWidth / 2, tipContactY]].forEach(([x, y]) => {
+        const s = toMain(x, y);
+        ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill();
+      });
+    }
 
     // ── Edge offset preview (live) ──────────────────────────────
     // Shows where the metal edges / base cut will sit, updating as the user changes
@@ -2227,7 +2279,27 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
       if (cp.frames.includes("tail"))  drawCP(cp, toTail(cp.skiX, cp.skiY), 1.0, tailClip);
     });
-  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical,
+
+    // Live tangent-handle angle readout (during a handle drag). Shows the physical angle and turns
+    // torch + "SNAP" when sitting on a detent, so you can tell exactly where the handle points.
+    if (handleAngle && dragging && String(dragging).includes("_t")) {
+      const cp = cps.find(c => c.id === dragging);
+      if (cp) {
+        const frame = dragStart?.frame;
+        const s = frame === "tip" ? toTip(cp.skiX, cp.skiY) : frame === "tail" ? toTail(cp.skiX, cp.skiY) : toMain(cp.skiX, cp.skiY);
+        const label = `${handleAngle.deg}\u00B0${handleAngle.snapped ? " SNAP" : ""}`;
+        ctx.font = "bold 11px 'JetBrains Mono', monospace";
+        const tw = ctx.measureText(label).width;
+        const bx = s.x + 12, by = s.y - 22;
+        ctx.fillStyle = "rgba(20,18,16,0.9)";
+        ctx.fillRect(bx - 4, by - 12, tw + 8, 18);
+        ctx.strokeStyle = handleAngle.snapped ? (C.contactLabel || "#f0895c") : C.panelBorder;
+        ctx.lineWidth = 1; ctx.strokeRect(bx - 4, by - 12, tw + 8, 18);
+        ctx.fillStyle = handleAngle.snapped ? (C.contactLabel || "#f0895c") : C.value;
+        ctx.textAlign = "left"; ctx.fillText(label, bx, by + 1);
+      }
+    }
+  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical, handleAngle, dragStart,
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
       tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
@@ -2344,14 +2416,44 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       tipPivotX, tipPivotY, tailPivotX, tailPivotY, mainPivotX, mainPivotY]);
 
   // Double-click resets the zoom/pan of the panel under the cursor.
+  // Double-click a control node or tangent handle → reset THAT node to its default shape position
+  // (the tester's ask: undo an accidental drag without hunting for the exact value). If not over a
+  // node, fall back to resetting the zoom/pan of the panel under the cursor.
   const handleDoubleClick = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+    const id = findCP(mx, my);
+    if (id) {
+      const cp = cps.find(c => c.id === id);
+      if (cp && (cp.type?.endsWith("Node") || cp.type?.endsWith("Tangent"))) {
+        // Which node array + default shape does this handle belong to?
+        const isTip = cp.isTip;
+        const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
+        const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
+        const defShape = isTip ? makeRoundedTip() : makeRoundedTail();
+        const def = defShape[cp.idx];
+        if (def) {
+          setSki(s => {
+            const arr = (s[param] || (isTip ? makeRoundedTip() : makeRoundedTail())).map(n => ({ ...n }));
+            if (cp.type.endsWith("Node")) { arr[cp.idx].x = def.x; arr[cp.idx].y = def.y; }
+            else { arr[cp.idx].tx = def.tx; arr[cp.idx].ty = def.ty; }
+            const next = { ...s, [param]: arr };
+            // Keep symmetric side mirrored if applicable.
+            if (isTip && s.tipSymmetric) next.tipNodesL = arr.map(n => ({ ...n }));
+            if (!isTip && s.tailSymmetric) next.tailNodesL = arr.map(n => ({ ...n }));
+            return next;
+          });
+          return;
+        }
+      }
+    }
+
     const frame = findDragFrame(mx, my);
     if (frame === "tip")  { setTipZoom(1);  setTipPan({ x: 0, y: 0 }); }
     if (frame === "tail") { setTailZoom(1); setTailPan({ x: 0, y: 0 }); }
     if (frame === "main") { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }
-  }, [findDragFrame]);
+  }, [findCP, cps, findDragFrame, setSki]);
 
   // Attach the wheel listener as NON-PASSIVE so preventDefault() actually stops page scroll.
   // React's synthetic onWheel can be passive in some setups, which would let the page scroll.
@@ -2434,9 +2536,33 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
 
       const newNodes = JSON.parse(JSON.stringify(nodes));
       if (cp.type.includes("Tangent")) {
-        // Tangent handle drag — pure bezier shape edit, no dimension changes
-        newNodes[cp.idx].tx = nodes[cp.idx].tx + dNx;
-        newNodes[cp.idx].ty = nodes[cp.idx].ty + dNy;
+        // Tangent handle drag — pure bezier shape edit, no dimension changes.
+        let ntx = nodes[cp.idx].tx + dNx;
+        let nty = nodes[cp.idx].ty + dNy;
+        // ── Angle detents ── Snap the handle's PHYSICAL direction to notable angles (0/45/90/…)
+        // when within a few degrees, so you can't accidentally sit 1° past 90° and get a dimple.
+        // Convert normalized tangent → physical vector (mm) to measure the true on-ski angle.
+        const physX = ntx * wHalf * sign;
+        const physY = nty * ySpan;
+        const mag = Math.hypot(physX, physY);
+        let angleDeg = Math.atan2(physY, physX) * 180 / Math.PI;   // -180..180
+        let snapped = false;
+        if (mag > 1e-6) {
+          const detents = [-180, -135, -90, -45, 0, 45, 90, 135, 180];
+          const SNAP_DEG = 4;
+          let best = null, bestD = SNAP_DEG;
+          detents.forEach(d => { const diff = Math.abs(((angleDeg - d + 540) % 360) - 180); const dd = 180 - diff; if (dd < bestD) { bestD = dd; best = d; } });
+          if (best !== null) {
+            angleDeg = best; snapped = true;
+            const rad = best * Math.PI / 180;
+            const sx = Math.cos(rad) * mag, sy = Math.sin(rad) * mag;
+            ntx = (sx / wHalf) * sign;
+            nty = sy / ySpan;
+          }
+        }
+        setHandleAngle({ deg: Math.round(((angleDeg % 360) + 360) % 360), snapped });
+        newNodes[cp.idx].tx = ntx;
+        newNodes[cp.idx].ty = nty;
         const updates = { [arrKey]: newNodes };
         if (arrKey === "tipNodesR"  && dragStart.ski.tipSymmetric)  updates.tipNodesL  = JSON.parse(JSON.stringify(newNodes));
         if (arrKey === "tailNodesR" && dragStart.ski.tailSymmetric) updates.tailNodesL = JSON.parse(JSON.stringify(newNodes));
@@ -2519,7 +2645,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     }
   }, [dragging, dragStart, cps, mainScale, tailScale, tipScale, findCP, setSki, panning, tipZoom, tailZoom, mainZoom, isVertical]);
 
-  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); setPanning(null); }, []);
+  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); setPanning(null); setHandleAngle(null); }, []);
 
   const mainViewChanged = mainZoom > 1.01 || Math.abs(mainPan.x) > 0.5 || Math.abs(mainPan.y) > 0.5;
 
@@ -4316,6 +4442,9 @@ export default function App() {
           {stat("Dims", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
           {stat("Eff Edge", `${Math.round(derived.effectiveEdge)} mm`)}
           {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
+          {derived.asymmetric && stat("R front / back",
+            `${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m`,
+            C.contactLabel)}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
@@ -4467,4 +4596,4 @@ export default function App() {
       />
     </div>
   );
-} 
+}
