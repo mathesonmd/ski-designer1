@@ -3658,6 +3658,21 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
         style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
       />
+      {derived.asymmetric && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+          <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>
+            front / back R
+          </span>
+          <span style={{ color: C.contactLabel || "#f0895c", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
+            {isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / {isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m
+          </span>
+        </div>
+      )}
+      {derived.asymmetric && (
+        <div style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
+          Waist off-center → each side turns at a different radius (highlighted on the plan view).
+        </div>
+      )}
     </div>
   );
 }
@@ -4794,4 +4809,3 @@ export default function App() {
     </div>
   );
 }
- 
