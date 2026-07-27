@@ -13,7 +13,10 @@ const C = {
   gridMajor:    "#37322c",
   center:       "rgba(200,147,90,0.20)",
   snow:         "rgba(237,230,216,0.30)",
-  contactLine:  "rgba(232,85,42,0.55)",  // torch, for tip/tail contact reference lines
+  contactLine:  "rgba(232,85,42,0.55)",  // torch, for tip/tail contact reference LINES (semi-transparent)
+  contactLabel: "#f0895c",                // brighter torch for contact LABEL TEXT (legible when small)
+  waistLine:    "rgba(237,230,216,0.65)", // light bone for the WAIST line (legible, distinct from torch)
+  waistLabel:   "#f3ecdd",                // near-white for the WAIST label text
   skiFill:      "rgba(237,230,216,0.08)",
   skiStroke:    "#ede6d8",  // bone
   skiGlow:      "rgba(237,230,216,0.20)",
@@ -2468,9 +2471,9 @@ function ProfileView({ ski, width, height }) {
     }
 
     ctx.fillStyle = C.dimText;
-    ctx.font = "10px 'JetBrains Mono', monospace";
-    ctx.textAlign = "left";  ctx.fillText("TAIL", padX + 6, padTop + 10);
-    ctx.textAlign = "right"; ctx.fillText("TIP",  padX + plotW - 6, padTop + 10);
+    ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padX + 6, baseY - 4);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padX + plotW - 6, baseY - 4);
 
     if (yExagg > 1.05) {
       ctx.fillStyle = C.labelDim;
@@ -2550,24 +2553,24 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = C.contactLine || "rgba(232,85,42,0.8)";
-      ctx.font = "7px 'JetBrains Mono', monospace";
-      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
+      ctx.fillStyle = C.contactLabel || "#f0895c";
+      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText(lbl, 0, 0); ctx.restore();
     });
-    // WAIST reference line (boot center) — solid brass, so you can align the thickest part of the
+    // WAIST reference line (boot center) — light bone, so you can align the thickest part of the
     // core to it. Sits between the contacts at the waist position.
     {
       const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
       const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
       const x = padL + waistPos * plotW;
-      ctx.strokeStyle = C.handle || "#c8935a";
+      ctx.strokeStyle = C.waistLine || "rgba(237,230,216,0.65)";
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
-      ctx.fillStyle = C.handle || "#c8935a";
-      ctx.font = "7px 'JetBrains Mono', monospace";
-      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, -2); ctx.restore();
+      ctx.fillStyle = C.waistLabel || "#f3ecdd";
+      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, 0); ctx.restore();
     }
 
     // Smooth profile
@@ -2639,9 +2642,9 @@ function CoreView({ ski, setSki, width, height }) {
     });
 
     ctx.fillStyle = C.dimText;
-    ctx.font = "10px 'JetBrains Mono', monospace";
-    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 2, padT + 10);
-    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 2, padT + 10);
+    ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 3, baseY - 4);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 3, baseY - 4);
   }, [ski, width, height, cp, cps, hovered, dragging, toC2, baseY, plotW, plotH, padL, padT, getThickAt]);
 
   const findCP3 = useCallback((mx, my) => {
@@ -2737,23 +2740,23 @@ function FlexView({ ski, flex, width, height }) {
       ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseYF); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = C.contactLine || "rgba(232,85,42,0.8)";
-      ctx.font = "7px 'JetBrains Mono', monospace";
-      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "left"; ctx.fillText(lbl, 0, -2); ctx.restore();
+      ctx.fillStyle = C.contactLabel || "#f0895c";
+      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText(lbl, 0, 0); ctx.restore();
     });
-    // WAIST reference line (boot center) — solid brass, matches the core view.
+    // WAIST reference line (boot center) — light bone, matches the core view.
     {
       const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
       const waistPos = tailContactPos + (tipContactPos - tailContactPos) * wp;
       const x = padL + waistPos * plotW;
-      ctx.strokeStyle = C.handle || "#c8935a";
+      ctx.strokeStyle = C.waistLine || "rgba(237,230,216,0.65)";
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseYF); ctx.stroke();
-      ctx.fillStyle = C.handle || "#c8935a";
-      ctx.font = "7px 'JetBrains Mono', monospace";
-      ctx.save(); ctx.translate(x, padT + 2); ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, -2); ctx.restore();
+      ctx.fillStyle = C.waistLabel || "#f3ecdd";
+      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
+      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, 0); ctx.restore();
     }
 
     const drawSmoothCurve = (points, fillStyle, strokeStyle, lineWidth, glow) => {
@@ -2813,9 +2816,9 @@ function FlexView({ ski, flex, width, height }) {
     ctx.fillText("N\u00B7m\u00B2", 0, 0);
     ctx.restore();
 
-    ctx.fillStyle = C.dimText; ctx.font = "10px 'JetBrains Mono', monospace";
-    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 2, padT + 10);
-    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 2, padT + 10);
+    ctx.fillStyle = C.dimText; ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 3, baseYF - 4);
+    ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 3, baseYF - 4);
 
     ctx.fillStyle = C.flexStroke;
     ctx.fillRect(padL + 6, padT + plotH - 32, 12, 2);
@@ -3041,24 +3044,33 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
 function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   return (
     <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+        {/* Title button takes the available space so its click target is the whole left area. */}
         <button
           onClick={onToggle}
           style={{
-            flex: 1, padding: "9px 12px", background: "transparent", border: "none",
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            cursor: "pointer", textAlign: "left",
+            flex: 1, minWidth: 0, padding: "9px 6px 9px 12px", background: "transparent", border: "none",
+            display: "flex", alignItems: "center", cursor: "pointer", textAlign: "left",
           }}
         >
           <span style={{
             color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
             fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>{title}</span>
-          <span style={{ color: C.heading, fontSize: 16, fontFamily: "monospace", lineHeight: 1, marginLeft: 9 }}>
-            {isOpen ? "\u25BC" : "\u25B6"}
-          </span>
         </button>
-        {accent && <span style={{ marginLeft: 6, display: "inline-flex" }}>{accent}</span>}
+        {/* Accent (info bubble / status chip) sits just left of the triangle, not affecting its position. */}
+        {accent && <span style={{ display: "inline-flex", alignItems: "center", marginRight: 8, flexShrink: 0 }}>{accent}</span>}
+        {/* Triangle is always the last item → always flush right, identical on every row. */}
+        <button
+          onClick={onToggle}
+          aria-label={isOpen ? "Collapse" : "Expand"}
+          style={{
+            background: "transparent", border: "none", cursor: "pointer", padding: "9px 12px 9px 0",
+            color: C.heading, fontSize: 16, fontFamily: "monospace", lineHeight: 1, flexShrink: 0,
+          }}>
+          {isOpen ? "\u25BC" : "\u25B6"}
+        </button>
       </div>
       {isOpen && (
         <div style={{ padding: "2px 12px 10px" }}>
