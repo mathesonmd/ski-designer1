@@ -4757,9 +4757,9 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #37322c" }}>
         <div style={{ color: "#c8935a", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
-          3D PREVIEW \u00B7 {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " \u00B7 topsheet mapped" : ""}
+          3D PREVIEW · {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " · topsheet mapped" : ""}
         </div>
-        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close \u2715</button>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close ✕</button>
       </div>
       <div ref={mountRef} style={{ flex: 1, position: "relative", cursor: "grab", minHeight: 0 }}>
         {status !== "ok" && (
@@ -4771,7 +4771,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
         )}
       </div>
       <div style={{ padding: "8px 16px", borderTop: "1px solid #37322c", color: "#6f685f", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
-        Drag to rotate \u00B7 scroll to zoom \u00B7 topsheet is mapped onto the top surface with rocker &amp; camber
+        Drag to rotate · scroll to zoom · topsheet is mapped onto the top surface with rocker &amp; camber
       </div>
     </div>
   );
@@ -6128,7 +6128,7 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Base SVG</button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-            <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core \u2014 outline + 3D solid</span>
+            <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — outline + 3D solid</span>
             <InfoBubble C={C} width={260}>
               <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D solid whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
             </InfoBubble>
@@ -6183,7 +6183,7 @@ export default function App() {
             <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
           )}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            A wide logo (e.g. 800\u00D7200 px) reads best. Saved on this device; the footer credits the tool.
+            A wide logo (e.g. 800×200 px) reads best. Saved on this device; the footer credits the tool.
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => exportSpecSheet("png")}
