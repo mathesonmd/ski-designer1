@@ -27,7 +27,7 @@ const C = {
   handle:       "#c8935a",  // brass
   handleLine:   "rgba(200,147,90,0.55)",
   label:        "#9b9388",  // bone-dim
-  labelDim:     "#6f685f",
+  labelDim:     "#928a7d",  // lighter dim so small captions stay readable
   value:        "#ede6d8",  // bone
   heading:      "#c8935a",  // brass
   dim:          "rgba(237,230,216,0.35)",
@@ -1588,18 +1588,28 @@ ${body}
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
 // 3D wood core as a binary STL: flat bottom (Z=0) with the top surface following the core thickness
-// taper from the Core Side view, held constant across the width at each length station. Length is
-// along X, width along Y, thickness up Z, centered on origin with the flat face on Z=0 — so it drops
-// straight into Vectric Aspire (import as millimetres) as a 3D model you can rough and finish on the
-// top, no vector-to-CAD modeling first. Non-V-cut cores only; a V-cut is a planform trim you'd apply
-// separately.
+// taper from the Core Side view, held constant across the width at each length station. Includes the
+// core inset (narrower than the ski by coreInset per side) and any tip/tail V-cuts (the core tapers to
+// the V apex and stops). Length along X, width along Y, thickness up Z, centered with the flat face on
+// Z=0 — drops into CAM (import as millimetres) as a solid to rough & finish the core top.
 function exportCoreSTL(ski) {
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
-  const L = ski.length, N = 240;
-  const hwAt = (pos) => Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-  const tAt = (pos) => Math.max(0.3, getCoreThickAt(ski.coreProfile, pos));
+  const L = ski.length, N = 300;
+  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const tipExt = ski.vcutTipExt || 0, tailExt = ski.vcutTailExt || 0;
+  const hwCore = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+  const tAt = (xmm) => Math.max(0.3, getCoreThickAt(ski.coreProfile, xmm / L));
+  // Half-width, tapering linearly to the apex across each V-cut region (core body unchanged).
+  const hwV = (xmm) => {
+    if (vTail && xmm < tailContactX) { const a = tailContactX - tailExt; return (tailExt > 0 && xmm > a) ? hwCore(tailContactX) * (xmm - a) / tailExt : 0; }
+    if (vTip && xmm > tipContactX) { const a = tipContactX + tipExt; return (tipExt > 0 && xmm < a) ? hwCore(tipContactX) * (a - xmm) / tipExt : 0; }
+    return hwCore(xmm);
+  };
+  const xMin = vTail ? tailContactX - tailExt : 0;
+  const xMax = vTip ? tipContactX + tipExt : L;
   const st = [];
-  for (let i = 0; i <= N; i++) { const pos = i / N; st.push({ x: pos * L - L / 2, hw: hwAt(pos), t: tAt(pos) }); }
+  for (let i = 0; i <= N; i++) { const xmm = xMin + (xMax - xMin) * (i / N); st.push({ x: xmm - L / 2, hw: Math.max(0.4, hwV(xmm)), t: tAt(xmm) }); }
 
   const tris = [];
   const nrm = (a, b, c) => {
@@ -4401,7 +4411,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
         <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m)</span>
         <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
-          <span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
+          <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
           {segBtn("waist", "Waist")}
           {segBtn("tiptail", "Tip/Tail")}
         </span>
@@ -4418,7 +4428,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
       />
       {derived.asymmetric && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-          <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>
+          <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>
             front / back R
           </span>
           <span style={{ color: C.contactLabel || "#f0895c", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
@@ -4427,7 +4437,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         </div>
       )}
       {derived.asymmetric && (
-        <div style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
+        <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
           Waist off-center → each side turns at a different radius (highlighted on the plan view).
         </div>
       )}
@@ -4534,7 +4544,7 @@ function RockerProfileField({ ski, setSki, C }) {
 
   const cellStyle = { flex: 1, minWidth: 0 };
   const inputStyle = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", textAlign: "center" };
-  const subLabel = { color: C.labelDim, fontSize: 9, textAlign: "center", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" };
+  const subLabel = { color: C.labelDim, fontSize: 10.5, textAlign: "center", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" };
 
   return (
     <div style={{ marginBottom: 7 }}>
@@ -4572,7 +4582,7 @@ function RockerProfileField({ ski, setSki, C }) {
           <div style={subLabel}>TAIL</div>
         </div>
       </div>
-      <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+      <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
         {linked
           ? "Linked: % sets tip/tail length (moves contacts + radius)."
           : "Unlinked: % sets rocker takeoff only. Contacts + radius stay fixed."}
@@ -5306,15 +5316,13 @@ export default function App() {
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
-  // Non-collapsible section-group label + one-line explanation, to organize the sidebar into an
-  // ordered workflow that a first-time user can follow top to bottom.
+  // Section-group label with an info bubble for its one-line explanation — condenses the sidebar to a
+  // single line per group while keeping the guidance one tap away.
   const groupHeader = (label, caption) => (
-    <div style={{ margin: "16px 2px 6px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{label}</span>
-        <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
-      </div>
-      {caption && <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>{caption}</div>}
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "16px 2px 5px" }}>
+      <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{label}</span>
+      {caption && <InfoBubble C={C} width={230}>{caption}</InfoBubble>}
+      <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
     </div>
   );
   const toggleBtn = (label, key) => (
@@ -5665,7 +5673,7 @@ export default function App() {
             <input readOnly value={shareCopyUrl} onFocus={e => e.target.select()}
               style={{ width: "100%", marginTop: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} />
           )}
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             A link that reopens this exact design in any browser. Artwork isn't included.
           </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
@@ -5755,7 +5763,7 @@ export default function App() {
                     );
                   })}
                 </div>
-                <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                   {ski.waistFullLength
                     ? "0.5 = geometric center of the ski (fraction of full length)."
                     : "0.5 = midway between the contact points (fraction of running edge)."}
@@ -5786,7 +5794,7 @@ export default function App() {
                   );
                 })}
               </div>
-              <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                 {(ski.insertPattern || "2x4") === "channel"
                   ? "Burton-style centered channel per foot."
                   : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
@@ -5853,7 +5861,7 @@ export default function App() {
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE</div>
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Narrows the wood core inside the edges (sidewall material) per side.
           </div>
 
@@ -5871,7 +5879,7 @@ export default function App() {
           {ski.vcutTip && inputField("Tip ext (mm)", "vcutTipExt", 10, Math.max(20, ski.tipLength))}
           {toggleBtn("Tail V-cut", "vcutTail")}
           {ski.vcutTail && inputField("Tail ext (mm)", "vcutTailExt", 10, Math.max(20, ski.tailLength))}
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Core terminates at the V; region beyond is fill. Preview in the Core view.
           </div>
         </AccordionSection>
@@ -5925,7 +5933,7 @@ export default function App() {
               PNG (150dpi)
             </button>
           </div>
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             1:1 cut line + bleed + crop marks. Art is embedded and aligned exactly as shown above (use the Fit/Shift/Scale/Rotate controls to place it). For crisp prints, upload art at ~150 dpi of the final size (a full ski ≈ 10,600 px long).
           </div>
 
@@ -5940,7 +5948,7 @@ export default function App() {
                 style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
                 {pairView ? "Pair View: ON" : "Pair View: OFF"}
               </button>
-              <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                 Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
               </div>
             </>
@@ -6035,7 +6043,7 @@ export default function App() {
               return Math.round(Object.keys(qv).reduce((s, k) => s + qv[k] * (bomPrices[k] || 0), 0));
             })()}
           </span>}>
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Estimated from geometry + layup. Prices are editable (USD) and saved on this device. A rough guide, not a quote.
           </div>
           {(() => {
@@ -6052,7 +6060,7 @@ export default function App() {
             ];
             const total = rows.reduce((s, r) => s + r.qty * (bomPrices[r.key] || 0), 0);
             const cellL = { color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" };
-            const cellD = { color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" };
+            const cellD = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
             return (
               <>
                 {rows.map(r => (
@@ -6119,20 +6127,21 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Base DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Base SVG</button>
           </div>
-          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — core-inset outline + contact marks</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>Core DXF</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>Core SVG</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core \u2014 outline + 3D solid</span>
+            <InfoBubble C={C} width={260}>
+              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D solid whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
+            </InfoBubble>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={expBtn}>STL</button>
           </div>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core Side — thickness taper profile</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideSVG)} style={expBtn}>Core Side SVG</button>
-          </div>
-          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core 3D — flat-bottomed solid for CAM</div>
-          <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={{ ...expBtn, width: "100%", marginBottom: 4 }}>Core STL (3D)</button>
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Flat bottom, top follows the core-side taper. Import into Aspire/CAM as <span style={{ color: C.heading }}>millimetres</span> to rough &amp; finish the core \u2014 no CAD modeling needed.
           </div>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Combined — all views aligned for lofting</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
@@ -6173,7 +6182,7 @@ export default function App() {
           {builderBrand.logoSrc && (
             <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
           )}
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             A wide logo (e.g. 800\u00D7200 px) reads best. Saved on this device; the footer credits the tool.
           </div>
           <div style={{ display: "flex", gap: 6 }}>
