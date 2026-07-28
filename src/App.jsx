@@ -876,6 +876,64 @@ function orientPt(a, t, orientation) {
 function skiOrientation(ski) {
   return ski.exportOrientation === "horizontal" ? "horizontal" : "vertical";
 }
+const HERSHEY = {"0":[10,"M9,1 L6,2 4,5 3,10 3,13 4,18 6,21 9,22 11,22 14,21 16,18 17,13 17,10 16,5 14,2 11,1 9,1"],"1":[10,"M6,5 L8,4 11,1 11,22"],"2":[10,"M4,6 L4,5 5,3 6,2 8,1 12,1 14,2 15,3 16,5 16,7 15,9 13,12 3,22 17,22"],"3":[10,"M5,1 L16,1 10,9 13,9 15,10 16,11 17,14 17,16 16,19 14,21 11,22 8,22 5,21 4,20 3,18"],"4":[10,"M13,1 L3,15 18,15 M13,1 L13,22"],"5":[10,"M15,1 L5,1 4,10 5,9 8,8 11,8 14,9 16,11 17,14 17,16 16,19 14,21 11,22 8,22 5,21 4,20 3,18"],"6":[10,"M16,4 L15,2 12,1 10,1 7,2 5,5 4,10 4,15 5,19 7,21 10,22 11,22 14,21 16,19 17,16 17,15 16,12 14,10 11,9 10,9 7,10 5,12 4,15"],"7":[10,"M17,1 L7,22 M3,1 L17,1"],"8":[10,"M8,1 L5,2 4,4 4,6 5,8 7,9 11,10 14,11 16,13 17,15 17,18 16,20 15,21 12,22 8,22 5,21 4,20 3,18 3,15 4,13 6,11 9,10 13,9 15,8 16,6 16,4 15,2 12,1 8,1"],"9":[10,"M16,8 L15,11 13,13 10,14 9,14 6,13 4,11 3,8 3,7 4,4 6,2 9,1 10,1 13,2 15,4 16,8 16,13 15,18 13,21 10,22 8,22 5,21 4,19"],"!":[5,"M5,1 L5,15 M5,20 L4,21 5,22 6,21 5,20"],"\"":[8,"M4,1 L4,8 M12,1 L12,8"],"#":[11,"M11,-3 L4,29 M17,-3 L10,29 M4,10 L18,10 M3,16 L17,16"],"$":[10,"M8,-3 L8,26 M12,-3 L12,26 M17,4 L15,2 12,1 8,1 5,2 3,4 3,6 4,8 5,9 7,10 13,12 15,13 16,14 17,16 17,19 15,21 12,22 8,22 5,21 3,19"],"%":[12,"M21,1 L3,22 M8,1 L10,3 10,5 9,7 7,8 5,8 3,6 3,4 4,2 6,1 8,1 10,2 13,3 16,3 19,2 21,1 M17,15 L15,16 14,18 14,20 16,22 18,22 20,21 21,19 21,17 19,15 17,15"],"&":[13,"M23,10 L23,9 22,8 21,8 20,9 19,11 17,16 15,19 13,21 11,22 7,22 5,21 4,20 3,18 3,16 4,14 5,13 12,9 13,8 14,6 14,4 13,2 11,1 9,2 8,4 8,6 9,9 11,12 16,19 18,21 20,22 22,22 23,21 23,20"],"'":[5,"M5,3 L4,2 5,1 6,2 6,4 5,6 4,7"],"(":[7,"M11,-3 L9,-1 7,2 5,6 4,11 4,15 5,20 7,24 9,27 11,29"],")":[7,"M3,-3 L5,-1 7,2 9,6 10,11 10,15 9,20 7,24 5,27 3,29"],"*":[8,"M8,7 L8,19 M3,10 L13,16 M13,10 L3,16"],"+":[13,"M13,4 L13,22 M4,13 L22,13"],",":[4,"M5,18 L4,19 3,18 4,17 5,18 5,20 3,22"],"-":[13,"M4,13 L22,13"],".":[4,"M4,17 L3,18 4,19 5,18 4,17"],"/":[11,"M20,-3 L2,29"],":":[4,"M4,10 L3,11 4,12 5,11 4,10 M4,17 L3,18 4,19 5,18 4,17"],";":[4,"M4,10 L3,11 4,12 5,11 4,10 M5,18 L4,19 3,18 4,17 5,18 5,20 3,22"],"<":[12,"M20,4 L4,13 20,22"],"=":[13,"M4,10 L22,10 M4,16 L22,16"],">":[12,"M4,4 L20,13 4,22"],"?":[9,"M3,6 L3,5 4,3 5,2 7,1 11,1 13,2 14,3 15,5 15,7 14,9 13,10 9,12 9,15 M9,20 L8,21 9,22 10,21 9,20"],"@":[14,"M18,9 L17,7 15,6 12,6 10,7 9,8 8,11 8,14 9,16 11,17 14,17 16,16 17,14 M12,6 L10,8 9,11 9,14 10,16 11,17 M18,6 L17,14 17,16 19,17 21,17 23,15 24,12 24,10 23,7 22,5 20,3 18,2 15,1 12,1 9,2 7,3 5,5 4,7 3,10 3,13 4,16 5,18 7,20 9,21 12,22 15,22 18,21 20,20 21,19 M19,6 L18,14 18,16 19,17"],"A":[9,"M9,1 L1,22 M9,1 L17,22 M4,15 L14,15"],"B":[10,"M4,1 L4,22 M4,1 L13,1 16,2 17,3 18,5 18,7 17,9 16,10 13,11 M4,11 L13,11 16,12 17,13 18,15 18,18 17,20 16,21 13,22 4,22"],"C":[11,"M18,6 L17,4 15,2 13,1 9,1 7,2 5,4 4,6 3,9 3,14 4,17 5,19 7,21 9,22 13,22 15,21 17,19 18,17"],"D":[10,"M4,1 L4,22 M4,1 L11,1 14,2 16,4 17,6 18,9 18,14 17,17 16,19 14,21 11,22 4,22"],"E":[9,"M4,1 L4,22 M4,1 L17,1 M4,11 L12,11 M4,22 L17,22"],"F":[8,"M4,1 L4,22 M4,1 L17,1 M4,11 L12,11"],"G":[11,"M18,6 L17,4 15,2 13,1 9,1 7,2 5,4 4,6 3,9 3,14 4,17 5,19 7,21 9,22 13,22 15,21 17,19 18,17 18,14 M13,14 L18,14"],"H":[11,"M4,1 L4,22 M18,1 L18,22 M4,11 L18,11"],"I":[4,"M4,1 L4,22"],"J":[8,"M12,1 L12,17 11,20 10,21 8,22 6,22 4,21 3,20 2,17 2,15"],"K":[10,"M4,1 L4,22 M18,1 L4,15 M9,10 L18,22"],"L":[7,"M4,1 L4,22 M4,22 L16,22"],"M":[12,"M4,1 L4,22 M4,1 L12,22 M20,1 L12,22 M20,1 L20,22"],"N":[11,"M4,1 L4,22 M4,1 L18,22 M18,1 L18,22"],"O":[11,"M9,1 L7,2 5,4 4,6 3,9 3,14 4,17 5,19 7,21 9,22 13,22 15,21 17,19 18,17 19,14 19,9 18,6 17,4 15,2 13,1 9,1"],"P":[10,"M4,1 L4,22 M4,1 L13,1 16,2 17,3 18,5 18,8 17,10 16,11 13,12 4,12"],"Q":[11,"M9,1 L7,2 5,4 4,6 3,9 3,14 4,17 5,19 7,21 9,22 13,22 15,21 17,19 18,17 19,14 19,9 18,6 17,4 15,2 13,1 9,1 M12,18 L18,24"],"R":[10,"M4,1 L4,22 M4,1 L13,1 16,2 17,3 18,5 18,7 17,9 16,10 13,11 4,11 M11,11 L18,22"],"S":[10,"M17,4 L15,2 12,1 8,1 5,2 3,4 3,6 4,8 5,9 7,10 13,12 15,13 16,14 17,16 17,19 15,21 12,22 8,22 5,21 3,19"],"T":[8,"M8,1 L8,22 M1,1 L15,1"],"U":[11,"M4,1 L4,16 5,19 7,21 10,22 12,22 15,21 17,19 18,16 18,1"],"V":[9,"M1,1 L9,22 M17,1 L9,22"],"W":[12,"M2,1 L7,22 M12,1 L7,22 M12,1 L17,22 M22,1 L17,22"],"X":[10,"M3,1 L17,22 M17,1 L3,22"],"Y":[9,"M1,1 L9,11 9,22 M17,1 L9,11"],"Z":[10,"M17,1 L3,22 M3,1 L17,1 M3,22 L17,22"],"[":[7,"M4,-3 L4,29 M5,-3 L5,29 M4,-3 L11,-3 M4,29 L11,29"],"\\":[7,"M0,1 L14,25"],"]":[7,"M9,-3 L9,29 M10,-3 L10,29 M3,-3 L10,-3 M3,29 L10,29"],"^":[8,"M8,-1 L0,13 M8,-1 L16,13"],"_":[9,"M0,29 L18,29"],"`":[4,"M5,6 L3,8 3,10 4,11 5,10 4,9 3,10"],"a":[10,"M15,8 L15,22 M15,11 L13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"b":[9,"M4,1 L4,22 M4,11 L6,9 8,8 11,8 13,9 15,11 16,14 16,16 15,19 13,21 11,22 8,22 6,21 4,19"],"c":[9,"M15,11 L13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"d":[10,"M15,1 L15,22 M15,11 L13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"e":[9,"M3,14 L15,14 15,12 14,10 13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"f":[7,"M10,1 L8,1 6,2 5,5 5,22 M2,8 L9,8"],"g":[10,"M15,8 L15,24 14,27 13,28 11,29 8,29 6,28 M15,11 L13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"h":[10,"M4,1 L4,22 M4,12 L7,9 9,8 12,8 14,9 15,12 15,22"],"i":[4,"M3,1 L4,2 5,1 4,0 3,1 M4,8 L4,22"],"j":[5,"M5,1 L6,2 7,1 6,0 5,1 M6,8 L6,25 5,28 3,29 1,29"],"k":[8,"M4,1 L4,22 M14,8 L4,18 M8,14 L15,22"],"l":[4,"M4,1 L4,22"],"m":[15,"M4,8 L4,22 M4,12 L7,9 9,8 12,8 14,9 15,12 15,22 M15,12 L18,9 20,8 23,8 25,9 26,12 26,22"],"n":[10,"M4,8 L4,22 M4,12 L7,9 9,8 12,8 14,9 15,12 15,22"],"o":[10,"M8,8 L6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19 16,16 16,14 15,11 13,9 11,8 8,8"],"p":[9,"M4,8 L4,29 M4,11 L6,9 8,8 11,8 13,9 15,11 16,14 16,16 15,19 13,21 11,22 8,22 6,21 4,19"],"q":[10,"M15,8 L15,29 M15,11 L13,9 11,8 8,8 6,9 4,11 3,14 3,16 4,19 6,21 8,22 11,22 13,21 15,19"],"r":[6,"M4,8 L4,22 M4,14 L5,11 7,9 9,8 12,8"],"s":[9,"M14,11 L13,9 10,8 7,8 4,9 3,11 4,13 6,14 11,15 13,16 14,18 14,19 13,21 10,22 7,22 4,21 3,19"],"t":[7,"M5,1 L5,18 6,21 8,22 10,22 M2,8 L9,8"],"u":[10,"M4,8 L4,18 5,21 7,22 10,22 12,21 15,18 M15,8 L15,22"],"v":[8,"M2,8 L8,22 M14,8 L8,22"],"w":[11,"M3,8 L7,22 M11,8 L7,22 M11,8 L15,22 M19,8 L15,22"],"x":[9,"M3,8 L14,22 M14,8 L3,22"],"y":[8,"M2,8 L8,22 M14,8 L8,22 6,26 4,28 2,29 1,29"],"z":[9,"M14,8 L3,22 M3,8 L14,8 M3,22 L14,22"],"{":[7,"M9,-3 L7,-2 6,-1 5,1 5,3 6,5 7,6 8,8 8,10 6,12 M7,-2 L6,0 6,2 7,4 8,5 9,7 9,9 8,11 4,13 8,15 9,17 9,19 8,21 7,22 6,24 6,26 7,28 M6,14 L8,16 8,18 7,20 6,21 5,23 5,25 6,27 7,28 9,29"],"|":[4,"M4,-3 L4,29"],"}":[7,"M5,-3 L7,-2 8,-1 9,1 9,3 8,5 7,6 6,8 6,10 8,12 M7,-2 L8,0 8,2 7,4 6,5 5,7 5,9 6,11 10,13 6,15 5,17 5,19 6,21 7,22 8,24 8,26 7,28 M8,14 L6,16 6,18 7,20 8,21 9,23 9,25 8,27 7,28 5,29"],"~":[12,"M3,16 L3,14 4,11 6,10 8,10 10,11 14,14 16,15 18,15 20,14 21,12 M3,14 L4,12 6,11 8,11 10,12 14,15 16,16 18,16 20,15 21,12 21,10"]};
+// Render a string as baked single-stroke (Hershey Simplex) polyline path geometry. Unlike SVG
+// <text>, this imports as real vector geometry in CAM tools (Vectric, LightBurn, Illustrator),
+// which typically ignore <text>. Baseline sits at (x, y); capitals are ~sizeMM tall; y increases
+// downward (SVG screen space). anchor: 'start' | 'middle' | 'end'.
+function hersheyPath(str, x, y, sizeMM, opts) {
+  opts = opts || {};
+  const s = sizeMM / 21, SPACE_W = 10;
+  let total = 0;
+  for (const ch of str) { const g = HERSHEY[ch]; total += g ? g[0] : SPACE_W; }
+  let penX = x;
+  if (opts.anchor === 'middle') penX = x - total * s / 2;
+  else if (opts.anchor === 'end') penX = x - total * s;
+  let d = '';
+  for (const ch of str) {
+    const g = HERSHEY[ch];
+    const w = g ? g[0] : SPACE_W;
+    if (g && g[1]) {
+      const toks = g[1].split(' ');
+      let cmd = 'L';
+      for (const t of toks) {
+        let coord = t;
+        if (t[0] === 'M' || t[0] === 'L') { cmd = t[0]; coord = t.slice(1); }
+        const p = coord.split(',');
+        const X = penX + parseFloat(p[0]) * s, Y = y + (parseFloat(p[1]) - 22) * s;
+        d += (cmd === 'M' ? 'M' : 'L') + X.toFixed(2) + ',' + Y.toFixed(2) + ' ';
+        if (cmd === 'M') cmd = 'L';
+      }
+    }
+    penX += w * s;
+  }
+  const sw = (opts.strokeWidth !== undefined) ? opts.strokeWidth : sizeMM * 0.045;
+  return `<path d="${d.trim()}" fill="none" stroke="${opts.color || '#000'}" stroke-width="${sw.toFixed(2)}"/>`;
+}
+// Approximate rendered width (mm) of a Hershey string at a given cap size — for layout/bounds.
+function hersheyWidth(str, sizeMM) {
+  const s = sizeMM / 21; let total = 0;
+  for (const ch of str) { const g = HERSHEY[ch]; total += g ? g[0] : 10; }
+  return total * s;
+}
+// Compute a tight bounding box (with padding) over ALL geometry in an assembled SVG body — path 'd'
+// coordinates plus <line> endpoints. Used to frame the viewBox so nothing (including baked label
+// paths, which can overhang the geometry) ever clips.
+function svgBBox(content, pad = 12) {
+  const xs = [], ys = [];
+  const dAttr = content.matchAll(/\sd="([^"]+)"/g);
+  for (const dm of dAttr) {
+    const cm = dm[1].matchAll(/(-?[\d.]+)[ ,](-?[\d.]+)/g);
+    for (const c of cm) { xs.push(parseFloat(c[1])); ys.push(parseFloat(c[2])); }
+  }
+  const lines = content.matchAll(/<line[^>]*x1="(-?[\d.]+)"[^>]*y1="(-?[\d.]+)"[^>]*x2="(-?[\d.]+)"[^>]*y2="(-?[\d.]+)"/g);
+  for (const l of lines) { xs.push(parseFloat(l[1]), parseFloat(l[3])); ys.push(parseFloat(l[2]), parseFloat(l[4])); }
+  if (!xs.length) return { minX: 0, minY: 0, W: 1, H: 1 };
+  const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
+  const maxX = Math.max(...xs) + pad, maxY = Math.max(...ys) + pad;
+  return { minX, minY, W: maxX - minX, H: maxY - minY };
+}
+
 // Appends binding-insert geometry to a DXF on the INSERTS layer (snowboard mode only): a circle at
 // each drill center (2x4 / 4x4) or a closed slot outline per foot (channel), plus a small cross at
 // each pack center. `tf(x,y)` maps ski coords (x=width, y=length) to the target layout (default:
@@ -1147,11 +1205,20 @@ function exportPlanSVG(ski){
   // (a 4mm label on an 1800mm sheet is invisible at fit-to-view). fL = contact-label height.
   const fL = Math.max(ski.length / 60, 14);
   const fTbl = Math.max(ski.length / 75, 12);
+  const charW = fL * 0.62;
 
-  // Measurements table (top-right of the geometry). Dimensions come back from the builder.
+  // Right extent of the contact labels (they sit to the right of the geometry at each station). The
+  // table must clear these so nothing overlaps.
+  const labelRightExtent = Math.max(gMaxX, ...marks.map(m => {
+    const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
+    const pl = P({ x: halfW + fL * 0.4, y: m.skiY });
+    return pl.x + m.label.length * charW;
+  }));
+
+  // Measurements table (top-right, beyond both the geometry and the contact labels).
   const coreInsetVal = ski.coreInset !== undefined ? ski.coreInset : 0;
   const tblGap = fL;
-  const tblX = pad + geomW + tblGap;
+  const tblX = (labelRightExtent - gMinX + pad) + tblGap;
   const tblTopY = pad + 8;
   const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: coreInsetVal }, fTbl);
   const tblH = tbl.height;
@@ -1175,7 +1242,7 @@ function exportPlanSVG(ski){
     const lbl = { x: halfW + fL * 0.4, y: m.skiY };
     const pa = P(a), pb = P(b), pl = P(lbl);
     return `    <line x1="${sx(pa.x).toFixed(2)}" y1="${sy(pa.y).toFixed(2)}" x2="${sx(pb.x).toFixed(2)}" y2="${sy(pb.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
-    <text x="${sx(pl.x).toFixed(2)}" y="${(sy(pl.y) + fL*0.35).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    ${hersheyPath(m.label, sx(pl.x), sy(pl.y) + fL*0.35, fL, {color:'#aa0000'})}`;
   }).join('\n');
 
   // Centerline along the full length at lateral 0.
@@ -1197,16 +1264,18 @@ function exportPlanSVG(ski){
     <path d="${insetPath}"/>
   </g>` : ''}`;
 
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(2)}mm" height="${totalH.toFixed(2)}mm" viewBox="0 0 ${totalW.toFixed(2)} ${totalH.toFixed(2)}">
-  <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
-  <desc>${edgeDesc} Red = reference lines. Orientation: ${O}. Units: mm.</desc>
-${cutGroup}
+  const body = `${cutGroup}
   <g id="table">${tbl.svg}</g>
   <g id="centerline">${centerline}</g>
   <g id="reference">
 ${refMarks}
-  </g>
+  </g>`;
+  const bb = svgBBox(body);
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${bb.W.toFixed(2)}mm" height="${bb.H.toFixed(2)}mm" viewBox="${bb.minX.toFixed(2)} ${bb.minY.toFixed(2)} ${bb.W.toFixed(2)} ${bb.H.toFixed(2)}">
+  <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
+  <desc>${edgeDesc} Red = reference lines. Orientation: ${O}. Units: mm.</desc>
+${body}
 </svg>`;
   downloadFile(svg, `bcs-ski-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1268,16 +1337,16 @@ function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
 // plus the table's width/height so callers can size the viewBox and place it without overlap.
 function buildMeasurementsTableSVG(ski, tblX, tblTopY, extra = {}, fs = 24) {
   const rows = measurementRows(ski, extra);
-  const headerF = fs * 1.3, rowH = fs * 1.7, charW = fs * 0.62;
-  const maxLabelLen = Math.max(...rows.map(r => r[0].length));
-  const maxValLen = Math.max(...rows.map(r => r[1].length));
-  const valOff = maxLabelLen * charW + fs * 1.2;
-  const width = valOff + maxValLen * charW + fs;
+  const headerF = fs * 1.3, rowH = fs * 1.7;
+  // Column width from actual Hershey advance widths so the value column clears the widest label.
+  const valOff = Math.max(...rows.map(r => hersheyWidth(r[0], fs))) + fs * 1.2;
+  const maxValW = Math.max(...rows.map(r => hersheyWidth(r[1], fs)));
+  const width = valOff + maxValW + fs;
   let y = tblTopY + headerF;
-  let out = `<text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="${headerF.toFixed(1)}" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`;
+  let out = hersheyPath("MEASUREMENTS (mm)", tblX, y, headerF, { strokeWidth: headerF * 0.07 });
   y += rowH * 1.2;
   rows.forEach(([k, v]) => {
-    out += `\n    <text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="${fs.toFixed(1)}" fill="#000" font-family="monospace">${k}</text><text x="${(tblX + valOff).toFixed(2)}" y="${y.toFixed(2)}" font-size="${fs.toFixed(1)}" fill="#000" font-family="monospace">${v}</text>`;
+    out += "\n    " + hersheyPath(k, tblX, y, fs) + hersheyPath(v, tblX + valOff, y, fs);
     y += rowH;
   });
   return { svg: out, width, height: (y - tblTopY) };
@@ -1403,7 +1472,7 @@ function exportCoreSideSVG(ski){
   }
   const maxT = Math.max(...topPts.map(p => p.y));
   const marks = getRegistrationMarks(ski);
-  const L = ski.length, pad = 10, sz = 8;
+  const L = ski.length, pad = 10, sz = 1;  // sz=1: true 1:1 thickness, matching the DXF (no exaggeration)
   const O = skiOrientation(ski);
   const fL = Math.max(ski.length / 60, 14);
   // Canonical math point (Y up): a = along, te = thickness * sz (exaggerated for readability).
@@ -1428,15 +1497,17 @@ function exportCoreSideSVG(ski){
   const regLines = marks.map(m => {
     const a = M(m.skiY, 0), b = M(m.skiY, maxT), lbl = M(m.skiY + 2, maxT);
     return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - fL*0.3).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    ${hersheyPath(m.label, sx(lbl.x), sy(lbl.y) - fL*0.3, fL, {color:'#aa0000'})}`;
   }).join('\n    ');
 
+  const body = `  <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
+  <g id="reference">${regLines}</g>`;
+  const bb = svgBBox(body);
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${bb.W.toFixed(1)}mm" height="${bb.H.toFixed(1)}mm" viewBox="${bb.minX.toFixed(1)} ${bb.minY.toFixed(1)} ${bb.W.toFixed(1)} ${bb.H.toFixed(1)}">
   <title>Black Chapel Studios — Core Side Profile ${ski.length}mm</title>
-  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Thickness scale ${sz}x. Orientation: ${O}.</desc>
-  <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
-  <g id="reference">${regLines}</g>
+  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. True 1:1 (matches DXF). Orientation: ${O}.</desc>
+${body}
 </svg>`;
   downloadFile(svg, `bcs-ski-core-side-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1558,7 +1629,7 @@ function exportCorePlanSVG(ski){
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
     const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + fL * 0.4, y: m.skiY });
     return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) + fL*0.35).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    ${hersheyPath(m.label, sx(lbl.x), sy(lbl.y) + fL*0.35, fL, {color:'#aa0000'})}`;
   }).join('\n    ');
   const cc0 = P({ x: 0, y: 0 }), cc1 = P({ x: 0, y: ski.length });
   const centerline = `<line x1="${sx(cc0.x).toFixed(2)}" y1="${sy(cc0.y).toFixed(2)}" x2="${sx(cc1.x).toFixed(2)}" y2="${sy(cc1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
@@ -1568,23 +1639,25 @@ function exportCorePlanSVG(ski){
   if (ski.vcutTip) {
     const apexY = Math.min((ski.length - ski.tipLength) + (ski.vcutTipExt || 0), ski.length - 4);
     const p = P({ x: 6, y: apexY });
-    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="${(fL*0.85).toFixed(1)}" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
+    vcutNotes.push(hersheyPath("TIP V-CUT (fill beyond)", sx(p.x), sy(p.y), fL*0.85, {color:'#aa0000'}));
   }
   if (ski.vcutTail) {
     const apexY = Math.max(ski.tailLength - (ski.vcutTailExt || 0), 8);
     const p = P({ x: 6, y: apexY });
-    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="${(fL*0.85).toFixed(1)}" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
+    vcutNotes.push(hersheyPath("TAIL V-CUT (fill beyond)", sx(p.x), sy(p.y), fL*0.85, {color:'#aa0000'}));
   }
   const vcutNote = vcutNotes.join('\n    ');
 
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(2)}mm" height="${totalH.toFixed(2)}mm" viewBox="0 0 ${totalW.toFixed(2)} ${totalH.toFixed(2)}">
-  <title>Black Chapel Studios — Core Plan Outline ${ski.length}mm</title>
-  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation${(ski.vcutTip || ski.vcutTail) ? "; tip/tail terminate in a V-cut fill" : ""}. Orientation: ${O}.</desc>
-  <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
+  const body = `  <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
   <g id="centerline">${centerline}</g>
   <g id="reference">${regLines}</g>
-  <g id="vcut-notes">${vcutNote}</g>
+  <g id="vcut-notes">${vcutNote}</g>`;
+  const bb = svgBBox(body);
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${bb.W.toFixed(2)}mm" height="${bb.H.toFixed(2)}mm" viewBox="${bb.minX.toFixed(2)} ${bb.minY.toFixed(2)} ${bb.W.toFixed(2)} ${bb.H.toFixed(2)}">
+  <title>Black Chapel Studios — Core Plan Outline ${ski.length}mm</title>
+  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation${(ski.vcutTip || ski.vcutTail) ? "; tip/tail terminate in a V-cut fill" : ""}. Orientation: ${O}.</desc>
+${body}
 </svg>`;
   downloadFile(svg, `bcs-ski-core-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1665,17 +1738,19 @@ function exportRockerSVG(ski){
   const regLines = marks.map(m => {
     const a = M(m.skiY, -2), b = M(m.skiY, maxY + 2), lbl = M(m.skiY + 2, maxY);
     return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.06).toFixed(2)}" stroke-dasharray="3,2"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - fL*0.4).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    ${hersheyPath(m.label, sx(lbl.x), sy(lbl.y) - fL*0.4, fL, {color:'#aa0000'})}`;
   }).join('\n    ');
   const b0 = M(0, 0), b1 = M(L, 0);
 
+  const body = `  <g id="rocker"><path d="${pathD}" fill="none" stroke="#000" stroke-width="0.6"/></g>
+  <g id="baseline"><line x1="${sx(b0.x).toFixed(2)}" y1="${sy(b0.y).toFixed(2)}" x2="${sx(b1.x).toFixed(2)}" y2="${sy(b1.y).toFixed(2)}" stroke="#888" stroke-width="0.3"/></g>
+  <g id="registration">${regLines}</g>`;
+  const bb = svgBBox(body);
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${bb.W.toFixed(1)}mm" height="${bb.H.toFixed(1)}mm" viewBox="${bb.minX.toFixed(1)} ${bb.minY.toFixed(1)} ${bb.W.toFixed(1)} ${bb.H.toFixed(1)}">
   <title>Black Chapel Studios — Rocker/Mold Profile ${ski.length}mm</title>
   <desc>Side-view rocker line for press mold. Orientation: ${O}. Units: mm, true 1:1 scale.</desc>
-  <g id="rocker"><path d="${pathD}" fill="none" stroke="#000" stroke-width="0.6"/></g>
-  <g id="baseline"><line x1="${sx(b0.x).toFixed(2)}" y1="${sy(b0.y).toFixed(2)}" x2="${sx(b1.x).toFixed(2)}" y2="${sy(b1.y).toFixed(2)}" stroke="#888" stroke-width="0.3"/></g>
-  <g id="registration">${regLines}</g>
+${body}
 </svg>`;
   downloadFile(svg, `bcs-ski-rocker-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1841,14 +1916,27 @@ function exportCombinedDXF(ski){
     dxf += text('TEXT', { x: m.skiY + 2, y: topY + 3 }, 6, m.label);
   });
 
-  // ── VIEW LABELS ── one per band, lifted into the empty GAP above each band's top edge so the
-  // text never crosses the geometry. ASCII only (DXF default font renders non-ASCII as "???").
+  // ── VIEW LABELS ── identify each band. Placed directly in FINAL (post-orientation) space so they
+  // never collapse onto one line. Horizontal has room for full descriptions above each stacked band;
+  // vertical uses short identifiers at the tip end of each side-by-side strip (details are in the
+  // table). ASCII only (DXF default font renders non-ASCII as "???").
   const edgeWrap = ski.edgeWrap || "full";
   const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
-  const lblX = 0, lblH = 9;
-  dxf += text('LABEL', { x: lblX, y: topY + 22 }, lblH, baseLbl);
-  dxf += text('LABEL', { x: lblX, y: coreYoff + halfCoreW + 12 }, lblH, `CORE: outline (inset ${g.coreInset}mm/side)`);
-  dxf += text('LABEL', { x: lblX, y: sideYoff + maxThick + 12 }, lblH, "CORE SIDE: thickness taper (flat bottom)");
+  const lblH = 9;
+  const bands = [
+    { full: baseLbl, short: "BASE", cy: baseYoff, half: halfBaseW },
+    { full: `CORE: outline (inset ${g.coreInset}mm/side)`, short: "CORE", cy: coreYoff, half: halfCoreW },
+    { full: "CORE SIDE: thickness taper (flat bottom)", short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
+  ];
+  bands.forEach(b => {
+    if (O === "horizontal") {
+      // Above each band (band top + a little), left-aligned at the tail end.
+      dxf += dxfText('LABEL', 0, b.cy + b.half + lblH * 1.6, lblH, b.full);
+    } else {
+      // Left edge of each vertical strip, at the tip end (top).
+      dxf += dxfText('LABEL', -(b.cy + b.half), L + lblH * 2, lblH, b.short);
+    }
+  });
 
   // ── BINDING INSERTS ── snowboard mode; compose the combined swap then the orientation rotation.
   dxf += buildInsertsDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
@@ -1890,31 +1978,43 @@ function exportCombinedSVG(ski){
   const sideLoop = shift(g.sideLoop, sideYoff).map(R);
 
   const topY = baseYoff + halfBaseW + 6, botY = sideYoff - 6;
-  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
-  // Anchor points (math space) for reference lines + labels; rotate, then draw text horizontal.
+  const edgeWrapC = ski.edgeWrap || "full";
+  const baseLbl = edgeWrapC === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
+
+  // Text sized to the drawing so it's legible at fit-to-view.
+  const fL = Math.max(ski.length / 60, 14);
+  const fTbl = Math.max(ski.length / 75, 12);
+  const charW = fL * 0.62;
+
+  // Reference lines + contact labels; anchors rotate, text stays horizontal.
   const refData = g.marks.map(m => ({
     a: R({ x: m.skiY, y: botY }), b: R({ x: m.skiY, y: topY }), lbl: R({ x: m.skiY + 2, y: topY + 3 }), label: m.label,
   }));
-  const lblData = [
-    { p: R({ x: 0, y: topY + 22 }), t: baseLbl },
-    { p: R({ x: 0, y: coreYoff + halfCoreW + 12 }), t: `CORE: outline (inset ${g.coreInset}mm/side)` },
-    { p: R({ x: 0, y: sideYoff + maxThick + 12 }), t: "CORE SIDE: thickness taper (flat bottom)" },
-  ];
 
-  // Bounds over all geometry + anchors.
+  // View labels placed directly in FINAL space (no R) so they never collapse onto one line.
+  // Horizontal: full descriptions above each stacked band. Vertical: short identifiers at the tip
+  // end of each side-by-side strip (details live in the table).
+  const bandsV = [
+    { full: baseLbl, short: "BASE", cy: baseYoff, half: halfBaseW },
+    { full: `CORE: outline (inset ${g.coreInset}mm/side)`, short: "CORE", cy: coreYoff, half: halfCoreW },
+    { full: "CORE SIDE: thickness taper (flat bottom)", short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
+  ];
+  const lblData = bandsV.map(b => O === "horizontal"
+    ? { x: 0, y: b.cy + b.half + fL * 1.4, t: b.full }
+    : { x: -(b.cy + b.half), y: L + fL * 1.6, t: b.short });
+
+  // Bounds over all geometry + anchors + label anchors + label text extents.
+  const lblExtents = lblData.map(l => ({ x: l.x + l.t.length * charW, y: l.y }));
+  const refLblExtents = refData.map(r => ({ x: r.lbl.x + r.label.length * charW, y: r.lbl.y }));
   const allPts = [...baseLoop, ...(baseEdge || []), ...coreLoop, ...sideLoop,
-    ...refData.flatMap(r => [r.a, r.b, r.lbl]), ...lblData.map(l => l.p)];
+    ...refData.flatMap(r => [r.a, r.b, r.lbl]), ...refLblExtents, ...lblData.map(l => ({ x: l.x, y: l.y })), ...lblExtents];
   const gMinX = Math.min(...allPts.map(p => p.x)), gMaxX = Math.max(...allPts.map(p => p.x));
   const gMinY = Math.min(...allPts.map(p => p.y)), gMaxY = Math.max(...allPts.map(p => p.y));
   const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  // Text sized to the drawing so it's legible at fit-to-view.
-  const fL = Math.max(ski.length / 60, 14);
-  const fTbl = Math.max(ski.length / 75, 12);
-
-  // Table sits to the right of the composition; rows flow downward, text horizontal.
+  // Table sits to the right of everything (including contact labels), so nothing overlaps it.
   const tblGap = fL;
   const tblX = pad + geomW + tblGap;
   const tblTopY = pad + 6;
@@ -1928,29 +2028,31 @@ function exportCombinedSVG(ski){
 
   const baseGroup =
     `<path d="${pathFrom(baseLoop, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
-    (baseEdge ? `<path d="${pathFrom(baseEdge, true)}" fill="none" stroke="#005000" stroke-width="0.5" ${edgeWrap === "contact" ? "" : 'stroke-dasharray="2,1.5"'}/>` : '');
+    (baseEdge ? `<path d="${pathFrom(baseEdge, true)}" fill="none" stroke="#005000" stroke-width="0.5" ${edgeWrapC === "contact" ? "" : 'stroke-dasharray="2,1.5"'}/>` : '');
   const coreGroup = `<path d="${pathFrom(coreLoop, true)}" fill="none" stroke="#C8935A" stroke-width="0.6"/>`;
   const sideGroup = `<path d="${pathFrom(sideLoop, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
 
   const refLines = refData.map(r =>
     `<line x1="${sx(r.a.x).toFixed(2)}" y1="${sy(r.a.y).toFixed(2)}" x2="${sx(r.b.x).toFixed(2)}" y2="${sy(r.b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.06).toFixed(2)}" stroke-dasharray="4,3"/>
-    <text x="${sx(r.lbl.x).toFixed(2)}" y="${(sy(r.lbl.y)).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${r.label}</text>`
+    ${hersheyPath(r.label, sx(r.lbl.x), sy(r.lbl.y), fL, {color:'#aa0000'})}`
   ).join('\n    ');
 
   const labels = lblData.map(l =>
-    `<text x="${sx(l.p.x).toFixed(1)}" y="${sy(l.p.y).toFixed(1)}" font-size="${(fL*1.1).toFixed(1)}" fill="#3aa" font-family="monospace" font-weight="bold">${l.t}</text>`
+    hersheyPath(l.t, sx(l.x), sy(l.y), fL*1.1, {color:'#2a8a8a', strokeWidth: fL*0.08})
   ).join('\n    ');
 
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
-  <title>Black Chapel Studios — Combined Views ${ski.length}mm</title>
-  <desc>Full profile, base edge, core outline, and core side profile — aligned on the length axis for lofting. Orientation: ${O}. Units: mm, 1:1.</desc>
-  <g id="base">${baseGroup}</g>
+  const body = `  <g id="base">${baseGroup}</g>
   <g id="core">${coreGroup}</g>
   <g id="core_side">${sideGroup}</g>
   <g id="reference">${refLines}</g>
   <g id="labels">${labels}</g>
-  <g id="table">${tbl.svg}</g>
+  <g id="table">${tbl.svg}</g>`;
+  const bb = svgBBox(body);
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${bb.W.toFixed(1)}mm" height="${bb.H.toFixed(1)}mm" viewBox="${bb.minX.toFixed(1)} ${bb.minY.toFixed(1)} ${bb.W.toFixed(1)} ${bb.H.toFixed(1)}">
+  <title>Black Chapel Studios — Combined Views ${ski.length}mm</title>
+  <desc>Full profile, base edge, core outline, and core side profile — aligned on the length axis for lofting. Orientation: ${O}. Units: mm, 1:1.</desc>
+${body}
 </svg>`;
   downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
 }
