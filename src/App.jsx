@@ -2107,6 +2107,39 @@ ${body}
   downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
 }
 
+// ══════════════ TOPSHEET OVERLAY ══════════════
+// Draws a topsheet artwork image into a screen-space box {minX,minY,maxX,maxY}, honoring fit mode
+// ("cover" | "contain" | "stretch"), a scale multiplier, offsets (as fractions of the box size),
+// rotation (degrees) and opacity. The CALLER is responsible for clipping the canvas to the ski
+// outline first, so the artwork only shows inside the silhouette. Shared by the live PlanView
+// preview and the standalone PNG render so both look identical.
+function drawTopsheetImage(ctx, img, box, ts) {
+  const bw = box.maxX - box.minX, bh = box.maxY - box.minY;
+  if (!img || bw <= 0 || bh <= 0) return;
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  const arImg = iw / ih, arBox = bw / bh;
+  let dw, dh;
+  if (ts.fit === "stretch") {
+    dw = bw; dh = bh;                                   // fill box exactly, distort to match
+  } else {
+    const cover = ts.fit !== "contain";                // default = cover (fill + crop)
+    const fillWidth = cover ? (arImg < arBox) : (arImg > arBox);
+    if (fillWidth) { dw = bw; dh = bw / arImg; } else { dh = bh; dw = bh * arImg; }
+  }
+  const scale = ts.scale || 1;
+  dw *= scale; dh *= scale;
+  const cx = (box.minX + box.maxX) / 2 + (ts.offsetX || 0) * bw;
+  const cy = (box.minY + box.maxY) / 2 + (ts.offsetY || 0) * bh;
+  ctx.save();
+  ctx.globalAlpha = ts.opacity != null ? ts.opacity : 1;
+  ctx.translate(cx, cy);
+  if (ts.rotation) ctx.rotate(ts.rotation * Math.PI / 180);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
+
 // ══════════════ PLAN VIEW ══════════════
 // Layout:
 //   ROW 1 (top, ~38% of height): Full ski plan at TRUE aspect ratio. Long and thin.
@@ -2114,8 +2147,22 @@ ${body}
 //   ROW 2 (bottom, ~62% of height): Two side-by-side zoom panels — tail (left) | tip (right).
 //                                   Lots of headroom so handle dragging doesn't hit the edge.
 //                                   This is where bezier handles are edited.
-function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
+function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet }) {
   const canvasRef = useRef(null);
+  // Topsheet artwork: keep a decoded HTMLImageElement in a ref, and bump a counter when it finishes
+  // loading so the drawing effect re-runs and paints it.
+  const topsheetImgRef = useRef(null);
+  const [topsheetTick, setTopsheetTick] = useState(0);
+  useEffect(() => {
+    const src = topsheet && topsheet.src;
+    if (!src) { topsheetImgRef.current = null; setTopsheetTick(t => t + 1); return; }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => { if (!cancelled) { topsheetImgRef.current = img; setTopsheetTick(t => t + 1); } };
+    img.onerror = () => { if (!cancelled) { topsheetImgRef.current = null; setTopsheetTick(t => t + 1); } };
+    img.src = src;
+    return () => { cancelled = true; };
+  }, [topsheet && topsheet.src]);
   const edgeHandleRef = useRef(null);  // screen positions of edge-extension drag handles
   const [hovered, setHovered] = useState(null);
   const [dragging, setDragging] = useState(null);
@@ -2361,6 +2408,41 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
     ctx.fillStyle = C.skiFill; ctx.fill();
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     ctx.restore();
+
+    // ── Topsheet artwork ──────────────────────────────────────────
+    // Clip to the ski silhouette and paint the uploaded artwork inside it, fit to the ski's on-screen
+    // bounding box. Drawn on top of the fill so a transparent PNG shows the fill behind it; the
+    // outline is re-stroked afterward so the edge stays crisp over the artwork.
+    if (topsheet && topsheet.src && topsheetImgRef.current) {
+      const outlinePath = () => {
+        ctx.beginPath();
+        right.forEach((p, i) => { const s = toMain(p.x, p.y); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+        for (let i = left.length - 1; i >= 0; i--) { const s = toMain(left[i].x, left[i].y); ctx.lineTo(s.x, s.y); }
+        ctx.closePath();
+      };
+      // On-screen bounding box of the outline (already reflects zoom/pan via toMain).
+      let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+      right.concat(left).forEach(p => {
+        const s = toMain(p.x, p.y);
+        if (s.x < bMinX) bMinX = s.x; if (s.x > bMaxX) bMaxX = s.x;
+        if (s.y < bMinY) bMinY = s.y; if (s.y > bMaxY) bMaxY = s.y;
+      });
+      ctx.save();
+      // Keep the artwork within both the silhouette AND the main plot region (so it can't spill into
+      // the zoom panels when panned/zoomed).
+      ctx.beginPath();
+      ctx.rect(mainPadX, mainRowY + mainPadY, mainPlotW, mainPlotH);
+      ctx.clip();
+      outlinePath();
+      ctx.clip();
+      drawTopsheetImage(ctx, topsheetImgRef.current, { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY }, topsheet);
+      ctx.restore();
+      // Re-stroke the outline on top for a clean edge over the artwork.
+      ctx.save();
+      outlinePath();
+      ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+      ctx.restore();
+    }
 
     // ── Effective-edge highlight ──────────────────────────────────
     // Overlay the contact-to-contact portion of each edge (the actual turning section / sidecut) in
@@ -2754,7 +2836,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal" }) {
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
       tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
-      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan]);
+      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan, topsheet, topsheetTick]);
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
@@ -3624,6 +3706,7 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
     feedback: "",
     interestedPaid: false,
     interestedForum: false,
+    interestedGcode: false,
   });
 
   if (!isOpen) return null;
@@ -3650,6 +3733,7 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
           feedback: form.feedback,
           interested_in_paid_version: form.interestedPaid ? "Yes" : "No",
           interested_in_revived_forum: form.interestedForum ? "Yes" : "No",
+          interested_in_gcode_export: form.interestedGcode ? "Yes" : "No",
           trigger: trigger || "manual",
           source: "Black Chapel Ski Designer",
           timestamp: new Date().toISOString(),
@@ -3750,12 +3834,20 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
                     I'd be interested in a paid version with unlimited exports and advanced features.
                   </span>
                 </label>
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", marginBottom: 10 }}>
                   <input type="checkbox" checked={form.interestedForum}
                     onChange={e => handleField("interestedForum", e.target.checked)}
                     style={{ marginTop: 3, accentColor: C.heading, cursor: "pointer" }} />
                   <span style={{ color: C.value, fontSize: 13, lineHeight: 1.4 }}>
                     I'd be interested in joining a new forum — similar to the old skibuilders.com forum if it were revived.
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                  <input type="checkbox" checked={form.interestedGcode}
+                    onChange={e => handleField("interestedGcode", e.target.checked)}
+                    style={{ marginTop: 3, accentColor: C.heading, cursor: "pointer" }} />
+                  <span style={{ color: C.value, fontSize: 13, lineHeight: 1.4 }}>
+                    I'd use direct G-code (CNC toolpath) export — cut parts straight from the designer without a separate CAM program.
                   </span>
                 </label>
               </div>
@@ -4151,6 +4243,70 @@ export default function App() {
   const derived = useMemo(() => computeDerived(ski), [ski]);
   const flex = useMemo(() => computeFlexProfile(ski), [ski]);
 
+  // ── Topsheet artwork overlay ──────────────────────────────────
+  // Kept in component state (not the saved ski JSON) so large base64 images don't bloat design files.
+  const [topsheet, setTopsheet] = useState({
+    src: null, name: null, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0, fit: "cover",
+  });
+  const topsheetFileRef = useRef(null);
+  const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
+  const handleTopsheetFile = useCallback((file) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { alert("Please choose an image file (PNG, JPG, WEBP, or SVG)."); return; }
+    if (file.size > 12 * 1024 * 1024) { alert("Image is larger than 12 MB — please use a smaller file."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setTopsheet(t => ({ ...t, src: reader.result, name: file.name }));
+    reader.readAsDataURL(file);
+  }, []);
+  const clearTopsheet = useCallback(() => {
+    setTopsheet({ src: null, name: null, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0, fit: "cover" });
+    if (topsheetFileRef.current) topsheetFileRef.current.value = "";
+  }, []);
+  // Render a clean "finished ski" PNG: silhouette + clipped topsheet + crisp outline, length along X.
+  const exportTopsheetPNG = useCallback(() => {
+    if (!topsheet.src) { alert("Upload a topsheet image first."); return; }
+    const img = new Image();
+    img.onload = () => {
+      const { right, left } = computeOutline(ski);
+      const all = right.concat(left);
+      const maxLat = Math.max(...all.map(p => Math.abs(p.x)));
+      const pad = 24;
+      const pxPerMM = Math.max(0.5, Math.min(4, 2400 / ski.length)); // ~2400px long side
+      const W = Math.ceil(ski.length * pxPerMM + pad * 2);
+      const H = Math.ceil(maxLat * 2 * pxPerMM + pad * 2);
+      const cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d");
+      const cy0 = pad + maxLat * pxPerMM;
+      const map = (p) => ({ x: pad + p.y * pxPerMM, y: cy0 + p.x * pxPerMM }); // along→X, lateral→Y
+      const outline = () => {
+        ctx.beginPath();
+        right.forEach((p, i) => { const s = map(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+        for (let i = left.length - 1; i >= 0; i--) { const s = map(left[i]); ctx.lineTo(s.x, s.y); }
+        ctx.closePath();
+      };
+      // Base fill (so transparent artwork areas aren't see-through).
+      outline(); ctx.fillStyle = "#1c1916"; ctx.fill();
+      // Clip + artwork.
+      let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
+      all.forEach(p => { const s = map(p); if (s.x < mnX) mnX = s.x; if (s.x > mxX) mxX = s.x; if (s.y < mnY) mnY = s.y; if (s.y > mxY) mxY = s.y; });
+      ctx.save(); outline(); ctx.clip();
+      drawTopsheetImage(ctx, img, { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY }, topsheet);
+      ctx.restore();
+      // Crisp outline on top.
+      outline(); ctx.strokeStyle = "#ede6d8"; ctx.lineWidth = 2.5; ctx.stroke();
+      cv.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, "image/png");
+    };
+    img.src = topsheet.src;
+  }, [ski, topsheet]);
+
   // ── Save / Load state ─────────────────────────────────────────
   const fileInputRef = useRef(null);
   const [loadMessage, setLoadMessage] = useState(null);  // { type: "ok"|"error"|"warn", text }
@@ -4259,6 +4415,7 @@ export default function App() {
     sideProfile: false,
     symmetry: false,
     layup: false,
+    topsheet: false,
     flex: true,           // open by default so the rating chip is visible
     cncExport: false,
     externalTools: false,
@@ -4943,6 +5100,75 @@ export default function App() {
           )}
         </AccordionSection>
 
+        <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
+          title="Topsheet Art"
+          accent={topsheet.src
+            ? <span style={{ background: C.heading + "30", color: C.heading, border: `1px solid ${C.heading}66`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>ON</span>
+            : null}>
+          <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 10, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            Overlay artwork on the ski silhouette to preview a finished topsheet. Clipped to the outline. Export a rendered PNG below.
+          </div>
+
+          <input ref={topsheetFileRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={e => handleTopsheetFile(e.target.files && e.target.files[0])} />
+          <button onClick={() => topsheetFileRef.current && topsheetFileRef.current.click()}
+            style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
+            {topsheet.src ? "Replace Image" : "Upload Image"}
+          </button>
+
+          {topsheet.src && (
+            <>
+              <div style={{ color: C.value, fontSize: 10, marginBottom: 10, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>
+                {topsheet.name || "topsheet image"}
+              </div>
+
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Fit</div>
+              <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+                {["cover", "contain", "stretch"].map(mode => (
+                  <button key={mode} onClick={() => setTopsheetField("fit", mode)}
+                    style={{ flex: 1, background: topsheet.fit === mode ? C.heading : C.inputBg, color: topsheet.fit === mode ? C.bgDeep : C.label, border: `1px solid ${topsheet.fit === mode ? C.heading : C.inputBorder}`, borderRadius: 3, padding: "6px 4px", cursor: "pointer", fontSize: 10.5, fontWeight: topsheet.fit === mode ? 700 : 400, fontFamily: "'JetBrains Mono', monospace", textTransform: "capitalize" }}>
+                    {mode}
+                  </button>
+                ))}
+              </div>
+
+              {[
+                { key: "opacity", label: "Opacity", min: 0.1, max: 1, step: 0.05, fmt: v => `${Math.round(v * 100)}%` },
+                { key: "scale", label: "Scale", min: 0.2, max: 3, step: 0.02, fmt: v => `${v.toFixed(2)}\u00D7` },
+                { key: "offsetX", label: "Shift \u2194", min: -0.5, max: 0.5, step: 0.01, fmt: v => `${Math.round(v * 100)}%` },
+                { key: "offsetY", label: "Shift \u2195", min: -0.5, max: 0.5, step: 0.01, fmt: v => `${Math.round(v * 100)}%` },
+                { key: "rotation", label: "Rotate", min: -180, max: 180, step: 1, fmt: v => `${Math.round(v)}\u00B0` },
+              ].map(s => (
+                <div key={s.key} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                    <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{s.label}</span>
+                    <span style={{ color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>{s.fmt(topsheet[s.key])}</span>
+                  </div>
+                  <input type="range" min={s.min} max={s.max} step={s.step} value={topsheet[s.key]}
+                    onChange={e => setTopsheetField(s.key, parseFloat(e.target.value))}
+                    style={{ width: "100%", accentColor: C.heading, cursor: "pointer" }} />
+                </div>
+              ))}
+
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button onClick={() => setTopsheet(t => ({ ...t, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0 }))}
+                  style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                  Reset
+                </button>
+                <button onClick={clearTopsheet}
+                  style={{ flex: 1, background: "transparent", border: `1px solid ${C.torch}66`, color: C.torch, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                  Remove
+                </button>
+              </div>
+
+              <button onClick={exportTopsheetPNG}
+                style={{ width: "100%", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginTop: 8 }}>
+                Export Rendered PNG
+              </button>
+            </>
+          )}
+        </AccordionSection>
+
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title="Flex Analysis"
           accent={
@@ -5113,7 +5339,7 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} />
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} />
             {viewLabelChip("Plan")}
           </div>
         )}
