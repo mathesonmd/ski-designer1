@@ -3488,8 +3488,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   );
 }
 // ══════════════ PROFILE VIEW (smooth continuous rise — no level-off at tips) ══════════════
-function ProfileView({ ski, width, height }) {
+function ProfileView({ ski, setSki, width, height }) {
   const canvasRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const handlesRef = useRef([]);        // last-drawn handle screen positions + metadata
+  const dragXformRef = useRef(null);     // vertical transform frozen for the duration of a drag
   const { tipLength: TL, tailLength: TAIL, tipHeight: TH, tailHeight: TAH, camberHeight: CH, length: L } = ski;
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -3502,25 +3506,22 @@ function ProfileView({ ski, width, height }) {
     const plotW = width - padX * 2;
     const plotH = height - padTop - padBot;
     const xScale = plotW / L;
-    // Profile heights are tiny vs length, so we exaggerate Y for readability — but with a HARD CAP
-    // so the rocker never stretches into an unrealistic shape when the panel is tall. We cap both the
-    // exaggeration factor AND the resulting pixel-scale, then anchor the baseline low and let the
-    // profile occupy only the space it truly needs. This keeps the rocker looking like a rocker at
-    // any panel size (viewed alone or stacked with the other views).
-    const MAX_Y_EXAGG = 3.0;         // never exaggerate height more than 3× the true aspect
-    const maxH = Math.max(TH, TAH, CH) + 5;
-    const trueHpx = maxH * xScale;
-    const idealHpx = plotH * 0.72;   // how much height we'd LIKE the profile to use
-    let yExagg = 1.0, yScale = xScale;
-    if (trueHpx < idealHpx) {
-      // Exaggerate toward the ideal, but never beyond MAX_Y_EXAGG.
-      yExagg = Math.min(MAX_Y_EXAGG, idealHpx / trueHpx);
-      yScale = xScale * yExagg;
+    // Profile heights are tiny vs length, so we exaggerate Y for readability (capped at 3×). While a
+    // handle is being dragged we FREEZE this vertical transform so the profile doesn't rescale under
+    // the cursor mid-drag (the max-height value changing would otherwise shift the whole curve).
+    let yScale, baseY, yExagg = 1.0;
+    if (dragging && dragXformRef.current) {
+      yScale = dragXformRef.current.yScale; baseY = dragXformRef.current.baseY; yExagg = dragXformRef.current.yExagg;
+    } else {
+      const MAX_Y_EXAGG = 3.0;
+      const maxH = Math.max(TH, TAH, CH) + 5;
+      const trueHpx = maxH * xScale;
+      const idealHpx = plotH * 0.72;
+      yScale = xScale;
+      if (trueHpx < idealHpx) { yExagg = Math.min(MAX_Y_EXAGG, idealHpx / trueHpx); yScale = xScale * yExagg; }
+      const profileHpx = maxH * yScale;
+      baseY = Math.min(padTop + plotH * 0.92, padTop + profileHpx + plotH * 0.12);
     }
-    // Baseline: anchor so the (capped) profile sits comfortably; if the panel is taller than the
-    // profile needs, the extra space stays empty below rather than stretching the curve.
-    const profileHpx = maxH * yScale;
-    const baseY = Math.min(padTop + plotH * 0.92, padTop + profileHpx + plotH * 0.12);
     const toC = (xmm, ymm) => ({ x: padX + xmm * xScale, y: baseY - ymm * yScale });
 
     // Snow line
@@ -3530,8 +3531,6 @@ function ProfileView({ ski, width, height }) {
     ctx.lineTo(padX + plotW, baseY);
     ctx.stroke();
 
-    // Build the profile points via the shared side-profile function so the rocker takeoff points
-    // (linked to contacts, or independent when unlinked) are honored consistently with the exports.
     const pts = [];
     const n = 400;
     for (let i = 0; i <= n; i++) {
@@ -3568,35 +3567,71 @@ function ProfileView({ ski, width, height }) {
     ctx.stroke();
     ctx.restore();
 
-    // Height value labels
+    // ── Draggable measurement handles: tail rise, tip rise, camber peak ──
+    const tk = rockerTakeoffLens(ski);
+    const camberMidX = (tk.tail + (L - tk.tip)) / 2;   // midpoint between takeoffs (camber peak)
+    const handleDefs = [
+      { key: "tailHeight", xmm: 0, ymm: TAH, min: 5, max: 60, step: 1, align: "left" },
+      { key: "tipHeight",  xmm: L, ymm: TH,  min: 5, max: 80, step: 1, align: "right" },
+      { key: "camberHeight", xmm: camberMidX, ymm: CH, min: 0, max: 10, step: 0.5, align: "center" },
+    ];
+    const handles = handleDefs.map(h => { const s = toC(h.xmm, h.ymm); return { ...h, x: s.x, y: s.y, yScale, baseY, yExagg }; });
+    handlesRef.current = handles;
+
+    // Value labels (kept, nudged above the handle)
     ctx.fillStyle = C.heading;
     ctx.font = "bold 10px 'JetBrains Mono', monospace";
-    const drawV = (xmm, ymm, align) => {
-      const top = toC(xmm, ymm);
-      ctx.textAlign = align;
-      ctx.fillText(`${ymm}mm`, top.x + (align === "left" ? 6 : align === "right" ? -6 : 0), top.y - 6);
-    };
-    drawV(0, TAH, "left");
-    drawV(L, TH, "right");
-    if (CH > 0) {
-      const tk = rockerTakeoffLens(ski);
-      const camberMidX = (tk.tail + (L - tk.tip)) / 2;  // midpoint between takeoffs (camber peak)
-      drawV(camberMidX, CH, "center");
-    }
+    handles.forEach(h => {
+      ctx.textAlign = h.align;
+      const val = h.step < 1 ? h.ymm.toFixed(1) : Math.round(h.ymm);
+      ctx.fillText(`${val}mm`, h.x + (h.align === "left" ? 8 : h.align === "right" ? -8 : 0), h.y - 11);
+    });
+
+    // Handle dots
+    handles.forEach(h => {
+      const active = dragging === h.key || hovered === h.key;
+      ctx.beginPath(); ctx.arc(h.x, h.y, active ? 7 : 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = active ? C.controlHover : C.heading; ctx.fill();
+      ctx.strokeStyle = C.bgDeep; ctx.lineWidth = 1.5; ctx.stroke();
+    });
 
     ctx.fillStyle = C.dimText;
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";  ctx.fillText("TAIL", padX + 6, baseY - 4);
     ctx.textAlign = "right"; ctx.fillText("TIP",  padX + plotW - 6, baseY - 4);
 
-    if (yExagg > 1.05) {
-      ctx.fillStyle = C.labelDim;
-      ctx.font = "8px 'JetBrains Mono', monospace";
-      ctx.textAlign = "left";
-      ctx.fillText(`Y-scale: ${yExagg.toFixed(1)}\u00D7 exaggerated for readability`, padX + 6, height - 6);
+    ctx.fillStyle = C.labelDim;
+    ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(`drag \u25CF to set tip / tail rise & camber${yExagg > 1.05 ? `  \u00B7  Y ${yExagg.toFixed(1)}\u00D7 exaggerated` : ""}`, padX + 6, height - 6);
+  }, [ski, setSki, width, height, TL, TAIL, TH, TAH, CH, L, hovered, dragging]);
+
+  const getPos = (e) => { const r = canvasRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const hitTest = (p) => handlesRef.current.find(h => Math.hypot(p.x - h.x, p.y - h.y) <= 11);
+  const onDown = (e) => {
+    const h = hitTest(getPos(e));
+    if (h) { dragXformRef.current = { yScale: h.yScale, baseY: h.baseY, yExagg: h.yExagg }; setDragging(h.key); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} }
+  };
+  const onMove = (e) => {
+    const p = getPos(e);
+    if (dragging) {
+      const xf = dragXformRef.current; if (!xf) return;
+      const meta = handlesRef.current.find(h => h.key === dragging); if (!meta) return;
+      let ymm = (xf.baseY - p.y) / xf.yScale;
+      ymm = Math.max(meta.min, Math.min(meta.max, ymm));
+      ymm = Math.round(ymm / meta.step) * meta.step;
+      setSki(s => (s[dragging] === ymm ? s : { ...s, [dragging]: ymm }));
+    } else {
+      const h = hitTest(p);
+      setHovered(h ? h.key : null);
     }
-  }, [ski, width, height, TL, TAIL, TH, TAH, CH, L]);
-  return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
+  };
+  const onUp = (e) => { if (dragging) { setDragging(null); dragXformRef.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {} } };
+  const cursor = dragging ? "grabbing" : hovered ? "grab" : "default";
+  return (<canvas ref={canvasRef}
+    onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+    onPointerLeave={() => { if (!dragging) setHovered(null); }}
+    style={{ width, height, cursor, display: "block", touchAction: "none" }} />);
 }
 
 // ══════════════ CORE VIEW ══════════════
@@ -6130,7 +6165,7 @@ export default function App() {
         )}
         {profH > 0 && (
           <div style={{ height: profH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <ProfileView ski={ski} width={canvasW} height={profH} />
+            <ProfileView ski={ski} setSki={setSki} width={canvasW} height={profH} />
             {viewLabelChip("Side Profile")}
           </div>
         )}
