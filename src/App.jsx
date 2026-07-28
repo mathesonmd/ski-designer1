@@ -5561,7 +5561,7 @@ export default function App() {
               ["4", "Dial the Side Profile", "In Side Profile, set camber and tip / tail rise. This is the rocker line your press mold follows."],
               ["5", "Choose your Layup", "In Layup / Materials, pick wood core, fiberglass, optional metal and carbon. The Flex panel updates to show how stiff the ski will ride."],
               ["6", "Check the Flex", "Read the flex rating chip. Adjust core thickness, width, or materials until it feels right for the skier."],
-              ["7", "Set edges & export", "In CNC Export, set the edge inset and choose Full Wrap or Contact-to-Contact edges. Then export Base, Core, Core Side, or the Combined file for CAD."],
+              ["7", "Set edges & export", "In Edges & Core (Design), set the edge inset, core inset, and Full Wrap vs Contact-to-Contact edges. Then in CNC Export choose Base, Core, Core Side, Core STL, or the Combined file."],
             ].map(([n, title, body]) => (
               <div key={n} style={{ display: "flex", gap: 10, marginBottom: 11 }}>
                 <div style={{
@@ -5809,14 +5809,64 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.coreFill !== false} onToggle={() => toggleSection("coreFill")}
-          title="Core Fill (V-cut)"
-          accent={<InfoBubble C={C} width={250}>
-            The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
-            across the core at the contact point, and the two sides converge to an apex pointing toward
-            the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
-            extension sets how far the apex reaches past the contact. Shows in the Core view and exports
-            to the Core / Combined DXF.
-          </InfoBubble>}>
+          title="Edges & Core">
+          <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>EDGES</div>
+          {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
+          <div style={{ marginBottom: 9 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[
+                { val: "full", label: "Full Wrap" },
+                { val: "contact", label: "Contact→Contact" },
+              ].map(opt => {
+                const on = (ski.edgeWrap || "full") === opt.val;
+                return (
+                  <button key={opt.val}
+                    onClick={() => setSki(s => ({ ...s, edgeWrap: opt.val }))}
+                    style={{
+                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
+                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
+                    }}>{opt.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+              {(ski.edgeWrap || "full") === "contact"
+                ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
+                : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
+            </div>
+            {(ski.edgeWrap || "full") === "contact" && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
+                <div style={{ color: C.label, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Extension (mm past contact)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {inputField("Tip end", "edgeExtTip", 0, 400, 5)}
+                  {inputField("Tail end", "edgeExtTail", 0, 400, 5)}
+                </div>
+                <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 2 }}>
+                  Extends each partial edge past its contact point toward the tip / tail. Drag the square handles in the plan view to set these visually. Clamped at the physical ends.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE</div>
+          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Narrows the wood core inside the edges (sidewall material) per side.
+          </div>
+
+          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>CORE FILL (V-CUT)</span>
+            <InfoBubble C={C} width={250}>
+              The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
+              across the core at the contact point, and the two sides converge to an apex pointing toward
+              the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
+              extension sets how far the apex reaches past the contact. Shows in the Core view and exports
+              to the Core / Combined DXF.
+            </InfoBubble>
+          </div>
           {toggleBtn("Tip V-cut", "vcutTip")}
           {ski.vcutTip && inputField("Tip ext (mm)", "vcutTipExt", 10, Math.max(20, ski.tipLength))}
           {toggleBtn("Tail V-cut", "vcutTail")}
@@ -6034,47 +6084,7 @@ export default function App() {
 
         {groupHeader("5 · EXPORT", "CNC cut files (DXF/SVG) and a branded build card.")}
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
-          {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           <div style={{ marginBottom: 9 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[
-                { val: "full", label: "Full Wrap" },
-                { val: "contact", label: "Contact→Contact" },
-              ].map(opt => {
-                const on = (ski.edgeWrap || "full") === opt.val;
-                return (
-                  <button key={opt.val}
-                    onClick={() => setSki(s => ({ ...s, edgeWrap: opt.val }))}
-                    style={{
-                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
-                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
-                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
-                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
-                    }}>{opt.label}</button>
-                );
-              })}
-            </div>
-            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
-              {(ski.edgeWrap || "full") === "contact"
-                ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
-                : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
-            </div>
-            {(ski.edgeWrap || "full") === "contact" && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
-                <div style={{ color: C.label, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Extension (mm past contact)</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {inputField("Tip end", "edgeExtTip", 0, 400, 5)}
-                  {inputField("Tail end", "edgeExtTail", 0, 400, 5)}
-                </div>
-                <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 2 }}>
-                  Extends each partial edge past its contact point toward the tip / tail. Drag the square handles in the plan view to set these visually. Clamped at the physical ends.
-                </div>
-              </div>
-            )}
-          </div>
-          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ marginBottom: 9, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
               {[
