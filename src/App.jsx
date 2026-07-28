@@ -4769,6 +4769,8 @@ export default function App() {
   const topsheetFileRef = useRef(null);
   const [show3D, setShow3D] = useState(false);
   const [pairView, setPairView] = useState(false);
+  // A snowboard is a single board, not a pair — keep pair view off (and its toggles hidden) in that mode.
+  useEffect(() => { if (ski.mode === "snowboard" && pairView) setPairView(false); }, [ski.mode, pairView]);
   const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
   const handleTopsheetFile = useCallback((file) => {
     if (!file) return;
@@ -5641,10 +5643,12 @@ export default function App() {
               </>
             )}
           </div>
-          <button onClick={() => setPairView(v => !v)}
-            style={{ width: "100%", marginTop: 8, background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-            {pairView ? "Pair View: ON" : "Pair View: OFF"}
-          </button>
+          {ski.mode !== "snowboard" && (
+            <button onClick={() => setPairView(v => !v)}
+              style={{ width: "100%", marginTop: 8, background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              {pairView ? "Pair View: ON" : "Pair View: OFF"}
+            </button>
+          )}
         </AccordionSection>
 
         {groupHeader("2 · DESIGN", "Shape the ski — dimensions, rocker & camber, core, and layup.")}
@@ -5829,13 +5833,17 @@ export default function App() {
             View in 3D
           </button>
 
-          <button onClick={() => setPairView(v => !v)}
-            style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
-            {pairView ? "Pair View: ON" : "Pair View: OFF"}
-          </button>
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
-          </div>
+          {ski.mode !== "snowboard" && (
+            <>
+              <button onClick={() => setPairView(v => !v)}
+                style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
+                {pairView ? "Pair View: ON" : "Pair View: OFF"}
+              </button>
+              <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
+              </div>
+            </>
+          )}
 
           {topsheet.src && (
             <>
@@ -6159,7 +6167,7 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView} />
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} />
             {viewLabelChip("Plan")}
           </div>
         )}
@@ -6189,7 +6197,7 @@ export default function App() {
         onClose={() => setFeedbackOpen(false)}
         trigger={feedbackTrigger}
       />
-      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView} onClose={() => setShow3D(false)} />}
+      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
     </div>
   );
 }
