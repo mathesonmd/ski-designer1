@@ -1421,15 +1421,22 @@ function exportCorePlanDXF(ski){
 function exportCorePlanSVG(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
-  const right = [], left = [];
-  for (let i = 0; i <= N; i++) {
-    const pos = i / N;
-    const xmm = pos * ski.length;
-    const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
-    right.push({ x: halfW, y: xmm });
-    left.unshift({ x: -halfW, y: xmm });
+  let all;
+  if (ski.vcutTip || ski.vcutTail) {
+    // V-cut core: reuse the shared helper (X=length space) and swap to this export's
+    // convention (x = lateral/width, y = length) so tip/tail terminate in the V fill.
+    all = applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }));
+  } else {
+    const right = [], left = [];
+    for (let i = 0; i <= N; i++) {
+      const pos = i / N;
+      const xmm = pos * ski.length;
+      const halfW = Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+      right.push({ x: halfW, y: xmm });
+      left.unshift({ x: -halfW, y: xmm });
+    }
+    all = [...right, ...left];
   }
-  const all = [...right, ...left];
   const marks = getRegistrationMarks(ski);
   const pad = 10;
   // Reference labels extend right of the geometry; include their text extent so they aren't clipped.
@@ -1455,13 +1462,26 @@ function exportCorePlanSVG(ski){
   }).join('\n    ');
   const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
+  // V-cut fill notes — mark the triangular fill region at each enabled end (matches the DXF).
+  const vcutNotes = [];
+  if (ski.vcutTip) {
+    const apexY = Math.min((ski.length - ski.tipLength) + (ski.vcutTipExt || 0), ski.length - 4);
+    vcutNotes.push(`<text x="6" y="${toSvgY(apexY).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
+  }
+  if (ski.vcutTail) {
+    const apexY = Math.max(ski.tailLength - (ski.vcutTailExt || 0), 8);
+    vcutNotes.push(`<text x="6" y="${toSvgY(apexY).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
+  }
+  const vcutNote = vcutNotes.join('\n    ');
+
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
   <title>Black Chapel Studios — Core Plan Outline ${ski.length}mm</title>
-  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation.</desc>
+  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation${(ski.vcutTip || ski.vcutTail) ? "; tip/tail terminate in a V-cut fill" : ""}.</desc>
   <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
   <g id="centerline">${centerline}</g>
   <g id="reference">${regLines}</g>
+  <g id="vcut-notes">${vcutNote}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-core-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
