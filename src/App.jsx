@@ -1143,14 +1143,20 @@ function exportPlanSVG(ski){
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  // Measurements table (top-right of the geometry). Rows flow downward.
-  const rows = measurementRows(ski, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
-  const tblRowH = 13, tblHeaderH = 16, tblW = 270, tblGap = 22;
-  const tblH = tblHeaderH + rows.length * tblRowH + 6;
+  // Text is sized relative to the drawing so it stays legible when the whole SVG is viewed at once
+  // (a 4mm label on an 1800mm sheet is invisible at fit-to-view). fL = contact-label height.
+  const fL = Math.max(ski.length / 60, 14);
+  const fTbl = Math.max(ski.length / 75, 12);
+
+  // Measurements table (top-right of the geometry). Dimensions come back from the builder.
+  const coreInsetVal = ski.coreInset !== undefined ? ski.coreInset : 0;
+  const tblGap = fL;
   const tblX = pad + geomW + tblGap;
   const tblTopY = pad + 8;
+  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: coreInsetVal }, fTbl);
+  const tblH = tbl.height;
 
-  const totalW = tblX + tblW + pad;
+  const totalW = tblX + tbl.width + pad;
   const totalH = pad + Math.max(geomH, tblH) + pad;
 
   const pathFrom = (arr, close) => arr.map((p,i) =>
@@ -1166,17 +1172,15 @@ function exportPlanSVG(ski){
   const refMarks = marks.map(m => {
     const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
     const a = { x: -halfW, y: m.skiY }, b = { x: halfW, y: m.skiY };
-    const lbl = { x: halfW + 4, y: m.skiY };
+    const lbl = { x: halfW + fL * 0.4, y: m.skiY };
     const pa = P(a), pb = P(b), pl = P(lbl);
-    return `    <line x1="${sx(pa.x).toFixed(2)}" y1="${sy(pa.y).toFixed(2)}" x2="${sx(pb.x).toFixed(2)}" y2="${sy(pb.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${sx(pl.x).toFixed(2)}" y="${(sy(pl.y) + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    return `    <line x1="${sx(pa.x).toFixed(2)}" y1="${sy(pa.y).toFixed(2)}" x2="${sx(pb.x).toFixed(2)}" y2="${sy(pb.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
+    <text x="${sx(pl.x).toFixed(2)}" y="${(sy(pl.y) + fL*0.35).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n');
 
   // Centerline along the full length at lateral 0.
   const c0 = P({ x: 0, y: 0 }), c1 = P({ x: 0, y: ski.length });
   const centerline = `<line x1="${sx(c0.x).toFixed(2)}" y1="${sy(c0.y).toFixed(2)}" x2="${sx(c1.x).toFixed(2)}" y2="${sy(c1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
-
-  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
 
   const edgeDesc = isContact
     ? `Cut path = single continuous base-cut loop (${edgeInset}mm edge inset, partial wrap with perpendicular tie-ins).`
@@ -1198,11 +1202,11 @@ function exportPlanSVG(ski){
   <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
   <desc>${edgeDesc} Red = reference lines. Orientation: ${O}. Units: mm.</desc>
 ${cutGroup}
+  <g id="table">${tbl.svg}</g>
   <g id="centerline">${centerline}</g>
   <g id="reference">
 ${refMarks}
   </g>
-  <g id="table">${tbl}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1259,17 +1263,24 @@ function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
   return out;
 }
 
-// SVG measurements table. Rows flow DOWNWARD (increasing SVG-Y) from the top anchor. Text is always
-// horizontal regardless of the drawing's orientation.
-function buildMeasurementsTableSVG(ski, tblX, tblTopY, extra = {}) {
-  let y = tblTopY;
-  let out = `<text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="8" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`;
-  y += 16;
-  measurementRows(ski, extra).forEach(([k, v]) => {
-    out += `\n    <text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="6.5" fill="#000" font-family="monospace">${k}</text><text x="${(tblX + 210).toFixed(2)}" y="${y.toFixed(2)}" font-size="6.5" fill="#000" font-family="monospace">${v}</text>`;
-    y += 13;
+// SVG measurements table. Rows flow DOWNWARD from the top anchor; text is always horizontal. `fs` is
+// the row font size in mm (scaled to the drawing so it's legible at fit-to-view). Returns the markup
+// plus the table's width/height so callers can size the viewBox and place it without overlap.
+function buildMeasurementsTableSVG(ski, tblX, tblTopY, extra = {}, fs = 24) {
+  const rows = measurementRows(ski, extra);
+  const headerF = fs * 1.3, rowH = fs * 1.7, charW = fs * 0.62;
+  const maxLabelLen = Math.max(...rows.map(r => r[0].length));
+  const maxValLen = Math.max(...rows.map(r => r[1].length));
+  const valOff = maxLabelLen * charW + fs * 1.2;
+  const width = valOff + maxValLen * charW + fs;
+  let y = tblTopY + headerF;
+  let out = `<text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="${headerF.toFixed(1)}" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`;
+  y += rowH * 1.2;
+  rows.forEach(([k, v]) => {
+    out += `\n    <text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="${fs.toFixed(1)}" fill="#000" font-family="monospace">${k}</text><text x="${(tblX + valOff).toFixed(2)}" y="${y.toFixed(2)}" font-size="${fs.toFixed(1)}" fill="#000" font-family="monospace">${v}</text>`;
+    y += rowH;
   });
-  return out;
+  return { svg: out, width, height: (y - tblTopY) };
 }
 
 function exportPlanDXF(ski){
@@ -1394,6 +1405,7 @@ function exportCoreSideSVG(ski){
   const marks = getRegistrationMarks(ski);
   const L = ski.length, pad = 10, sz = 8;
   const O = skiOrientation(ski);
+  const fL = Math.max(ski.length / 60, 14);
   // Canonical math point (Y up): a = along, te = thickness * sz (exaggerated for readability).
   const M = (a, t) => orientPt(a, t * sz, O);
 
@@ -1404,7 +1416,7 @@ function exportCoreSideSVG(ski){
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  const labelCharW = 4 * 0.6;
+  const labelCharW = fL * 0.62;
   const labelRightExtent = Math.max(0, ...marks.map(m => {
     const lp = M(m.skiY + 2, maxT);
     return sx(lp.x) + m.label.length * labelCharW;
@@ -1415,8 +1427,8 @@ function exportCoreSideSVG(ski){
   const fillPath = poly.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)},${sy(p.y).toFixed(2)}`).join(' ') + ' Z';
   const regLines = marks.map(m => {
     const a = M(m.skiY, 0), b = M(m.skiY, maxT), lbl = M(m.skiY + 2, maxT);
-    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - 2).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - fL*0.3).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1522,6 +1534,7 @@ function exportCorePlanSVG(ski){
   const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
   const pts = all.map(P);
   const pad = 10;
+  const fL = Math.max(ski.length / 60, 14);
   const gMinX = Math.min(...pts.map(p => p.x)), gMaxX = Math.max(...pts.map(p => p.x));
   const gMinY = Math.min(...pts.map(p => p.y)), gMaxY = Math.max(...pts.map(p => p.y));
   const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
@@ -1529,10 +1542,10 @@ function exportCorePlanSVG(ski){
   const sy = y => (gMaxY - y + pad);
 
   // Account for reference labels extending to the right of the geometry so nothing clips.
-  const labelCharW = 4 * 0.6;
+  const labelCharW = fL * 0.62;
   const labelRightExtent = Math.max(0, ...marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const pl = P({ x: hw + 3, y: m.skiY });
+    const pl = P({ x: hw + fL * 0.4, y: m.skiY });
     return sx(pl.x) + m.label.length * labelCharW;
   }));
   const totalW = Math.max(pad + geomW + pad, labelRightExtent + pad);
@@ -1543,9 +1556,9 @@ function exportCorePlanSVG(ski){
   ).join(' ') + ' Z';
   const regLines = marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 3, y: m.skiY });
-    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + fL * 0.4, y: m.skiY });
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) + fL*0.35).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
   const cc0 = P({ x: 0, y: 0 }), cc1 = P({ x: 0, y: ski.length });
   const centerline = `<line x1="${sx(cc0.x).toFixed(2)}" y1="${sy(cc0.y).toFixed(2)}" x2="${sx(cc1.x).toFixed(2)}" y2="${sy(cc1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
@@ -1555,12 +1568,12 @@ function exportCorePlanSVG(ski){
   if (ski.vcutTip) {
     const apexY = Math.min((ski.length - ski.tipLength) + (ski.vcutTipExt || 0), ski.length - 4);
     const p = P({ x: 6, y: apexY });
-    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
+    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="${(fL*0.85).toFixed(1)}" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
   }
   if (ski.vcutTail) {
     const apexY = Math.max(ski.tailLength - (ski.vcutTailExt || 0), 8);
     const p = P({ x: 6, y: apexY });
-    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
+    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="${(fL*0.85).toFixed(1)}" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
   }
   const vcutNote = vcutNotes.join('\n    ');
 
@@ -1627,6 +1640,7 @@ function exportRockerSVG(ski){
   const maxY = Math.max(...pts.map(p => p.y));
   const L = ski.length, pad = 10;
   const O = skiOrientation(ski);
+  const fL = Math.max(ski.length / 60, 14);
   const M = (a, t) => orientPt(a, t, O);  // math space, Y up
 
   const curve = pts.map(p => M(p.x, p.y));
@@ -1638,7 +1652,7 @@ function exportRockerSVG(ski){
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  const labelCharW = 4 * 0.6;
+  const labelCharW = fL * 0.62;
   const labelRightExtent = Math.max(0, ...getRegistrationMarks(ski).map(m => {
     const lp = M(m.skiY + 2, maxY);
     return sx(lp.x) + m.label.length * labelCharW;
@@ -1650,8 +1664,8 @@ function exportRockerSVG(ski){
   const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
     const a = M(m.skiY, -2), b = M(m.skiY, maxY + 2), lbl = M(m.skiY + 2, maxY);
-    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
-    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - 3).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.06).toFixed(2)}" stroke-dasharray="3,2"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - fL*0.4).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
   const b0 = M(0, 0), b1 = M(L, 0);
 
@@ -1896,14 +1910,17 @@ function exportCombinedSVG(ski){
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
+  // Text sized to the drawing so it's legible at fit-to-view.
+  const fL = Math.max(ski.length / 60, 14);
+  const fTbl = Math.max(ski.length / 75, 12);
+
   // Table sits to the right of the composition; rows flow downward, text horizontal.
-  const rows = measurementRows(ski, { coreInset: g.coreInset });
-  const tblW = 300, tblGap = 24;
-  const tblH = 16 + rows.length * 13 + 6;
+  const tblGap = fL;
   const tblX = pad + geomW + tblGap;
   const tblTopY = pad + 6;
-  const totalW = tblX + tblW + pad;
-  const totalH = pad + Math.max(geomH, tblH) + pad;
+  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: g.coreInset }, fTbl);
+  const totalW = tblX + tbl.width + pad;
+  const totalH = pad + Math.max(geomH, tbl.height) + pad;
 
   const pathFrom = (pts, close) => pts.map((p, i) =>
     `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)},${sy(p.y).toFixed(2)}`
@@ -1916,15 +1933,13 @@ function exportCombinedSVG(ski){
   const sideGroup = `<path d="${pathFrom(sideLoop, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
 
   const refLines = refData.map(r =>
-    `<line x1="${sx(r.a.x).toFixed(2)}" y1="${sy(r.a.y).toFixed(2)}" x2="${sx(r.b.x).toFixed(2)}" y2="${sy(r.b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="4,3"/>
-    <text x="${sx(r.lbl.x).toFixed(2)}" y="${(sy(r.lbl.y)).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${r.label}</text>`
+    `<line x1="${sx(r.a.x).toFixed(2)}" y1="${sy(r.a.y).toFixed(2)}" x2="${sx(r.b.x).toFixed(2)}" y2="${sy(r.b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.06).toFixed(2)}" stroke-dasharray="4,3"/>
+    <text x="${sx(r.lbl.x).toFixed(2)}" y="${(sy(r.lbl.y)).toFixed(2)}" font-size="${fL.toFixed(1)}" fill="#aa0000" font-family="monospace">${r.label}</text>`
   ).join('\n    ');
 
   const labels = lblData.map(l =>
-    `<text x="${sx(l.p.x).toFixed(1)}" y="${sy(l.p.y).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${l.t}</text>`
+    `<text x="${sx(l.p.x).toFixed(1)}" y="${sy(l.p.y).toFixed(1)}" font-size="${(fL*1.1).toFixed(1)}" fill="#3aa" font-family="monospace" font-weight="bold">${l.t}</text>`
   ).join('\n    ');
-
-  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: g.coreInset });
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
@@ -1935,7 +1950,7 @@ function exportCombinedSVG(ski){
   <g id="core_side">${sideGroup}</g>
   <g id="reference">${refLines}</g>
   <g id="labels">${labels}</g>
-  <g id="table">${tbl}</g>
+  <g id="table">${tbl.svg}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
 }
