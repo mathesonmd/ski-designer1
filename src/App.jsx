@@ -2373,8 +2373,8 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
   <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
   <g id="silhouette">
     <path d="${silPath}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>
-    <text x="${rx + rw / 2}" y="${ry + rh + 50}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
-    <text x="${rx + rw / 2}" y="${ry + rh + 78}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
+    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 40).toFixed(0)}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
+    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 64).toFixed(0)}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
   </g>
   <g id="specs">${rowsSvg}</g>
   <line x1="${pad}" y1="${H - 96}" x2="${W - pad}" y2="${H - 96}" stroke="${border}" stroke-width="1"/>
@@ -2383,7 +2383,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
 </svg>`;
 }
 
-function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet }) {
+function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet, pairView }) {
   const canvasRef = useRef(null);
   // Topsheet artwork: keep a decoded HTMLImageElement in a ref, and bump a counter when it finishes
   // loading so the drawing effect re-runs and paints it.
@@ -2628,55 +2628,47 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
     ctx.stroke(); ctx.setLineDash([]);
 
-    // Ski outline
+    // Ski outline(s). In pair view we also draw the mirrored partner ski below, and (if art is loaded)
+    // project the topsheet across BOTH skis so asymmetric tips and split graphics read as a set.
+    const mapA = (p) => toMain(p.x, p.y);
+    // Partner = mirror across the ski centerline (done in ski space so zoom/pan stay correct), then
+    // shifted laterally so the two skis sit side by side. Lateral axis is screen-Y (horizontal) or
+    // screen-X (vertical).
+    let aMinX = Infinity, aMinY = Infinity, aMaxX = -Infinity, aMaxY = -Infinity;
+    right.concat(left).forEach(p => { const s = toMain(p.x, p.y); if (s.x < aMinX) aMinX = s.x; if (s.x > aMaxX) aMaxX = s.x; if (s.y < aMinY) aMinY = s.y; if (s.y > aMaxY) aMaxY = s.y; });
+    const pairGap = 14;
+    const partnerShift = (isVertical ? (aMaxX - aMinX) : (aMaxY - aMinY)) + pairGap;
+    const mapB = (p) => { const s = toMain(-p.x, p.y); return isVertical ? { x: s.x + partnerShift, y: s.y } : { x: s.x, y: s.y + partnerShift }; };
+    const tracePath = (mapFn) => {
+      ctx.beginPath();
+      right.forEach((p, i) => { const s = mapFn(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+      for (let i = left.length - 1; i >= 0; i--) { const s = mapFn(left[i]); ctx.lineTo(s.x, s.y); }
+      ctx.closePath();
+    };
+
     ctx.save();
     ctx.shadowColor = C.skiGlow; ctx.shadowBlur = 8;
-    ctx.beginPath();
-    right.forEach((p, i) => {
-      const s = toMain(p.x, p.y);
-      if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
-    });
-    for (let i = left.length - 1; i >= 0; i--) {
-      const s = toMain(left[i].x, left[i].y);
-      ctx.lineTo(s.x, s.y);
-    }
-    ctx.closePath();
+    tracePath(mapA);
     ctx.fillStyle = C.skiFill; ctx.fill();
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+    if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
 
     // ── Topsheet artwork ──────────────────────────────────────────
-    // Clip to the ski silhouette and paint the uploaded artwork inside it, fit to the ski's on-screen
-    // bounding box. Drawn on top of the fill so a transparent PNG shows the fill behind it; the
-    // outline is re-stroked afterward so the edge stays crisp over the artwork.
     if (topsheet && topsheet.src && topsheetImgRef.current) {
-      const outlinePath = () => {
-        ctx.beginPath();
-        right.forEach((p, i) => { const s = toMain(p.x, p.y); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
-        for (let i = left.length - 1; i >= 0; i--) { const s = toMain(left[i].x, left[i].y); ctx.lineTo(s.x, s.y); }
-        ctx.closePath();
-      };
-      // On-screen bounding box of the outline (already reflects zoom/pan via toMain).
+      // Combined on-screen bounding box (both skis in pair view, else just ski A). The art is fit to
+      // this box, so each ski shows its slice of one continuous image.
       let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-      right.concat(left).forEach(p => {
-        const s = toMain(p.x, p.y);
-        if (s.x < bMinX) bMinX = s.x; if (s.x > bMaxX) bMaxX = s.x;
-        if (s.y < bMinY) bMinY = s.y; if (s.y > bMaxY) bMaxY = s.y;
-      });
-      ctx.save();
-      // Keep the artwork within both the silhouette AND the main plot region (so it can't spill into
-      // the zoom panels when panned/zoomed).
-      ctx.beginPath();
-      ctx.rect(mainPadX, mainRowY + mainPadY, mainPlotW, mainPlotH);
-      ctx.clip();
-      outlinePath();
-      ctx.clip();
-      drawTopsheetImage(ctx, topsheetImgRef.current, { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY }, topsheet);
-      ctx.restore();
-      // Re-stroke the outline on top for a clean edge over the artwork.
-      ctx.save();
-      outlinePath();
-      ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+      const acc = (s) => { if (s.x < bMinX) bMinX = s.x; if (s.x > bMaxX) bMaxX = s.x; if (s.y < bMinY) bMinY = s.y; if (s.y > bMaxY) bMaxY = s.y; };
+      right.concat(left).forEach(p => { acc(mapA(p)); if (pairView) acc(mapB(p)); });
+      const box = { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY };
+      const rowClip = () => { ctx.beginPath(); if (isVertical) ctx.rect(0, 0, mainColW, height); else ctx.rect(0, mainRowY, width, mainRowH); ctx.clip(); };
+      const paint = (mapFn) => { ctx.save(); rowClip(); tracePath(mapFn); ctx.clip(); drawTopsheetImage(ctx, topsheetImgRef.current, box, topsheet); ctx.restore(); };
+      paint(mapA);
+      if (pairView) paint(mapB);
+      // Re-stroke outlines on top for crisp edges over the artwork.
+      ctx.save(); tracePath(mapA); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
+      if (pairView) { tracePath(mapB); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
       ctx.restore();
     }
 
@@ -3072,7 +3064,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
       tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
-      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan, topsheet, topsheetTick]);
+      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan, topsheet, topsheetTick, pairView]);
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
@@ -4509,7 +4501,7 @@ function loadThree() {
   return _threePromise;
 }
 
-function Ski3DModal({ ski, topsheet, onClose }) {
+function Ski3DModal({ ski, topsheet, pairView, onClose }) {
   const mountRef = useRef(null);
   const [status, setStatus] = useState("loading"); // loading | ok | error
 
@@ -4567,7 +4559,19 @@ function Ski3DModal({ ski, topsheet, onClose }) {
       grp.add(new THREE.Mesh(topGeo, topMat));
       grp.add(new THREE.Mesh(botGeo, botMat));
       grp.add(new THREE.Mesh(wallGeo, wallMat));
+      const off = pairView ? (g.maxHW + 0.18) : 0;
+      grp.position.x = off;
       scene.add(grp);
+      if (pairView) {
+        // Mirror partner: same geometries/materials, flipped across the long axis and offset.
+        const grpB = new THREE.Group();
+        grpB.add(new THREE.Mesh(topGeo, topMat));
+        grpB.add(new THREE.Mesh(botGeo, botMat));
+        grpB.add(new THREE.Mesh(wallGeo, wallMat));
+        grpB.position.x = -off;
+        grpB.scale.x = -1;
+        scene.add(grpB);
+      }
       cleanupFns.push(() => { [topGeo, botGeo, wallGeo].forEach(x => x.dispose()); [topMat, botMat, wallMat].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
 
       // Orbit (custom, no OrbitControls dep).
@@ -4621,7 +4625,7 @@ function Ski3DModal({ ski, topsheet, onClose }) {
       cleanupFns.forEach(fn => { try { fn(); } catch (e) {} });
       if (renderer) { try { renderer.dispose(); if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch (e) {} }
     };
-  }, [ski, topsheet]);
+  }, [ski, topsheet, pairView]);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 1000, display: "flex", flexDirection: "column" }}
@@ -4680,6 +4684,7 @@ export default function App() {
   });
   const topsheetFileRef = useRef(null);
   const [show3D, setShow3D] = useState(false);
+  const [pairView, setPairView] = useState(false);
   const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
   const handleTopsheetFile = useCallback((file) => {
     if (!file) return;
@@ -4701,42 +4706,49 @@ export default function App() {
       const { right, left } = computeOutline(ski);
       const all = right.concat(left);
       const maxLat = Math.max(...all.map(p => Math.abs(p.x)));
-      const pad = 24;
+      const pad = 24, gapMM = 12;
       const pxPerMM = Math.max(0.5, Math.min(4, 2400 / ski.length)); // ~2400px long side
       const W = Math.ceil(ski.length * pxPerMM + pad * 2);
-      const H = Math.ceil(maxLat * 2 * pxPerMM + pad * 2);
+      const bandMM = maxLat * 2;
+      const H = Math.ceil((pairView ? bandMM * 2 + gapMM : bandMM) * pxPerMM + pad * 2);
       const cv = document.createElement("canvas");
       cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d");
-      const cy0 = pad + maxLat * pxPerMM;
-      const map = (p) => ({ x: pad + p.y * pxPerMM, y: cy0 + p.x * pxPerMM }); // along→X, lateral→Y
-      const outline = () => {
+      const cyA = pad + maxLat * pxPerMM;
+      const cyB = cyA + (bandMM + gapMM) * pxPerMM;
+      const mapA = (p) => ({ x: pad + p.y * pxPerMM, y: cyA + p.x * pxPerMM });   // along->X, lateral->Y
+      const mapB = (p) => ({ x: pad + p.y * pxPerMM, y: cyB - p.x * pxPerMM });   // mirrored partner
+      const outline = (mapFn) => {
         ctx.beginPath();
-        right.forEach((p, i) => { const s = map(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
-        for (let i = left.length - 1; i >= 0; i--) { const s = map(left[i]); ctx.lineTo(s.x, s.y); }
+        right.forEach((p, i) => { const s = mapFn(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+        for (let i = left.length - 1; i >= 0; i--) { const s = mapFn(left[i]); ctx.lineTo(s.x, s.y); }
         ctx.closePath();
       };
-      // Base fill (so transparent artwork areas aren't see-through).
-      outline(); ctx.fillStyle = "#1c1916"; ctx.fill();
-      // Clip + artwork.
+      // Combined art box across both skis (or just ski A).
       let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity;
-      all.forEach(p => { const s = map(p); if (s.x < mnX) mnX = s.x; if (s.x > mxX) mxX = s.x; if (s.y < mnY) mnY = s.y; if (s.y > mxY) mxY = s.y; });
-      ctx.save(); outline(); ctx.clip();
-      drawTopsheetImage(ctx, img, { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY }, topsheet);
-      ctx.restore();
-      // Crisp outline on top.
-      outline(); ctx.strokeStyle = "#ede6d8"; ctx.lineWidth = 2.5; ctx.stroke();
+      const acc = (s) => { if (s.x < mnX) mnX = s.x; if (s.x > mxX) mxX = s.x; if (s.y < mnY) mnY = s.y; if (s.y > mxY) mxY = s.y; };
+      all.forEach(p => { acc(mapA(p)); if (pairView) acc(mapB(p)); });
+      const box = { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY };
+      const paintSki = (mapFn) => {
+        outline(mapFn); ctx.fillStyle = "#1c1916"; ctx.fill();       // base fill
+        ctx.save(); outline(mapFn); ctx.clip();
+        drawTopsheetImage(ctx, img, box, topsheet);
+        ctx.restore();
+        outline(mapFn); ctx.strokeStyle = "#ede6d8"; ctx.lineWidth = 2.5; ctx.stroke();
+      };
+      paintSki(mapA);
+      if (pairView) paintSki(mapB);
       cv.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet.png`;
+        a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet${pairView ? "-pair" : ""}.png`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }, "image/png");
     };
     img.src = topsheet.src;
-  }, [ski, topsheet]);
+  }, [ski, topsheet, pairView]);
 
   // Export a 1:1 print-ready topsheet template (SVG): cut line + bleed + crop marks (+ embedded art).
   const exportTopsheetTemplate = useCallback(() => {
@@ -5667,6 +5679,14 @@ export default function App() {
             View in 3D
           </button>
 
+          <button onClick={() => setPairView(v => !v)}
+            style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
+            {pairView ? "Pair View: ON" : "Pair View: OFF"}
+          </button>
+          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
+          </div>
+
           {topsheet.src && (
             <>
               <div style={{ color: C.value, fontSize: 10, marginBottom: 10, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>
@@ -5958,7 +5978,7 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} />
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView} />
             {viewLabelChip("Plan")}
           </div>
         )}
@@ -5988,7 +6008,7 @@ export default function App() {
         onClose={() => setFeedbackOpen(false)}
         trigger={feedbackTrigger}
       />
-      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} onClose={() => setShow3D(false)} />}
+      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView} onClose={() => setShow3D(false)} />}
     </div>
   );
 }
