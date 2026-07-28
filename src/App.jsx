@@ -21,6 +21,7 @@ const C = {
   skiStroke:    "#ede6d8",  // bone
   skiGlow:      "rgba(237,230,216,0.20)",
   control:      "#e8552a",  // torch
+  torch:        "#e8552a",  // torch (alias used across UI for warnings / destructive actions)
   controlHover: "#f07a52",
   controlActive:"#FFD080",
   handle:       "#c8935a",  // brass
@@ -491,6 +492,55 @@ function computeEIAtStation(skiWidth,coreThick,layup){
   for(let i=0;i<layers.length;i++){const{E,b,t}=layers[i];const d=yc[i]-ybar;EI+=E*(b*t*t*t/12+b*t*d*d);}
   return EI;
 }
+// ══════════════ BILL OF MATERIALS ══════════════
+// Rough shop densities (kg/m^3) for a swing-weight-ish core mass estimate.
+const WOOD_DENSITY = { poplar: 420, ash: 670, maple: 705, bamboo: 650, paulownia: 280, fir: 450, birch: 670, aspen: 420, walnut: 610, cherry: 560 };
+function _polyArea(pts) { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; } return Math.abs(a) / 2; }
+function _polyPerim(pts) { let L = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; L += Math.hypot(q.x - p.x, q.y - p.y); } return L; }
+// Derives objective build quantities (areas, lengths, volumes, counts) from the geometry + layup.
+// Units returned: areas in m^2, lengths in m, volume in liters, mass in kg.
+function computeBOM(ski) {
+  let outline = [];
+  try { outline = getFullOutlinePoints(ski); } catch (e) { outline = []; }
+  const areaMM2 = outline.length ? _polyArea(outline) : 0;
+  const perimMM = outline.length ? _polyPerim(outline) : 0;
+  const N = 200, dx = ski.length / N;
+  let vol = 0, maxThick = 0;
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N;
+    const w = getWidthAtPos(ski, pos);
+    const t = getCoreThickAt(ski.coreProfile, pos);
+    if (t > maxThick) maxThick = t;
+    vol += (i === 0 || i === N ? 0.5 : 1) * w * t * dx;   // mm^3 (trapezoidal)
+  }
+  const areaM2 = areaMM2 / 1e6;
+  const coreVolL = vol / 1e6;                              // 1 L = 1e6 mm^3
+  const wood = (ski.layup && ski.layup.wood) || "";
+  const density = WOOD_DENSITY[wood] || 500;
+  const coreMassKg = (vol / 1e9) * density;               // mm^3 -> m^3
+  let effEdge = 0;
+  try { effEdge = computeDerived(ski).effectiveEdge || 0; } catch (e) {}
+  const edgeWrap = ski.edgeWrap || "full";
+  const edgeLenM = (edgeWrap === "contact" ? 2 * effEdge : perimMM) / 1000;
+  const glassLayers = (ski.layup && ski.layup.glassLayers) || 1;
+  const glassM2 = areaM2 * 2 * glassLayers;               // top + bottom
+  const hasMetal = ski.layup && ski.layup.metal && ski.layup.metal !== "none";
+  const metalM2 = hasMetal ? areaM2 * 2 : 0;
+  const carbonLayers = (ski.layup && ski.layup.carbon && ski.layup.carbon !== "none") ? (ski.layup.carbonLayers || 1) : 0;
+  const carbonM2 = carbonLayers ? areaM2 * 2 * carbonLayers : 0;
+  let inserts = 0;
+  if (ski.mode === "snowboard") { try { const ins = computeInserts(ski); inserts = (ins.holes && ins.holes.length) || 0; } catch (e) {} }
+  const maxW = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth);
+  // Epoxy: ~ wet-out for all fiber layers at ~250 g/m^2 per layer-side, in kg.
+  const epoxyKg = (glassM2 + carbonM2) * 0.25 + areaM2 * 0.15;
+  return {
+    areaM2, perimM: perimMM / 1000, coreVolL, coreMassKg, maxThick, density,
+    blank: { L: ski.length, W: Math.ceil(maxW + 10), T: Math.ceil(maxThick + 2) },
+    edgeLenM, edgeWrap, glassLayers, glassM2, metalM2, carbonLayers, carbonM2,
+    baseM2: areaM2, topsheetM2: areaM2, inserts, epoxyKg,
+  };
+}
+
 function computeFlexProfile(ski){
   const N=250,stations=[];
   for(let i=0;i<=N;i++){
@@ -2140,13 +2190,199 @@ function drawTopsheetImage(ctx, img, box, ts) {
   ctx.restore();
 }
 
-// ══════════════ PLAN VIEW ══════════════
+// Offsets a closed polygon OUTWARD by `dist` (mm) along per-vertex normals — used for the print
+// bleed line around the topsheet template.
+function offsetPolygonOutward(ptsIn, dist) {
+  const pts = [];
+  for (let i = 0; i < ptsIn.length; i++) {
+    const p = ptsIn[i], q = ptsIn[(i + 1) % ptsIn.length];
+    if (Math.hypot(p.x - q.x, p.y - q.y) > 1e-6) pts.push({ x: p.x, y: p.y });
+  }
+  const n = pts.length;
+  if (n < 3 || dist <= 0) return pts.slice();
+  let area = 0;
+  for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; area += a.x * b.y - b.x * a.y; }
+  const ccw = area > 0;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n], curr = pts[i], next = pts[(i + 1) % n];
+    const e1x = curr.x - prev.x, e1y = curr.y - prev.y, l1 = Math.hypot(e1x, e1y) || 1;
+    const e2x = next.x - curr.x, e2y = next.y - curr.y, l2 = Math.hypot(e2x, e2y) || 1;
+    // Outward normal: for a CCW polygon the RIGHT normal (dy,-dx) points outward.
+    const n1x = ccw ? e1y / l1 : -e1y / l1, n1y = ccw ? -e1x / l1 : e1x / l1;
+    const n2x = ccw ? e2y / l2 : -e2y / l2, n2y = ccw ? -e2x / l2 : e2x / l2;
+    let bx = n1x + n2x, by = n1y + n2y; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+    const cosHalf = Math.max(0.35, bx * n1x + by * n1y);
+    const off = dist / cosHalf;
+    out.push({ x: curr.x + bx * off, y: curr.y + by * off });
+  }
+  return out;
+}
+
+// Builds a 1:1 (mm) print-ready topsheet template SVG: solid CUT line = the ski outline, dashed
+// BLEED line offset outward, corner crop marks, centerline + length/waist dimensions, and (if art is
+// supplied) the artwork embedded and clipped to the bleed so a print shop gets a correctly-sized,
+// full-bleed file. SVG <text> is fine here — print software (Illustrator/Corel/RIP) renders it.
+function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
+  const outline = getFullOutlinePoints(ski);
+  const T = p => ({ x: p.y, y: p.x });                 // length horizontal
+  const cut = outline.map(T);
+  const bleed = offsetPolygonOutward(outline, bleedMM).map(T);
+  const pathOf = pts => pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ") + " Z";
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  bleed.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
+  const margin = 16;
+  const vbX = minX - margin, vbY = minY - margin, vbW = (maxX - minX) + margin * 2, vbH = (maxY - minY) + margin * 2;
+
+  // Optional embedded artwork, fit to the BLEED bounding box (cover/contain/stretch + scale/offset/rot).
+  let imgLayer = "";
+  if (topsheet && topsheet.src && imgDims && imgDims.w && imgDims.h) {
+    const bw = maxX - minX, bh = maxY - minY, arImg = imgDims.w / imgDims.h, arBox = bw / bh;
+    let dw, dh;
+    if (topsheet.fit === "stretch") { dw = bw; dh = bh; }
+    else { const cover = topsheet.fit !== "contain"; const fillW = cover ? arImg < arBox : arImg > arBox; if (fillW) { dw = bw; dh = bw / arImg; } else { dh = bh; dw = bh * arImg; } }
+    dw *= (topsheet.scale || 1); dh *= (topsheet.scale || 1);
+    const cx = (minX + maxX) / 2 + (topsheet.offsetX || 0) * bw;
+    const cy = (minY + maxY) / 2 + (topsheet.offsetY || 0) * bh;
+    const rot = topsheet.rotation || 0;
+    imgLayer = `<g clip-path="url(#bleedclip)"><image href="${topsheet.src}" x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="none" opacity="${topsheet.opacity != null ? topsheet.opacity : 1}" transform="rotate(${rot} ${cx.toFixed(2)} ${cy.toFixed(2)})"/></g>`;
+  }
+
+  // Corner crop marks around the bleed bbox.
+  const ml = 10;
+  const crop = [];
+  const corner = (x, y, sx, sy) => `<path d="M${(x + sx * 2).toFixed(1)},${y.toFixed(1)} L${(x + sx * (2 + ml)).toFixed(1)},${y.toFixed(1)} M${x.toFixed(1)},${(y + sy * 2).toFixed(1)} L${x.toFixed(1)},${(y + sy * (2 + ml)).toFixed(1)}" stroke="#000" stroke-width="0.3" fill="none"/>`;
+  crop.push(corner(minX, minY, -1, -1), corner(maxX, minY, 1, -1), corner(minX, maxY, -1, 1), corner(maxX, maxY, 1, 1));
+
+  const cenY = (minY + maxY) / 2;
+  const dims = `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth} \u00B7 ${ski.length}mm`;
+  const fs = Math.max(6, ski.length / 220);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vbW.toFixed(1)}mm" height="${vbH.toFixed(1)}mm" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}">
+  <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm</title>
+  <desc>1:1 mm scale. Solid = cut line (ski outline). Dashed = ${bleedMM}mm bleed. Print full-bleed, trim on the solid line.</desc>
+  <defs><clipPath id="bleedclip"><path d="${pathOf(bleed)}"/></clipPath></defs>
+  <g id="artwork">${imgLayer}</g>
+  <g id="bleed"><path d="${pathOf(bleed)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/></g>
+  <g id="cut"><path d="${pathOf(cut)}" fill="none" stroke="#000" stroke-width="0.5"/></g>
+  <g id="centerline"><line x1="${minX.toFixed(1)}" y1="${cenY.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${cenY.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/></g>
+  <g id="cropmarks">${crop.join("")}</g>
+  <g id="labels" fill="#000" font-family="monospace">
+    <text x="${(minX).toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm</text>
+    <text x="${(minX).toFixed(1)}" y="${(maxY + fs + 5).toFixed(1)}" font-size="${fs.toFixed(1)}">${(ski.designName || "Topsheet")} \u00B7 ${dims}</text>
+  </g>
+</svg>`;
+}
+
+
 // Layout:
 //   ROW 1 (top, ~38% of height): Full ski plan at TRUE aspect ratio. Long and thin.
 //                                Only NODES are draggable here (no handle clutter).
 //   ROW 2 (bottom, ~62% of height): Two side-by-side zoom panels — tail (left) | tip (right).
 //                                   Lots of headroom so handle dragging doesn't hit the edge.
 //                                   This is where bezier handles are edited.
+// Builds plain vertex data for a 3D ski mesh (top surface = topsheet-mapped, bottom = base, walls =
+// edge). Kept dependency-free and pure so it can be unit-tested; the 3D modal uploads these arrays
+// into THREE BufferGeometries. Units are scaled by S (mm -> ~cm) for numerical comfort.
+function buildSki3DGeometry(ski) {
+  const L = ski.length, TL = ski.tipLength, TAIL = ski.tailLength, N = 160, S = 0.01;
+  const halfW = (pos) => {
+    const xmm = pos * L;
+    let base = getWidthAtPos(ski, pos) / 2;
+    if (xmm >= L - TL) { const u = TL > 0 ? (xmm - (L - TL)) / TL : 0; base = (ski.tipWidth / 2) * Math.sqrt(Math.max(0, 1 - u * u)); }
+    else if (xmm <= TAIL) { const u = TAIL > 0 ? (TAIL - xmm) / TAIL : 0; base = (ski.tailWidth / 2) * Math.sqrt(Math.max(0, 1 - u * u)); }
+    return Math.max(0, base);
+  };
+  const thick = (pos) => (getCoreThickAt(ski.coreProfile, pos) + 2);
+  const st = [];
+  for (let i = 0; i <= N; i++) {
+    const pos = i / N, xmm = pos * L, y = (xmm - L / 2) * S;
+    const hw = halfW(pos) * S, bz = sideProfileHeightAt(ski, xmm) * S, tz = bz + thick(pos) * S;
+    st.push({ pos, y, hw, bz, tz });
+  }
+  const topPos = [], topUV = [], topIdx = [];
+  for (let i = 0; i <= N; i++) { const s = st[i]; topPos.push(-s.hw, s.tz, s.y, s.hw, s.tz, s.y); topUV.push(s.pos, 0, s.pos, 1); }
+  for (let i = 0; i < N; i++) { const a = i * 2; topIdx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+  const botPos = [], botIdx = [];
+  for (let i = 0; i <= N; i++) { const s = st[i]; botPos.push(-s.hw, s.bz, s.y, s.hw, s.bz, s.y); }
+  for (let i = 0; i < N; i++) { const a = i * 2; botIdx.push(a, a + 3, a + 1, a, a + 2, a + 3); }
+  const wallPos = [], wallIdx = [];
+  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(-s.hw, s.tz, s.y, -s.hw, s.bz, s.y); }
+  for (let i = 0; i < N; i++) { const a = i * 2; wallIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+  const lc = (N + 1) * 2;
+  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(s.hw, s.tz, s.y, s.hw, s.bz, s.y); }
+  for (let i = 0; i < N; i++) { const a = lc + i * 2; wallIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const len = L * S, maxHW = Math.max(...st.map(s => s.hw));
+  return { topPos, topUV, topIdx, botPos, botIdx, wallPos, wallIdx, len, maxHW };
+}
+
+// Builds a branded one-page "build card" spec sheet (fixed 1400x900 SVG) summarizing the design:
+// silhouette + all key numbers + layup + flex + estimated core mass, in the Black Chapel palette.
+function buildSpecSheetSVG(ski, derived, flex, bom) {
+  const W = 1400, H = 900, pad = 50;
+  const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
+  const rating = flexRating(flex.underfootK);
+  const isBoard = ski.mode === "snowboard";
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  let outline = [];
+  try { outline = getFullOutlinePoints(ski); } catch (e) {}
+  const rx = pad, ry = 210, rw = 540, rh = H - ry - 150;
+  const maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
+  const sc = Math.min(rw / ski.length, rh / (2 * maxLat));
+  const ox = rx + (rw - ski.length * sc) / 2, oy = ry + rh / 2;
+  const mp = p => ({ x: ox + p.y * sc, y: oy - p.x * sc });
+  const silPath = outline.length ? outline.map((p, i) => `${i ? "L" : "M"}${mp(p).x.toFixed(1)},${mp(p).y.toFixed(1)}`).join(" ") + " Z" : "";
+
+  const rows = [
+    ["Length", `${ski.length} mm`],
+    ["Dimensions", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth} mm`],
+    ["Sidecut radius", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--"],
+    ["Effective edge", `${Math.round(derived.effectiveEdge)} mm`],
+    ["Tip / tail length", `${ski.tipLength} / ${ski.tailLength} mm`],
+    ["Tip / tail rise", `${ski.tipHeight} / ${ski.tailHeight} mm`],
+    ["Camber", `${ski.camberHeight} mm`],
+    ["Flex", `${rating.label} (${Math.round(flex.underfootK)} N/mm)`],
+    ...(isBoard ? [["Stance / setback", `${ski.stanceWidth || 0} / ${ski.setback || 0} mm`]] : []),
+    ["Core", ski.layup.wood],
+    ["Fiber", `${ski.layup.glass} \u00D7${ski.layup.glassLayers}/side`],
+    ...(ski.layup.metal && ski.layup.metal !== "none" ? [["Metal", ski.layup.metal]] : []),
+    ...(ski.layup.carbon && ski.layup.carbon !== "none" ? [["Carbon", `${ski.layup.carbon} \u00D7${ski.layup.carbonLayers}`]] : []),
+    ["Edge wrap", ski.edgeWrap || "full"],
+    ["Core mass (est)", `~${bom.coreMassKg.toFixed(2)} kg`],
+  ];
+  const cx = 630, cyTop = 210, availH = H - cyTop - 150, rowH = availH / rows.length;
+  const rowsSvg = rows.map((r, i) => {
+    const yb = cyTop + i * rowH + rowH * 0.66;
+    return `<text x="${cx}" y="${yb.toFixed(0)}" font-size="21" fill="${dim}" font-family="monospace">${esc(r[0])}</text>`
+      + `<text x="${W - pad}" y="${yb.toFixed(0)}" font-size="22" fill="${bone}" font-family="monospace" text-anchor="end">${esc(r[1])}</text>`
+      + `<line x1="${cx}" y1="${(cyTop + (i + 1) * rowH).toFixed(0)}" x2="${W - pad}" y2="${(cyTop + (i + 1) * rowH).toFixed(0)}" stroke="${border}" stroke-width="1"/>`;
+  }).join("");
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const typeLabel = isBoard ? "SNOWBOARD SPEC SHEET" : "SKI SPEC SHEET";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <rect width="${W}" height="${H}" fill="${bg}"/>
+  <rect x="16" y="16" width="${W - 32}" height="${H - 32}" fill="none" stroke="${border}" stroke-width="1.5"/>
+  <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">BLACK CHAPEL STUDIOS</text>
+  <text x="${pad}" y="128" font-size="46" fill="${bone}" font-family="monospace" font-weight="bold">${esc(ski.designName || "Untitled Design")}</text>
+  <text x="${pad}" y="160" font-size="18" fill="${torch}" font-family="monospace" letter-spacing="3">${typeLabel}</text>
+  <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
+  <g id="silhouette">
+    <path d="${silPath}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>
+    <text x="${rx + rw / 2}" y="${ry + rh + 50}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
+    <text x="${rx + rw / 2}" y="${ry + rh + 78}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
+  </g>
+  <g id="specs">${rowsSvg}</g>
+  <line x1="${pad}" y1="${H - 96}" x2="${W - pad}" y2="${H - 96}" stroke="${border}" stroke-width="1"/>
+  <text x="${pad}" y="${H - 56}" font-size="30" fill="${brass}" font-family="monospace" letter-spacing="6" font-weight="bold">WORSHIP THE WORK</text>
+  <text x="${W - pad}" y="${H - 56}" font-size="18" fill="${dim}" font-family="monospace" text-anchor="end">${dateStr}</text>
+</svg>`;
+}
+
 function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet }) {
   const canvasRef = useRef(null);
   // Topsheet artwork: keep a decoded HTMLImageElement in a ref, and bump a counter when it finishes
@@ -4226,6 +4462,192 @@ function RockerProfileField({ ski, setSki, C }) {
   );
 }
 
+// ══════════════ SHAREABLE PERMALINK ══════════════
+// Encodes a design to a URL-safe string (base64url of JSON) and back, so a whole ski/board can be
+// shared as a link with no backend. Topsheet art is intentionally excluded (too large for a URL).
+function encodeDesign(ski) {
+  try {
+    const clean = { ...ski };
+    delete clean.topsheet;
+    const json = JSON.stringify(clean);
+    return btoa(unescape(encodeURIComponent(json)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } catch (e) { return null; }
+}
+function decodeDesign(str) {
+  try {
+    const b = str.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(escape(atob(b)));
+    const obj = JSON.parse(json);
+    if (!obj || typeof obj !== "object") return null;
+    // Backfill any keys missing from older shares so renders don't break.
+    const out = { ...DEFAULT_SKI, ...obj };
+    for (const k of Object.keys(DEFAULT_SKI)) {
+      const bv = DEFAULT_SKI[k], lv = obj[k];
+      if (bv && lv && typeof bv === "object" && typeof lv === "object" && !Array.isArray(bv) && !Array.isArray(lv)) {
+        out[k] = { ...bv, ...lv };
+      }
+    }
+    return out;
+  } catch (e) { return null; }
+}
+
+// ══════════════ 3D PREVIEW ══════════════
+// Loads Three.js from a CDN at runtime (once) so the single-file deploy flow needs no new npm deps.
+let _threePromise = null;
+function loadThree() {
+  if (typeof window !== "undefined" && window.THREE) return Promise.resolve(window.THREE);
+  if (_threePromise) return _threePromise;
+  _threePromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.id = "three-cdn";
+    s.src = "https://unpkg.com/three@0.149.0/build/three.min.js";
+    s.onload = () => resolve(window.THREE);
+    s.onerror = () => reject(new Error("Could not load 3D library"));
+    document.head.appendChild(s);
+  });
+  return _threePromise;
+}
+
+function Ski3DModal({ ski, topsheet, onClose }) {
+  const mountRef = useRef(null);
+  const [status, setStatus] = useState("loading"); // loading | ok | error
+
+  useEffect(() => {
+    let renderer, scene, camera, raf, ro;
+    let disposed = false;
+    const cleanupFns = [];
+    loadThree().then((THREE) => {
+      if (disposed || !mountRef.current) return;
+      const mount = mountRef.current;
+      const W = mount.clientWidth, H = mount.clientHeight;
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color("#0e0c0a");
+      camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(W, H);
+      mount.appendChild(renderer.domElement);
+
+      // Lights.
+      scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(6, 12, 8); scene.add(dir);
+      const dir2 = new THREE.DirectionalLight(0xffffff, 0.35);
+      dir2.position.set(-8, 6, -6); scene.add(dir2);
+
+      // Geometry.
+      const g = buildSki3DGeometry(ski);
+      const grp = new THREE.Group();
+      const mkGeom = (pos, idx, uv) => {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        if (uv) geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        return geo;
+      };
+      const topGeo = mkGeom(g.topPos, g.topIdx, g.topUV);
+      const botGeo = mkGeom(g.botPos, g.botIdx);
+      const wallGeo = mkGeom(g.wallPos, g.wallIdx);
+
+      let topMat;
+      if (topsheet && topsheet.src) {
+        const tex = new THREE.Texture();
+        const im = new Image();
+        im.onload = () => { tex.image = im; tex.needsUpdate = true; };
+        im.src = topsheet.src;
+        tex.colorSpace = THREE.SRGBColorSpace || undefined;
+        topMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide });
+      } else {
+        topMat = new THREE.MeshStandardMaterial({ color: "#c8935a", roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide });
+      }
+      const botMat = new THREE.MeshStandardMaterial({ color: "#0e0c0a", roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide });
+      const wallMat = new THREE.MeshStandardMaterial({ color: "#8a8f96", roughness: 0.35, metalness: 0.6, side: THREE.DoubleSide });
+      grp.add(new THREE.Mesh(topGeo, topMat));
+      grp.add(new THREE.Mesh(botGeo, botMat));
+      grp.add(new THREE.Mesh(wallGeo, wallMat));
+      scene.add(grp);
+      cleanupFns.push(() => { [topGeo, botGeo, wallGeo].forEach(x => x.dispose()); [topMat, botMat, wallMat].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
+
+      // Orbit (custom, no OrbitControls dep).
+      let az = 0.7, pol = 1.05, rad = g.len * 1.5;
+      const updateCam = () => {
+        camera.position.set(rad * Math.sin(pol) * Math.sin(az), rad * Math.cos(pol), rad * Math.sin(pol) * Math.cos(az));
+        camera.lookAt(0, 0, 0);
+      };
+      updateCam();
+      let drag = null;
+      const el = renderer.domElement;
+      const onDown = (e) => { drag = { x: e.clientX, y: e.clientY }; };
+      const onMove = (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+        az -= dx * 0.008; pol = Math.max(0.15, Math.min(Math.PI - 0.15, pol - dy * 0.008)); updateCam();
+      };
+      const onUp = () => { drag = null; };
+      const onWheel = (e) => { e.preventDefault(); rad = Math.max(g.len * 0.5, Math.min(g.len * 4, rad * (1 + e.deltaY * 0.001))); updateCam(); };
+      const onTouchStart = (e) => { if (e.touches[0]) drag = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+      const onTouchMove = (e) => { if (drag && e.touches[0]) { const t = e.touches[0]; const dx = t.clientX - drag.x, dy = t.clientY - drag.y; drag = { x: t.clientX, y: t.clientY }; az -= dx * 0.008; pol = Math.max(0.15, Math.min(Math.PI - 0.15, pol - dy * 0.008)); updateCam(); } };
+      el.addEventListener("pointerdown", onDown); window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+      el.addEventListener("wheel", onWheel, { passive: false });
+      el.addEventListener("touchstart", onTouchStart, { passive: true }); el.addEventListener("touchmove", onTouchMove, { passive: true }); el.addEventListener("touchend", onUp);
+      cleanupFns.push(() => { el.removeEventListener("pointerdown", onDown); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); el.removeEventListener("wheel", onWheel); el.removeEventListener("touchstart", onTouchStart); el.removeEventListener("touchmove", onTouchMove); el.removeEventListener("touchend", onUp); });
+
+      // Gentle auto-spin until the user interacts.
+      let spun = false;
+      const markSpun = () => { spun = true; };
+      el.addEventListener("pointerdown", markSpun);
+      const animate = () => {
+        raf = requestAnimationFrame(animate);
+        if (!spun) { az += 0.003; updateCam(); }
+        renderer.render(scene, camera);
+      };
+      animate();
+
+      ro = new ResizeObserver(() => {
+        if (!mountRef.current) return;
+        const w = mountRef.current.clientWidth, h = mountRef.current.clientHeight;
+        camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h);
+      });
+      ro.observe(mount);
+      setStatus("ok");
+    }).catch(() => { if (!disposed) setStatus("error"); });
+
+    return () => {
+      disposed = true;
+      if (raf) cancelAnimationFrame(raf);
+      if (ro) ro.disconnect();
+      cleanupFns.forEach(fn => { try { fn(); } catch (e) {} });
+      if (renderer) { try { renderer.dispose(); if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch (e) {} }
+    };
+  }, [ski, topsheet]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 1000, display: "flex", flexDirection: "column" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #37322c" }}>
+        <div style={{ color: "#c8935a", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
+          3D PREVIEW \u00B7 {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " \u00B7 topsheet mapped" : ""}
+        </div>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close \u2715</button>
+      </div>
+      <div ref={mountRef} style={{ flex: 1, position: "relative", cursor: "grab", minHeight: 0 }}>
+        {status !== "ok" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? "#e8552a" : "#9b9388", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", textAlign: "center", padding: 20 }}>
+            {status === "error"
+              ? "Couldn't load the 3D preview (the 3D library may be blocked on your network). Everything else works normally."
+              : "Loading 3D preview\u2026"}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: "8px 16px", borderTop: "1px solid #37322c", color: "#6f685f", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
+        Drag to rotate \u00B7 scroll to zoom \u00B7 topsheet is mapped onto the top surface with rocker &amp; camber
+      </div>
+    </div>
+  );
+}
+
 // ══════════════ MAIN ══════════════
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
@@ -4242,6 +4664,14 @@ export default function App() {
   const [size, setSize] = useState({ w: 1200, h: 800 });
   const derived = useMemo(() => computeDerived(ski), [ski]);
   const flex = useMemo(() => computeFlexProfile(ski), [ski]);
+  const bom = useMemo(() => computeBOM(ski), [ski]);
+  // Editable per-unit material prices (USD) for the cost estimate. Persisted to localStorage.
+  const [bomPrices, setBomPrices] = useState(() => {
+    const defs = { wood: 4, glass: 9, metal: 45, carbon: 38, edge: 2.5, base: 14, topsheet: 16, insert: 0.6, epoxy: 22 };
+    try { const raw = localStorage.getItem("bcs_bom_prices"); if (raw) return { ...defs, ...JSON.parse(raw) }; } catch (e) {}
+    return defs;
+  });
+  useEffect(() => { try { localStorage.setItem("bcs_bom_prices", JSON.stringify(bomPrices)); } catch (e) {} }, [bomPrices]);
 
   // ── Topsheet artwork overlay ──────────────────────────────────
   // Kept in component state (not the saved ski JSON) so large base64 images don't bloat design files.
@@ -4249,6 +4679,7 @@ export default function App() {
     src: null, name: null, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0, fit: "cover",
   });
   const topsheetFileRef = useRef(null);
+  const [show3D, setShow3D] = useState(false);
   const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
   const handleTopsheetFile = useCallback((file) => {
     if (!file) return;
@@ -4306,6 +4737,57 @@ export default function App() {
     };
     img.src = topsheet.src;
   }, [ski, topsheet]);
+
+  // Export a 1:1 print-ready topsheet template (SVG): cut line + bleed + crop marks (+ embedded art).
+  const exportTopsheetTemplate = useCallback(() => {
+    const finish = (imgDims) => {
+      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8);
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template.svg`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    if (topsheet.src) {
+      const img = new Image();
+      img.onload = () => finish({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => finish(null);
+      img.src = topsheet.src;
+    } else finish(null);
+  }, [ski, topsheet]);
+
+  // Export the branded spec sheet as SVG or PNG.
+  const exportSpecSheet = useCallback((fmt) => {
+    const svg = buildSpecSheetSVG(ski, derived, flex, bom);
+    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
+    if (fmt === "svg") {
+      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement("canvas");
+      cv.width = 1400; cv.height = 900;
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#141210"; ctx.fillRect(0, 0, 1400, 900);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      cv.toBlob((b) => {
+        const u = URL.createObjectURL(b);
+        const a = document.createElement("a"); a.href = u; a.download = `${nameBase}.png`; a.click();
+        setTimeout(() => URL.revokeObjectURL(u), 1000);
+      }, "image/png");
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); alert("Could not render the spec sheet to PNG. Try the SVG export."); };
+    img.src = url;
+  }, [ski, derived, flex, bom]);
 
   // ── Save / Load state ─────────────────────────────────────────
   const fileInputRef = useRef(null);
@@ -4391,6 +4873,42 @@ export default function App() {
     }
   }, []);
 
+  // ── Shareable permalink ───────────────────────────────────────
+  const [shareMsg, setShareMsg] = useState(null);
+  // On first mount, if the URL carries a shared design (#d=...), load it and clear the hash so a
+  // later save/edit doesn't keep re-loading the old link.
+  const sharedLoadedRef = useRef(false);
+  useEffect(() => {
+    if (sharedLoadedRef.current) return;
+    sharedLoadedRef.current = true;
+    try {
+      const m = (window.location.hash || "").match(/[#&]d=([^&]+)/);
+      if (m) {
+        const decoded = decodeDesign(m[1]);
+        if (decoded) {
+          setSki(decoded);
+          history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
+      }
+    } catch (e) {}
+  }, []);
+  const handleCopyShareLink = useCallback(() => {
+    const enc = encodeDesign(ski);
+    if (!enc) { setShareMsg({ type: "error", text: "Could not build link." }); return; }
+    const url = `${window.location.origin}${window.location.pathname}#d=${enc}`;
+    const done = (ok) => {
+      setShareMsg(ok
+        ? { type: "ok", text: `Link copied (${(url.length / 1024).toFixed(1)} KB)` }
+        : { type: "warn", text: "Copy failed — select the box and copy manually." });
+      setShareCopyUrl(url);
+      setTimeout(() => setShareMsg(null), 4000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => done(true)).catch(() => done(false));
+    } else { done(false); }
+  }, [ski]);
+  const [shareCopyUrl, setShareCopyUrl] = useState("");
+
   const acceptRecover = useCallback(() => {
     if (recoverBanner?.ski) setSki(recoverBanner.ski);
     setRecoverBanner(null);
@@ -4417,6 +4935,7 @@ export default function App() {
     layup: false,
     topsheet: false,
     flex: true,           // open by default so the rating chip is visible
+    materials: false,
     cncExport: false,
     externalTools: false,
     beta: true,
@@ -4928,6 +5447,25 @@ export default function App() {
               }}>New Design</button>
             </>
           )}
+          <button onClick={handleCopyShareLink} style={{
+            width: "100%", background: "transparent", border: `1px solid ${C.heading}`,
+            borderRadius: 3, padding: "8px 0", color: C.heading, fontSize: 12, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.6, cursor: "pointer",
+            textTransform: "uppercase", marginTop: 10,
+          }}>Copy Share Link</button>
+          {shareMsg && (
+            <div style={{ marginTop: 6, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace",
+              color: shareMsg.type === "error" ? C.torch : shareMsg.type === "warn" ? C.heading : "#9FB8A8" }}>
+              {shareMsg.text}
+            </div>
+          )}
+          {shareMsg && shareMsg.type === "warn" && shareCopyUrl && (
+            <input readOnly value={shareCopyUrl} onFocus={e => e.target.select()}
+              style={{ width: "100%", marginTop: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} />
+          )}
+          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            A link that reopens this exact design in any browser. Artwork isn't included.
+          </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
             Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
           </div>
@@ -5116,6 +5654,19 @@ export default function App() {
             {topsheet.src ? "Replace Image" : "Upload Image"}
           </button>
 
+          <button onClick={exportTopsheetTemplate}
+            style={{ width: "100%", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
+            Export Print Template (SVG)
+          </button>
+          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            1:1 cut line + bleed + crop marks for a print shop. Embeds your art if loaded; works blank too.
+          </div>
+
+          <button onClick={() => setShow3D(true)}
+            style={{ width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
+            View in 3D
+          </button>
+
           {topsheet.src && (
             <>
               <div style={{ color: C.value, fontSize: 10, marginBottom: 10, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>
@@ -5156,7 +5707,7 @@ export default function App() {
                   Reset
                 </button>
                 <button onClick={clearTopsheet}
-                  style={{ flex: 1, background: "transparent", border: `1px solid ${C.torch}66`, color: C.torch, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                  style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
                   Remove
                 </button>
               </div>
@@ -5194,6 +5745,74 @@ export default function App() {
           {derived.asymmetric && stat("R front / back",
             `${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m`,
             C.contactLabel)}
+        </AccordionSection>
+
+        <AccordionSection isOpen={sectionsOpen.materials} onToggle={() => toggleSection("materials")}
+          title="Bill of Materials"
+          accent={<span style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+            ${(() => {
+              const qv = { wood: bom.coreVolL, glass: bom.glassM2, metal: bom.metalM2, carbon: bom.carbonM2, edge: bom.edgeLenM, base: bom.baseM2, topsheet: bom.topsheetM2, epoxy: bom.epoxyKg, insert: bom.inserts };
+              return Math.round(Object.keys(qv).reduce((s, k) => s + qv[k] * (bomPrices[k] || 0), 0));
+            })()}
+          </span>}>
+          <div style={{ color: C.labelDim, fontSize: 9.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Estimated from geometry + layup. Prices are editable (USD) and saved on this device. A rough guide, not a quote.
+          </div>
+          {(() => {
+            const rows = [
+              { key: "wood", label: "Wood core", qty: bom.coreVolL, disp: `${bom.coreVolL.toFixed(2)} L`, unit: "$/L" },
+              { key: "glass", label: `Fiberglass (${bom.glassLayers}/side)`, qty: bom.glassM2, disp: `${bom.glassM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
+              ...(bom.metalM2 > 0 ? [{ key: "metal", label: "Metal laminate", qty: bom.metalM2, disp: `${bom.metalM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" }] : []),
+              ...(bom.carbonM2 > 0 ? [{ key: "carbon", label: `Carbon (${bom.carbonLayers}/side)`, qty: bom.carbonM2, disp: `${bom.carbonM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" }] : []),
+              { key: "edge", label: `Steel edge (${bom.edgeWrap})`, qty: bom.edgeLenM, disp: `${bom.edgeLenM.toFixed(2)} m`, unit: "$/m" },
+              { key: "base", label: "Base (P-tex)", qty: bom.baseM2, disp: `${bom.baseM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
+              { key: "topsheet", label: "Topsheet", qty: bom.topsheetM2, disp: `${bom.topsheetM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
+              { key: "epoxy", label: "Epoxy (wet-out)", qty: bom.epoxyKg, disp: `${bom.epoxyKg.toFixed(2)} kg`, unit: "$/kg" },
+              ...(bom.inserts > 0 ? [{ key: "insert", label: "Inserts", qty: bom.inserts, disp: `${bom.inserts} ea`, unit: "$/ea" }] : []),
+            ];
+            const total = rows.reduce((s, r) => s + r.qty * (bomPrices[r.key] || 0), 0);
+            const cellL = { color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" };
+            const cellD = { color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" };
+            return (
+              <>
+                {rows.map(r => (
+                  <div key={r.key} style={{ display: "grid", gridTemplateColumns: "1.25fr 0.8fr 52px 0.7fr", gap: 6, alignItems: "center", marginBottom: 5 }}>
+                    <div>
+                      <div style={cellL}>{r.label}</div>
+                      <div style={cellD}>{r.disp}</div>
+                    </div>
+                    <div style={{ ...cellD, textAlign: "right" }}>{r.unit}</div>
+                    <input type="number" value={bomPrices[r.key]} min={0} step={0.5}
+                      onChange={e => setBomPrices(p => ({ ...p, [r.key]: parseFloat(e.target.value) || 0 }))}
+                      style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 4px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
+                    <div style={{ ...cellL, textAlign: "right" }}>${(r.qty * (bomPrices[r.key] || 0)).toFixed(0)}</div>
+                  </div>
+                ))}
+                <div style={{ borderTop: `1px solid ${C.inputBorder}`, marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: C.heading, fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>EST. TOTAL</span>
+                  <span style={{ color: C.heading, fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>${total.toFixed(0)}</span>
+                </div>
+                <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                  {stat("Core mass", `~${bom.coreMassKg.toFixed(2)} kg`, C.heading)}
+                  {stat("Core blank", `${bom.blank.L}\u00D7${bom.blank.W}\u00D7${bom.blank.T} mm`)}
+                  {stat("Planform", `${(bom.areaM2 * 1e4).toFixed(0)} cm\u00B2`)}
+                </div>
+                <div style={{ borderTop: `1px solid ${C.inputBorder}`, marginTop: 12, paddingTop: 10 }}>
+                  <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Branded Build Card</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => exportSpecSheet("png")}
+                      style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+                      Spec Sheet PNG
+                    </button>
+                    <button onClick={() => exportSpecSheet("svg")}
+                      style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+                      SVG
+                    </button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
@@ -5369,6 +5988,7 @@ export default function App() {
         onClose={() => setFeedbackOpen(false)}
         trigger={feedbackTrigger}
       />
+      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} onClose={() => setShow3D(false)} />}
     </div>
   );
 }
