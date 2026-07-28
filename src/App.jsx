@@ -2223,19 +2223,30 @@ function offsetPolygonOutward(ptsIn, dist) {
 // BLEED line offset outward, corner crop marks, centerline + length/waist dimensions, and (if art is
 // supplied) the artwork embedded and clipped to the bleed so a print shop gets a correctly-sized,
 // full-bleed file. SVG <text> is fine here — print software (Illustrator/Corel/RIP) renders it.
-function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
+function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8, pair = false) {
   const outline = getFullOutlinePoints(ski);
-  const T = p => ({ x: p.y, y: p.x });                 // length horizontal
-  const cut = outline.map(T);
-  const bleed = offsetPolygonOutward(outline, bleedMM).map(T);
+  const bleedOutline = offsetPolygonOutward(outline, bleedMM);
+  const bleedMaxLat = Math.max(1, ...bleedOutline.map(p => Math.abs(p.x)));
+  const gap = 24;                                     // mm between the two skis
+  const bandH = 2 * bleedMaxLat;
+  const yA = bleedMaxLat;                              // ski A lateral center
+  const yB = yA + bandH + gap;                         // ski B lateral center (below A)
+  const TA = p => ({ x: p.y, y: yA + p.x });           // length horizontal
+  const TB = p => ({ x: p.y, y: yB - p.x });           // mirror partner
+  const cutA = outline.map(TA), bleedA = bleedOutline.map(TA);
+  const cutB = outline.map(TB), bleedB = bleedOutline.map(TB);
   const pathOf = pts => pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ") + " Z";
+
+  // Combined bounding box (both bleeds in pair mode) — the art is fit to THIS so one image spans the set.
+  const allBleed = pair ? bleedA.concat(bleedB) : bleedA;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  bleed.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
+  allBleed.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
   const margin = 16;
   const vbX = minX - margin, vbY = minY - margin, vbW = (maxX - minX) + margin * 2, vbH = (maxY - minY) + margin * 2;
 
-  // Optional embedded artwork, fit to the BLEED bounding box (cover/contain/stretch + scale/offset/rot).
-  let imgLayer = "";
+  // Artwork placement (identical math to the on-screen preview, fit to the combined box). One <image>
+  // geometry, clipped separately to each ski's bleed, so the picture reads continuously across the pair.
+  let imgSVG = "";
   if (topsheet && topsheet.src && imgDims && imgDims.w && imgDims.h) {
     const bw = maxX - minX, bh = maxY - minY, arImg = imgDims.w / imgDims.h, arBox = bw / bh;
     let dw, dh;
@@ -2245,32 +2256,35 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
     const cx = (minX + maxX) / 2 + (topsheet.offsetX || 0) * bw;
     const cy = (minY + maxY) / 2 + (topsheet.offsetY || 0) * bh;
     const rot = topsheet.rotation || 0;
-    imgLayer = `<g clip-path="url(#bleedclip)"><image href="${topsheet.src}" x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="none" opacity="${topsheet.opacity != null ? topsheet.opacity : 1}" transform="rotate(${rot} ${cx.toFixed(2)} ${cy.toFixed(2)})"/></g>`;
+    const op = topsheet.opacity != null ? topsheet.opacity : 1;
+    const image = `<image href="${topsheet.src}" x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="none" opacity="${op}" transform="rotate(${rot} ${cx.toFixed(2)} ${cy.toFixed(2)})"/>`;
+    imgSVG = `<g clip-path="url(#bleedclipA)">${image}</g>` + (pair ? `<g clip-path="url(#bleedclipB)">${image}</g>` : "");
   }
 
-  // Corner crop marks around the bleed bbox.
   const ml = 10;
-  const crop = [];
   const corner = (x, y, sx, sy) => `<path d="M${(x + sx * 2).toFixed(1)},${y.toFixed(1)} L${(x + sx * (2 + ml)).toFixed(1)},${y.toFixed(1)} M${x.toFixed(1)},${(y + sy * 2).toFixed(1)} L${x.toFixed(1)},${(y + sy * (2 + ml)).toFixed(1)}" stroke="#000" stroke-width="0.3" fill="none"/>`;
-  crop.push(corner(minX, minY, -1, -1), corner(maxX, minY, 1, -1), corner(minX, maxY, -1, 1), corner(maxX, maxY, 1, 1));
+  const crop = [corner(minX, minY, -1, -1), corner(maxX, minY, 1, -1), corner(minX, maxY, -1, 1), corner(maxX, maxY, 1, 1)].join("");
 
-  const cenY = (minY + maxY) / 2;
   const dims = `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth} \u00B7 ${ski.length}mm`;
   const fs = Math.max(6, ski.length / 220);
+  const clips = `<clipPath id="bleedclipA"><path d="${pathOf(bleedA)}"/></clipPath>` + (pair ? `<clipPath id="bleedclipB"><path d="${pathOf(bleedB)}"/></clipPath>` : "");
+  const cutPaths = `<path d="${pathOf(cutA)}" fill="none" stroke="#000" stroke-width="0.5"/>` + (pair ? `<path d="${pathOf(cutB)}" fill="none" stroke="#000" stroke-width="0.5"/>` : "");
+  const bleedPaths = `<path d="${pathOf(bleedA)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` + (pair ? `<path d="${pathOf(bleedB)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` : "");
+  const centerlines = `<line x1="${minX.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yA.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` + (pair ? `<line x1="${minX.toFixed(1)}" y1="${yB.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` : "");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vbW.toFixed(1)}mm" height="${vbH.toFixed(1)}mm" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}">
-  <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm</title>
+  <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm${pair ? " (pair)" : ""}</title>
   <desc>1:1 mm scale. Solid = cut line (ski outline). Dashed = ${bleedMM}mm bleed. Print full-bleed, trim on the solid line.</desc>
-  <defs><clipPath id="bleedclip"><path d="${pathOf(bleed)}"/></clipPath></defs>
-  <g id="artwork">${imgLayer}</g>
-  <g id="bleed"><path d="${pathOf(bleed)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/></g>
-  <g id="cut"><path d="${pathOf(cut)}" fill="none" stroke="#000" stroke-width="0.5"/></g>
-  <g id="centerline"><line x1="${minX.toFixed(1)}" y1="${cenY.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${cenY.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/></g>
-  <g id="cropmarks">${crop.join("")}</g>
+  <defs>${clips}</defs>
+  <g id="artwork">${imgSVG}</g>
+  <g id="bleed">${bleedPaths}</g>
+  <g id="cut">${cutPaths}</g>
+  <g id="centerline">${centerlines}</g>
+  <g id="cropmarks">${crop}</g>
   <g id="labels" fill="#000" font-family="monospace">
-    <text x="${(minX).toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm</text>
-    <text x="${(minX).toFixed(1)}" y="${(maxY + fs + 5).toFixed(1)}" font-size="${fs.toFixed(1)}">${(ski.designName || "Topsheet")} \u00B7 ${dims}</text>
+    <text x="${minX.toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm${pair ? " \u00B7 PAIR" : ""}</text>
+    <text x="${minX.toFixed(1)}" y="${(maxY + fs + 5).toFixed(1)}" font-size="${fs.toFixed(1)}">${(ski.designName || "Topsheet")} \u00B7 ${dims}</text>
   </g>
 </svg>`;
 }
@@ -2285,7 +2299,7 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
 // Builds plain vertex data for a 3D ski mesh (top surface = topsheet-mapped, bottom = base, walls =
 // edge). Kept dependency-free and pure so it can be unit-tested; the 3D modal uploads these arrays
 // into THREE BufferGeometries. Units are scaled by S (mm -> ~cm) for numerical comfort.
-function buildSki3DGeometry(ski) {
+function buildSki3DGeometry(ski, pair) {
   const L = ski.length, TL = ski.tipLength, TAIL = ski.tailLength, N = 160, S = 0.01;
   const halfW = (pos) => {
     const xmm = pos * L;
@@ -2301,20 +2315,32 @@ function buildSki3DGeometry(ski) {
     const hw = halfW(pos) * S, bz = sideProfileHeightAt(ski, xmm) * S, tz = bz + thick(pos) * S;
     st.push({ pos, y, hw, bz, tz });
   }
-  const topPos = [], topUV = [], topIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; topPos.push(-s.hw, s.tz, s.y, s.hw, s.tz, s.y); topUV.push(s.pos, 0, s.pos, 1); }
-  for (let i = 0; i < N; i++) { const a = i * 2; topIdx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
-  const botPos = [], botIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; botPos.push(-s.hw, s.bz, s.y, s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = i * 2; botIdx.push(a, a + 3, a + 1, a, a + 2, a + 3); }
-  const wallPos = [], wallIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(-s.hw, s.tz, s.y, -s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = i * 2; wallIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-  const lc = (N + 1) * 2;
-  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(s.hw, s.tz, s.y, s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = lc + i * 2; wallIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-  const len = L * S, maxHW = Math.max(...st.map(s => s.hw));
-  return { topPos, topUV, topIdx, botPos, botIdx, wallPos, wallIdx, len, maxHW };
+  const maxHW = Math.max(0.001, ...st.map(s => s.hw));
+  const gap = maxHW * 0.4;
+  const cOff = pair ? (maxHW + gap / 2) : 0;
+  // The topsheet UV spans the WHOLE pair across its combined width, so one image flows continuously
+  // over both skis (not doubled/mirrored). u = along length, v = lateral position across the pair.
+  const combMin = -(cOff + maxHW), combSpan = 2 * (cOff + maxHW) || 1;
+  const topPos = [], topUV = [], topIdx = [], botPos = [], botIdx = [], wallPos = [], wallIdx = [];
+  // sign: +1 normal, -1 mirrored (flips lateral so an asymmetric tip mirrors). off: lateral world offset.
+  const emit = (sign, off) => {
+    const xL = (s) => off + sign * (-s.hw), xR = (s) => off + sign * (s.hw);
+    let b = topPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; const l = xL(s), r = xR(s); topPos.push(l, s.tz, s.y, r, s.tz, s.y); topUV.push(s.pos, (l - combMin) / combSpan, s.pos, (r - combMin) / combSpan); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; topIdx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    b = botPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; botPos.push(xL(s), s.bz, s.y, xR(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; botIdx.push(a, a + 3, a + 1, a, a + 2, a + 3); }
+    b = wallPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(xL(s), s.tz, s.y, xL(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; wallIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    b = wallPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(xR(s), s.tz, s.y, xR(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; wallIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  };
+  if (pair) { emit(1, -cOff); emit(-1, cOff); } else { emit(1, 0); }
+  const len = L * S;
+  return { topPos, topUV, topIdx, botPos, botIdx, wallPos, wallIdx, len, maxHW: cOff + maxHW };
 }
 
 // Builds a branded one-page "build card" spec sheet (fixed 1400x900 SVG) summarizing the design:
@@ -2448,9 +2474,13 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   // In vertical: length axis is canvas-Y, so we fit ski.length to plotH and max width to plotW.
   // In horizontal: length axis is canvas-X, so we fit ski.length to plotW and max width to plotH.
   const skiMaxW = Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8;
+  // Pair view: fit BOTH skis (side by side across the width) so the view resizes instead of clipping.
+  const pairGapMM = 24;
+  const pairLatW = pairView ? (skiMaxW * 2 + pairGapMM) : skiMaxW;   // lateral extent to fit
+  const cOff = pairView ? (skiMaxW + pairGapMM) / 2 : 0;             // each ski's offset from plot centerline
   const mainScale = isVertical
-    ? Math.min(mainPlotH / ski.length, mainPlotW / skiMaxW)
-    : Math.min(mainPlotW / ski.length, mainPlotH / skiMaxW);
+    ? Math.min(mainPlotH / ski.length, mainPlotW / pairLatW)
+    : Math.min(mainPlotW / ski.length, mainPlotH / pairLatW);
   const mainCenterY = mainRowY + mainPadY + mainPlotH / 2;
   const mainCenterX = mainPadX + mainPlotW / 2;
   const mainOriginX = mainPadX + (mainPlotW - ski.length * mainScale) / 2;
@@ -2459,16 +2489,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   // Pivot for main-view zoom: the center of the main plot region.
   const mainPivotX = isVertical ? (mainColW / 2) : (mainOriginX + ski.length * mainScale / 2);
   const mainPivotY = isVertical ? (mainRowY + mainRowH / 2) : mainCenterY;
-  const toMainBase = (skiX, skiY) => isVertical
-    ? { x: mainCenterX + skiX * mainScale, y: mainTailY - skiY * mainScale }
-    : { x: mainOriginX + skiY * mainScale, y: mainCenterY + skiX * mainScale };
-  const toMain = (skiX, skiY) => {
-    const b = toMainBase(skiX, skiY);
+  // Lateral is expressed in "plot" coordinates (0 = plot centerline). Ski A sits at -cOff, its mirror
+  // partner at +cOff. In single-ski mode cOff=0 so this reduces to the original transform exactly.
+  const toMainLat = (latPlot, skiY) => {
+    const b = isVertical
+      ? { x: mainCenterX + latPlot * mainScale, y: mainTailY - skiY * mainScale }
+      : { x: mainOriginX + skiY * mainScale, y: mainCenterY + latPlot * mainScale };
     return {
       x: mainPivotX + (b.x - mainPivotX) * mainZoom + mainPan.x,
       y: mainPivotY + (b.y - mainPivotY) * mainZoom + mainPan.y,
     };
   };
+  const toMain = (skiX, skiY) => toMainLat(skiX - cOff, skiY);
+  const toMainPartner = (skiX, skiY) => toMainLat(cOff - skiX, skiY);
 
   // ── Zoom row / column ──────────────────────────────────────
   // Horizontal: tail on left, tip on right, side-by-side across the bottom row.
@@ -2631,14 +2664,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     // Ski outline(s). In pair view we also draw the mirrored partner ski below, and (if art is loaded)
     // project the topsheet across BOTH skis so asymmetric tips and split graphics read as a set.
     const mapA = (p) => toMain(p.x, p.y);
-    // Partner = mirror across the ski centerline (done in ski space so zoom/pan stay correct), then
-    // shifted laterally so the two skis sit side by side. Lateral axis is screen-Y (horizontal) or
-    // screen-X (vertical).
-    let aMinX = Infinity, aMinY = Infinity, aMaxX = -Infinity, aMaxY = -Infinity;
-    right.concat(left).forEach(p => { const s = toMain(p.x, p.y); if (s.x < aMinX) aMinX = s.x; if (s.x > aMaxX) aMaxX = s.x; if (s.y < aMinY) aMinY = s.y; if (s.y > aMaxY) aMaxY = s.y; });
-    const pairGap = 14;
-    const partnerShift = (isVertical ? (aMaxX - aMinX) : (aMaxY - aMinY)) + pairGap;
-    const mapB = (p) => { const s = toMain(-p.x, p.y); return isVertical ? { x: s.x + partnerShift, y: s.y } : { x: s.x, y: s.y + partnerShift }; };
+    // Partner ski = mirror across the plot centerline (handled by toMainPartner), auto-positioned in
+    // the second band. The view already resized (via pairLatW) so both fit without dragging.
+    const mapB = (p) => toMainPartner(p.x, p.y);
     const tracePath = (mapFn) => {
       ctx.beginPath();
       right.forEach((p, i) => { const s = mapFn(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
@@ -4528,8 +4556,8 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const dir2 = new THREE.DirectionalLight(0xffffff, 0.35);
       dir2.position.set(-8, 6, -6); scene.add(dir2);
 
-      // Geometry.
-      const g = buildSki3DGeometry(ski);
+      // Geometry (one mesh set; in pair mode it already contains both skis with continuous UVs).
+      const g = buildSki3DGeometry(ski, pairView);
       const grp = new THREE.Group();
       const mkGeom = (pos, idx, uv) => {
         const geo = new THREE.BufferGeometry();
@@ -4559,19 +4587,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       grp.add(new THREE.Mesh(topGeo, topMat));
       grp.add(new THREE.Mesh(botGeo, botMat));
       grp.add(new THREE.Mesh(wallGeo, wallMat));
-      const off = pairView ? (g.maxHW + 0.18) : 0;
-      grp.position.x = off;
       scene.add(grp);
-      if (pairView) {
-        // Mirror partner: same geometries/materials, flipped across the long axis and offset.
-        const grpB = new THREE.Group();
-        grpB.add(new THREE.Mesh(topGeo, topMat));
-        grpB.add(new THREE.Mesh(botGeo, botMat));
-        grpB.add(new THREE.Mesh(wallGeo, wallMat));
-        grpB.position.x = -off;
-        grpB.scale.x = -1;
-        scene.add(grpB);
-      }
       cleanupFns.push(() => { [topGeo, botGeo, wallGeo].forEach(x => x.dispose()); [topMat, botMat, wallMat].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
 
       // Orbit (custom, no OrbitControls dep).
@@ -4750,17 +4766,47 @@ export default function App() {
     img.src = topsheet.src;
   }, [ski, topsheet, pairView]);
 
-  // Export a 1:1 print-ready topsheet template (SVG): cut line + bleed + crop marks (+ embedded art).
-  const exportTopsheetTemplate = useCallback(() => {
+  // Export a 1:1 print-ready topsheet template. fmt "svg" = vector (Illustrator/CorelDraw). fmt "png"
+  // = flattened raster at ~150 DPI for print RIPs. In pair view it renders both skis with the art
+  // projected across the set.
+  const exportTopsheetTemplate = useCallback((fmt = "svg") => {
+    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template${pairView ? "-pair" : ""}`;
     const finish = (imgDims) => {
-      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8);
-      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8, pairView);
+      if (fmt === "svg") {
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      // PNG: rasterize the SVG at print DPI. viewBox units are mm, so px = mm * (dpi/25.4).
+      const vb = svg.match(/viewBox="([\d.\- ]+)"/);
+      const parts = vb ? vb[1].split(" ").map(Number) : [0, 0, ski.length + 40, 320];
+      const vbW = parts[2], vbH = parts[3];
+      const dpi = 150;
+      let pxPerMM = dpi / 25.4;
+      const MAXPX = 12000;
+      if (vbW * pxPerMM > MAXPX) pxPerMM = MAXPX / vbW;   // clamp huge long-side
+      const W = Math.round(vbW * pxPerMM), H = Math.round(vbH * pxPerMM);
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template.svg`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const im = new Image();
+      im.onload = () => {
+        const cv = document.createElement("canvas");
+        cv.width = W; cv.height = H;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(im, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        cv.toBlob((b) => {
+          const u = URL.createObjectURL(b);
+          const a = document.createElement("a"); a.href = u; a.download = `${nameBase}-${dpi}dpi.png`; a.click();
+          setTimeout(() => URL.revokeObjectURL(u), 1000);
+        }, "image/png");
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); alert("Could not rasterize the template to PNG. Use the SVG export."); };
+      im.src = url;
     };
     if (topsheet.src) {
       const img = new Image();
@@ -4768,7 +4814,7 @@ export default function App() {
       img.onerror = () => finish(null);
       img.src = topsheet.src;
     } else finish(null);
-  }, [ski, topsheet]);
+  }, [ski, topsheet, pairView]);
 
   // Export the branded spec sheet as SVG or PNG.
   const exportSpecSheet = useCallback((fmt) => {
@@ -5504,6 +5550,10 @@ export default function App() {
               </>
             )}
           </div>
+          <button onClick={() => setPairView(v => !v)}
+            style={{ width: "100%", marginTop: 8, background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+            {pairView ? "Pair View: ON" : "Pair View: OFF"}
+          </button>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
@@ -5666,12 +5716,19 @@ export default function App() {
             {topsheet.src ? "Replace Image" : "Upload Image"}
           </button>
 
-          <button onClick={exportTopsheetTemplate}
-            style={{ width: "100%", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
-            Export Print Template (SVG)
-          </button>
+          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Print Template{pairView ? " (pair)" : ""}</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+            <button onClick={() => exportTopsheetTemplate("svg")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              SVG (vector)
+            </button>
+            <button onClick={() => exportTopsheetTemplate("png")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              PNG (150dpi)
+            </button>
+          </div>
           <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            1:1 cut line + bleed + crop marks for a print shop. Embeds your art if loaded; works blank too.
+            1:1 cut line + bleed + crop marks. Art is embedded and aligned exactly as shown above (use the Fit/Shift/Scale/Rotate controls to place it). For crisp prints, upload art at ~150 dpi of the final size (a full ski ≈ 10,600 px long).
           </div>
 
           <button onClick={() => setShow3D(true)}
