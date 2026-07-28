@@ -2394,11 +2394,11 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const brandName = (brand && brand.name && brand.name.trim()) ? brand.name.trim() : "BLACK CHAPEL STUDIOS";
   let logoSVG = "";
   if (brand && brand.logoSrc && brand.logoDims && brand.logoDims.w && brand.logoDims.h) {
-    const maxH = 66, maxW = 360;
-    let lw = maxH * (brand.logoDims.w / brand.logoDims.h), lh = maxH;
-    if (lw > maxW) { lw = maxW; lh = maxW * (brand.logoDims.h / brand.logoDims.w); }
-    const lx = W - pad - lw, ly = 30;
-    logoSVG = `<image href="${brand.logoSrc}" x="${lx.toFixed(1)}" y="${ly}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+    const boxH = 118, boxW = 470;                       // generous logo box, top-right of header
+    let lw = boxH * (brand.logoDims.w / brand.logoDims.h), lh = boxH;
+    if (lw > boxW) { lw = boxW; lh = boxW * (brand.logoDims.h / brand.logoDims.w); }
+    const lx = W - pad - lw, ly = 100 - lh / 2;         // vertically centered in the header band
+    logoSVG = `<image href="${brand.logoSrc}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -5037,6 +5037,7 @@ export default function App() {
     topsheet: false,
     flex: true,           // open by default so the rating chip is visible
     materials: false,
+    buildCard: false,
     cncExport: false,
     externalTools: false,
     beta: true,
@@ -5216,6 +5217,17 @@ export default function App() {
       borderRadius: 3, cursor: "pointer",
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
+  );
+  // Non-collapsible section-group label + one-line explanation, to organize the sidebar into an
+  // ordered workflow that a first-time user can follow top to bottom.
+  const groupHeader = (label, caption) => (
+    <div style={{ margin: "16px 2px 6px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{label}</span>
+        <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
+      </div>
+      {caption && <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>{caption}</div>}
+    </div>
   );
   const toggleBtn = (label, key) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -5445,6 +5457,7 @@ export default function App() {
           })}
         </div>
 
+        {groupHeader("1 · SET UP", "Start a design or open a saved one, and choose how to view it.")}
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -5599,6 +5612,7 @@ export default function App() {
           </button>
         </AccordionSection>
 
+        {groupHeader("2 · DESIGN", "Shape the ski — dimensions, rocker & camber, core, and layup.")}
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
@@ -5743,6 +5757,7 @@ export default function App() {
           )}
         </AccordionSection>
 
+        {groupHeader("3 · ARTWORK & PREVIEW", "Wrap a topsheet image, preview the pair, and view it in 3D.")}
         <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
           title="Topsheet Art"
           accent={topsheet.src
@@ -5840,6 +5855,7 @@ export default function App() {
           )}
         </AccordionSection>
 
+        {groupHeader("4 · ANALYZE", "Check the flex profile and a materials + cost estimate.")}
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title="Flex Analysis"
           accent={
@@ -5917,48 +5933,12 @@ export default function App() {
                   {stat("Core blank", `${bom.blank.L}\u00D7${bom.blank.W}\u00D7${bom.blank.T} mm`)}
                   {stat("Planform", `${(bom.areaM2 * 1e4).toFixed(0)} cm\u00B2`)}
                 </div>
-                <div style={{ borderTop: `1px solid ${C.inputBorder}`, marginTop: 12, paddingTop: 10 }}>
-                  <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Branded Build Card</div>
-                  <input type="text" value={builderBrand.name}
-                    onChange={e => setBuilderBrand(b => ({ ...b, name: e.target.value }))}
-                    placeholder="Your shop / brand name"
-                    style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 8px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
-                  <input ref={brandLogoRef} type="file" accept="image/*" style={{ display: "none" }}
-                    onChange={e => handleBrandLogoFile(e.target.files && e.target.files[0])} />
-                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <button onClick={() => brandLogoRef.current && brandLogoRef.current.click()}
-                      style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
-                      {builderBrand.logoSrc ? "Replace Logo" : "Upload Logo"}
-                    </button>
-                    {builderBrand.logoSrc && (
-                      <button onClick={clearBrandLogo}
-                        style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
-                        Remove Logo
-                      </button>
-                    )}
-                  </div>
-                  {builderBrand.logoSrc && (
-                    <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
-                  )}
-                  <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                    Your name + logo appear on the card; the footer credits the tool. Saved on this device.
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => exportSpecSheet("png")}
-                      style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-                      Spec Sheet PNG
-                    </button>
-                    <button onClick={() => exportSpecSheet("svg")}
-                      style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-                      SVG
-                    </button>
-                  </div>
-                </div>
               </>
             );
           })()}
         </AccordionSection>
 
+        {groupHeader("5 · EXPORT", "CNC cut files (DXF/SVG) and a branded build card.")}
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           <div style={{ marginBottom: 9 }}>
@@ -6058,6 +6038,48 @@ export default function App() {
           </div>
         </AccordionSection>
 
+        <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
+          <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 10, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            A one-page spec sheet for customers or your bench: dimensions, sidecut, flex, layup, and core mass. Add your own name and logo to white-label it.
+          </div>
+          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Your Branding</div>
+          <input type="text" value={builderBrand.name}
+            onChange={e => setBuilderBrand(b => ({ ...b, name: e.target.value }))}
+            placeholder="Your shop / brand name"
+            style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 8px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+          <input ref={brandLogoRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={e => handleBrandLogoFile(e.target.files && e.target.files[0])} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+            <button onClick={() => brandLogoRef.current && brandLogoRef.current.click()}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+              {builderBrand.logoSrc ? "Replace Logo" : "Upload Logo"}
+            </button>
+            {builderBrand.logoSrc && (
+              <button onClick={clearBrandLogo}
+                style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                Remove Logo
+              </button>
+            )}
+          </div>
+          {builderBrand.logoSrc && (
+            <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
+          )}
+          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            A wide logo (e.g. 800\u00D7200 px) reads best. Saved on this device; the footer credits the tool.
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => exportSpecSheet("png")}
+              style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              Spec Sheet PNG
+            </button>
+            <button onClick={() => exportSpecSheet("svg")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              SVG
+            </button>
+          </div>
+        </AccordionSection>
+
+        {groupHeader("6 · MORE", "Handy external calculators and a place to send feedback.")}
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
