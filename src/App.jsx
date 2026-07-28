@@ -2345,7 +2345,7 @@ function buildSki3DGeometry(ski, pair) {
 
 // Builds a branded one-page "build card" spec sheet (fixed 1400x900 SVG) summarizing the design:
 // silhouette + all key numbers + layup + flex + estimated core mass, in the Black Chapel palette.
-function buildSpecSheetSVG(ski, derived, flex, bom) {
+function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const W = 1400, H = 900, pad = 50;
   const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
   const rating = flexRating(flex.underfootK);
@@ -2389,11 +2389,24 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
   const dateStr = new Date().toISOString().slice(0, 10);
   const typeLabel = isBoard ? "SNOWBOARD SPEC SHEET" : "SKI SPEC SHEET";
 
+  // White-label header: builder's brand name (default Black Chapel Studios) + optional uploaded logo
+  // placed top-right. A small tool-attribution credit sits in the footer.
+  const brandName = (brand && brand.name && brand.name.trim()) ? brand.name.trim() : "BLACK CHAPEL STUDIOS";
+  let logoSVG = "";
+  if (brand && brand.logoSrc && brand.logoDims && brand.logoDims.w && brand.logoDims.h) {
+    const maxH = 66, maxW = 360;
+    let lw = maxH * (brand.logoDims.w / brand.logoDims.h), lh = maxH;
+    if (lw > maxW) { lw = maxW; lh = maxW * (brand.logoDims.h / brand.logoDims.w); }
+    const lx = W - pad - lw, ly = 30;
+    logoSVG = `<image href="${brand.logoSrc}" x="${lx.toFixed(1)}" y="${ly}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="${bg}"/>
   <rect x="16" y="16" width="${W - 32}" height="${H - 32}" fill="none" stroke="${border}" stroke-width="1.5"/>
-  <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">BLACK CHAPEL STUDIOS</text>
+  <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">${esc(brandName)}</text>
+  ${logoSVG}
   <text x="${pad}" y="128" font-size="46" fill="${bone}" font-family="monospace" font-weight="bold">${esc(ski.designName || "Untitled Design")}</text>
   <text x="${pad}" y="160" font-size="18" fill="${torch}" font-family="monospace" letter-spacing="3">${typeLabel}</text>
   <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
@@ -2404,8 +2417,8 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
   </g>
   <g id="specs">${rowsSvg}</g>
   <line x1="${pad}" y1="${H - 96}" x2="${W - pad}" y2="${H - 96}" stroke="${border}" stroke-width="1"/>
-  <text x="${pad}" y="${H - 56}" font-size="30" fill="${brass}" font-family="monospace" letter-spacing="6" font-weight="bold">WORSHIP THE WORK</text>
-  <text x="${W - pad}" y="${H - 56}" font-size="18" fill="${dim}" font-family="monospace" text-anchor="end">${dateStr}</text>
+  <text x="${pad}" y="${H - 54}" font-size="17" fill="${dim}" font-family="monospace" letter-spacing="1">Generated with Black Chapel Studios Designer</text>
+  <text x="${W - pad}" y="${H - 54}" font-size="17" fill="${dim}" font-family="monospace" text-anchor="end">designer.blackchapelstudios.com \u00B7 ${dateStr}</text>
 </svg>`;
 }
 
@@ -4693,6 +4706,26 @@ export default function App() {
   });
   useEffect(() => { try { localStorage.setItem("bcs_bom_prices", JSON.stringify(bomPrices)); } catch (e) {} }, [bomPrices]);
 
+  // White-label branding for the build card (a shop's own name + logo). Persisted so it's set once.
+  const [builderBrand, setBuilderBrand] = useState(() => {
+    try { const raw = localStorage.getItem("bcs_builder_brand"); if (raw) return { name: "", logoSrc: null, logoName: null, ...JSON.parse(raw) }; } catch (e) {}
+    return { name: "", logoSrc: null, logoName: null };
+  });
+  useEffect(() => { try { localStorage.setItem("bcs_builder_brand", JSON.stringify(builderBrand)); } catch (e) {} }, [builderBrand]);
+  const brandLogoRef = useRef(null);
+  const handleBrandLogoFile = useCallback((file) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { alert("Please choose an image file (PNG or SVG works best for logos)."); return; }
+    if (file.size > 4 * 1024 * 1024) { alert("Logo is larger than 4 MB — please use a smaller file."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setBuilderBrand(b => ({ ...b, logoSrc: reader.result, logoName: file.name }));
+    reader.readAsDataURL(file);
+  }, []);
+  const clearBrandLogo = useCallback(() => {
+    setBuilderBrand(b => ({ ...b, logoSrc: null, logoName: null }));
+    if (brandLogoRef.current) brandLogoRef.current.value = "";
+  }, []);
+
   // ── Topsheet artwork overlay ──────────────────────────────────
   // Kept in component state (not the saved ski JSON) so large base64 images don't bloat design files.
   const [topsheet, setTopsheet] = useState({
@@ -4816,36 +4849,46 @@ export default function App() {
     } else finish(null);
   }, [ski, topsheet, pairView]);
 
-  // Export the branded spec sheet as SVG or PNG.
+  // Export the branded (white-labelable) spec sheet as SVG or PNG.
   const exportSpecSheet = useCallback((fmt) => {
-    const svg = buildSpecSheetSVG(ski, derived, flex, bom);
-    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
-    if (fmt === "svg") {
-      const blob = new Blob([svg], { type: "image/svg+xml" });
+    const run = (logoDims) => {
+      const brand = { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims };
+      const svg = buildSpecSheetSVG(ski, derived, flex, bom, brand);
+      const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
+      if (fmt === "svg") {
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return;
-    }
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const cv = document.createElement("canvas");
-      cv.width = 1400; cv.height = 900;
-      const ctx = cv.getContext("2d");
-      ctx.fillStyle = "#141210"; ctx.fillRect(0, 0, 1400, 900);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      cv.toBlob((b) => {
-        const u = URL.createObjectURL(b);
-        const a = document.createElement("a"); a.href = u; a.download = `${nameBase}.png`; a.click();
-        setTimeout(() => URL.revokeObjectURL(u), 1000);
-      }, "image/png");
+      const img = new Image();
+      img.onload = () => {
+        const cv = document.createElement("canvas");
+        cv.width = 1400; cv.height = 900;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#141210"; ctx.fillRect(0, 0, 1400, 900);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        cv.toBlob((b) => {
+          const u = URL.createObjectURL(b);
+          const a = document.createElement("a"); a.href = u; a.download = `${nameBase}.png`; a.click();
+          setTimeout(() => URL.revokeObjectURL(u), 1000);
+        }, "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); alert("Could not render the spec sheet to PNG. Try the SVG export."); };
+      img.src = url;
     };
-    img.onerror = () => { URL.revokeObjectURL(url); alert("Could not render the spec sheet to PNG. Try the SVG export."); };
-    img.src = url;
-  }, [ski, derived, flex, bom]);
+    // Load the logo first (if any) so we can preserve its aspect ratio in the layout.
+    if (builderBrand.logoSrc) {
+      const lg = new Image();
+      lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight });
+      lg.onerror = () => run(null);
+      lg.src = builderBrand.logoSrc;
+    } else run(null);
+  }, [ski, derived, flex, bom, builderBrand]);
 
   // ── Save / Load state ─────────────────────────────────────────
   const fileInputRef = useRef(null);
@@ -5876,6 +5919,30 @@ export default function App() {
                 </div>
                 <div style={{ borderTop: `1px solid ${C.inputBorder}`, marginTop: 12, paddingTop: 10 }}>
                   <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Branded Build Card</div>
+                  <input type="text" value={builderBrand.name}
+                    onChange={e => setBuilderBrand(b => ({ ...b, name: e.target.value }))}
+                    placeholder="Your shop / brand name"
+                    style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 8px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                  <input ref={brandLogoRef} type="file" accept="image/*" style={{ display: "none" }}
+                    onChange={e => handleBrandLogoFile(e.target.files && e.target.files[0])} />
+                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <button onClick={() => brandLogoRef.current && brandLogoRef.current.click()}
+                      style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {builderBrand.logoSrc ? "Replace Logo" : "Upload Logo"}
+                    </button>
+                    {builderBrand.logoSrc && (
+                      <button onClick={clearBrandLogo}
+                        style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                        Remove Logo
+                      </button>
+                    )}
+                  </div>
+                  {builderBrand.logoSrc && (
+                    <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
+                  )}
+                  <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                    Your name + logo appear on the card; the footer credits the tool. Saved on this device.
+                  </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button onClick={() => exportSpecSheet("png")}
                       style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
