@@ -209,6 +209,10 @@ const DEFAULT_SKI={
   // past the contact toward the end).
   vcutTip:false, vcutTipExt:120,
   vcutTail:false, vcutTailExt:120,
+  // Export orientation for all CNC files: "vertical" (portrait, length up the page) or
+  // "horizontal" (landscape, length across the page). Geometry rotates; text labels and the
+  // measurements table always stay horizontal for readability.
+  exportOrientation: "vertical",
   // Rocker takeoff (where the base lifts) vs contact point (widest point / sidecut extent).
   // rockerLinked=true (default, Snocad-style): takeoff = contact, so the rocker/camber boundary in
   // the side profile sits exactly at the tip/tail contact points. When false (advanced): the takeoff
@@ -858,6 +862,20 @@ function dxfText(layer, x, y, h, str) {
 function dxfCircle(layer, x, y, r) {
   return `0\nCIRCLE\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${r.toFixed(3)}\n`;
 }
+// ── Export orientation ──
+// Canonical geometry is authored in (a, t): a = along-length (0..L, tail→tip), t = lateral offset
+// (width for plan views; thickness/height for profile views). orientPt projects a canonical point
+// into output XY for the chosen orientation. DXF is Y-up directly; SVG helpers apply their own Y
+// flip. Text labels and the measurements table are NEVER rotated — callers place them at a projected
+// anchor but always draw horizontally.
+//   vertical (portrait): length runs up the page  → x = t (lateral), y = a (along)
+//   horizontal (landscape): length runs across     → x = a (along),   y = t (lateral)
+function orientPt(a, t, orientation) {
+  return orientation === "horizontal" ? { x: a, y: t } : { x: t, y: a };
+}
+function skiOrientation(ski) {
+  return ski.exportOrientation === "horizontal" ? "horizontal" : "vertical";
+}
 // Appends binding-insert geometry to a DXF on the INSERTS layer (snowboard mode only): a circle at
 // each drill center (2x4 / 4x4) or a closed slot outline per foot (channel), plus a small cross at
 // each pack center. `tf(x,y)` maps ski coords (x=width, y=length) to the target layout (default:
@@ -1100,57 +1118,70 @@ function getRegistrationMarks(ski) {
 
 // ══════════════ PLAN SVG EXPORT ══════════════
 function exportPlanSVG(ski){
+  const O = skiOrientation(ski);
+  // getFullOutlinePoints returns vertical convention {x: lateral, y: along}. Project to the chosen
+  // orientation (P), then flip into SVG screen space (Y down) via screenY.
+  const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
   const edgeInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0;
   const edgeWrap = ski.edgeWrap || "full";
-  const pts = getFullOutlinePoints(ski);
+  const ptsRaw = getFullOutlinePoints(ski);
   const isContact = edgeInset > 0 && edgeWrap === "contact";
-  const insetPts = (edgeInset > 0 && edgeWrap === "full") ? offsetPolygonInward(pts, edgeInset) : null;
-  const baseCutLoop = isContact ? getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
+  const insetRaw = (edgeInset > 0 && edgeWrap === "full") ? offsetPolygonInward(ptsRaw, edgeInset) : null;
+  const baseCutRaw = isContact ? getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0) : null;
+  const pts = ptsRaw.map(P);
+  const insetPts = insetRaw ? insetRaw.map(P) : null;
+  const baseCutLoop = baseCutRaw ? baseCutRaw.map(P) : null;
   const marks = getRegistrationMarks(ski);
 
-  // SVG bounds — encompass outer outline plus a small margin. Reference labels sit to the RIGHT of
-  // the widest point at each station and can extend well past the geometry, so include their text
-  // extent in maxX or they get clipped (monospace ≈ 0.6em per char at font-size 4).
   const pad = 10;
-  const labelFont = 4, labelCharW = labelFont * 0.6;
-  const labelRightExtent = Math.max(0, ...marks.map(m => {
-    const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
-    return halfW + 4 + m.label.length * labelCharW;
-  }));
-  const minX = Math.min(...pts.map(p=>p.x)) - pad;
-  const maxX = Math.max(Math.max(...pts.map(p=>p.x)) + pad, labelRightExtent + pad);
-  const minY = Math.min(...pts.map(p=>p.y)) - pad;
-  const maxY = Math.max(...pts.map(p=>p.y)) + pad;
-  const w = maxX - minX, h = maxY - minY;
+  // Math-space bounds of the geometry (before adding labels / table).
+  const gMinX = Math.min(...pts.map(p=>p.x)), gMaxX = Math.max(...pts.map(p=>p.x));
+  const gMinY = Math.min(...pts.map(p=>p.y)), gMaxY = Math.max(...pts.map(p=>p.y));
+  const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
 
-  // In SVG, Y increases downward. We flip so that ski Y (which goes tail-to-tip) is shown vertically.
-  const toSvgY = y => (maxY - y + minY);
+  // Screen transform: geometry starts at (pad, pad); SVG Y increases downward so we flip.
+  const sx = x => (x - gMinX + pad);
+  const sy = y => (gMaxY - y + pad);
+
+  // Measurements table (top-right of the geometry). Rows flow downward.
+  const rows = measurementRows(ski, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
+  const tblRowH = 13, tblHeaderH = 16, tblW = 270, tblGap = 22;
+  const tblH = tblHeaderH + rows.length * tblRowH + 6;
+  const tblX = pad + geomW + tblGap;
+  const tblTopY = pad + 8;
+
+  const totalW = tblX + tblW + pad;
+  const totalH = pad + Math.max(geomH, tblH) + pad;
 
   const pathFrom = (arr, close) => arr.map((p,i) =>
-    `${i===0?'M':'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+    `${i===0?'M':'L'}${sx(p.x).toFixed(3)},${sy(p.y).toFixed(3)}`
   ).join(' ') + (close ? ' Z' : '');
 
   const outerPath = pathFrom(pts, true);
   const insetPath = insetPts ? pathFrom(insetPts, true) : '';
   const baseCutPath = baseCutLoop ? pathFrom(baseCutLoop, true) : '';
 
-  // Three horizontal reference cross-lines: tail contact, waist, tip contact (span ski width).
+  // Reference cross-lines + horizontal labels. Anchor points are defined in vertical convention then
+  // projected (P) so they land correctly in either orientation; text is always drawn horizontal.
   const refMarks = marks.map(m => {
     const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
-    const cy = toSvgY(m.skiY);
-    return `    <line x1="${(-halfW).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${halfW.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${(halfW + 4).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    const a = { x: -halfW, y: m.skiY }, b = { x: halfW, y: m.skiY };
+    const lbl = { x: halfW + 4, y: m.skiY };
+    const pa = P(a), pb = P(b), pl = P(lbl);
+    return `    <line x1="${sx(pa.x).toFixed(2)}" y1="${sy(pa.y).toFixed(2)}" x2="${sx(pb.x).toFixed(2)}" y2="${sy(pb.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
+    <text x="${sx(pl.x).toFixed(2)}" y="${(sy(pl.y) + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n');
 
-  // Vertical centerline (full length)
-  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
+  // Centerline along the full length at lateral 0.
+  const c0 = P({ x: 0, y: 0 }), c1 = P({ x: 0, y: ski.length });
+  const centerline = `<line x1="${sx(c0.x).toFixed(2)}" y1="${sy(c0.y).toFixed(2)}" x2="${sx(c1.x).toFixed(2)}" y2="${sy(c1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
+
+  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
 
   const edgeDesc = isContact
     ? `Cut path = single continuous base-cut loop (${edgeInset}mm edge inset, partial wrap with perpendicular tie-ins).`
     : (insetPts ? `Inset line = base cut (${edgeInset}mm full-wrap inset).` : `Outline only.`);
 
-  // In contact mode, the single closed base-cut loop IS the cut path (black). No separate outline.
-  // In full-wrap mode, draw the outline (black) plus optional dashed inset (green).
   const cutGroup = isContact
     ? `  <g id="base_cut" stroke="#000" stroke-width="0.6" fill="none">
     <path d="${baseCutPath}"/>
@@ -1163,14 +1194,15 @@ function exportPlanSVG(ski){
   </g>` : ''}`;
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(2)}mm" height="${totalH.toFixed(2)}mm" viewBox="0 0 ${totalW.toFixed(2)} ${totalH.toFixed(2)}">
   <title>Black Chapel Studios — Ski Plan ${ski.length}mm ${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}</title>
-  <desc>${edgeDesc} Red = reference lines. Units: mm.</desc>
+  <desc>${edgeDesc} Red = reference lines. Orientation: ${O}. Units: mm.</desc>
 ${cutGroup}
   <g id="centerline">${centerline}</g>
   <g id="reference">
 ${refMarks}
   </g>
+  <g id="table">${tbl}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-plan-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -1179,46 +1211,64 @@ ${refMarks}
 // Appends the measurements table (as TEXT rows) to a DXF string, on the 'TABLE' layer, with its top
 // at (tblX, tblTopY). Shared by the combined AND base exports so both carry identical spec data.
 // Returns the DXF text to append.
-function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
+// Shared row data for the measurements table — single source of truth for both the DXF and SVG
+// table builders, so every export shows identical spec data.
+function measurementRows(ski, extra = {}) {
   const derived = computeDerived(ski);
   const edgeWrap = ski.edgeWrap || "full";
+  const rows = [];
+  rows.push(["Overall length", `${ski.length}`]);
+  rows.push(["Tip width", `${ski.tipWidth}`]);
+  rows.push(["Waist width", `${ski.waistWidth}`]);
+  rows.push(["Tail width", `${ski.tailWidth}`]);
+  rows.push(["Tip length (shovel)", `${ski.tipLength}`]);
+  rows.push(["Tail length", `${ski.tailLength}`]);
+  rows.push(["Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`]);
+  const rk = rockerPercents(ski);
+  rows.push(["Rocker profile (T/C/T %)", `${rk.tip.toFixed(0)} / ${rk.camber.toFixed(0)} / ${rk.tail.toFixed(0)}`]);
+  if (ski.rockerLinked === false) {
+    const rp = rockerProfilePercents(ski);
+    rows.push(["Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`]);
+  }
+  rows.push(["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`]);
+  rows.push(["Tip height (rocker)", `${ski.tipHeight}`]);
+  rows.push(["Tail height (rocker)", `${ski.tailHeight}`]);
+  rows.push(["Camber height", `${ski.camberHeight}`]);
+  rows.push(["Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`]);
+  rows.push(["Edge inset", `${ski.edgeInset}`]);
+  rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
+  if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
+  if (extra.coreInset !== undefined) rows.push(["Core inset", `${extra.coreInset}`]);
+  if ((ski.mode || "ski") === "snowboard") {
+    rows.push(["Stance width", `${ski.stanceWidth} (${(ski.stanceWidth/10).toFixed(1)}cm)`]);
+    rows.push(["Setback", `${ski.setback}`]);
+    rows.push(["Insert pattern", `${ski.insertPattern || "2x4"}`]);
+  }
+  return rows;
+}
+
+function buildMeasurementsTable(ski, tblX, tblTopY, extra = {}) {
   const rowH = 16, th = 7;
   let tblY = tblTopY;
   let out = dxfText('TABLE', tblX, tblY + rowH, 9, "MEASUREMENTS (mm)");
-  const row = (label, value) => {
+  measurementRows(ski, extra).forEach(([label, value]) => {
     out += dxfText('TABLE', tblX, tblY, th, label);
     out += dxfText('TABLE', tblX + 190, tblY, th, value);
     tblY -= rowH;
-  };
-  row("Overall length", `${ski.length}`);
-  row("Tip width", `${ski.tipWidth}`);
-  row("Waist width", `${ski.waistWidth}`);
-  row("Tail width", `${ski.tailWidth}`);
-  row("Tip length (shovel)", `${ski.tipLength}`);
-  row("Tail length", `${ski.tailLength}`);
-  row("Running / effective edge", `${derived.effectiveEdge.toFixed(0)}`);
-  const rk = rockerPercents(ski);
-  row("Rocker profile (T/C/T %)", `${rk.tip.toFixed(0)} / ${rk.camber.toFixed(0)} / ${rk.tail.toFixed(0)}`);
-  if (ski.rockerLinked === false) {
-    const rp = rockerProfilePercents(ski);
-    row("Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`);
-  }
-  row("Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`);
-  row("Tip height (rocker)", `${ski.tipHeight}`);
-  row("Tail height (rocker)", `${ski.tailHeight}`);
-  row("Camber height", `${ski.camberHeight}`);
-  row("Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`);
-  row("Edge inset", `${ski.edgeInset}`);
-  row("Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap");
-  if (edgeWrap === "contact") {
-    row("Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`);
-  }
-  if (extra.coreInset !== undefined) row("Core inset", `${extra.coreInset}`);
-  if ((ski.mode || "ski") === "snowboard") {
-    row("Stance width", `${ski.stanceWidth} (${(ski.stanceWidth/10).toFixed(1)}cm)`);
-    row("Setback", `${ski.setback}`);
-    row("Insert pattern", `${ski.insertPattern || "2x4"}`);
-  }
+  });
+  return out;
+}
+
+// SVG measurements table. Rows flow DOWNWARD (increasing SVG-Y) from the top anchor. Text is always
+// horizontal regardless of the drawing's orientation.
+function buildMeasurementsTableSVG(ski, tblX, tblTopY, extra = {}) {
+  let y = tblTopY;
+  let out = `<text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="8" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`;
+  y += 16;
+  measurementRows(ski, extra).forEach(([k, v]) => {
+    out += `\n    <text x="${tblX.toFixed(2)}" y="${y.toFixed(2)}" font-size="6.5" fill="#000" font-family="monospace">${k}</text><text x="${(tblX + 210).toFixed(2)}" y="${y.toFixed(2)}" font-size="6.5" fill="#000" font-family="monospace">${v}</text>`;
+    y += 13;
+  });
   return out;
 }
 
@@ -1241,39 +1291,47 @@ function exportPlanDXF(ski){
   ];
   let dxf = dxfStart(layers);
 
+  // Orientation: geometry authored in vertical convention {x: lateral, y: along}; P projects it.
+  const O = skiOrientation(ski);
+  const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
+
   if (edgeWrap === "contact" && edgeInset > 0) {
     // Contact mode: the base cut is a SINGLE continuous closed loop (outline arcs at tip/tail +
     // perpendicular tie-ins + edge insets). This is the one perimeter a drag knife follows, so we
     // export just this loop as the cut path — NOT a separate full outline, which would be a second
     // stray cut. The loop already traces the true outline in the tip/tail regions.
-    const loop = getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
+    const loop = getContactBaseCutLoop(ski, edgeInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0).map(P);
     dxf += dxfLwpolyline('BASE_CUT', loop, true);
   } else {
     // Full-wrap (or zero inset): full outline + (optionally) a closed inset loop around it.
-    dxf += dxfLwpolyline('OUTLINE', pts, true);
+    dxf += dxfLwpolyline('OUTLINE', pts.map(P), true);
     if (edgeInset > 0) {
-      const insetPts = offsetPolygonInward(pts, edgeInset);
+      const insetPts = offsetPolygonInward(pts, edgeInset).map(P);
       dxf += dxfLwpolyline('EDGE_OFFSET', insetPts, true);
     }
   }
 
-  // Vertical centerline (length of ski)
-  dxf += dxfLine('CENTERLINE', 0, 0, 0, ski.length);
+  // Centerline along the full length at lateral 0.
+  const c0 = P({ x: 0, y: 0 }), c1 = P({ x: 0, y: ski.length });
+  dxf += dxfLine('CENTERLINE', c0.x, c0.y, c1.x, c1.y);
 
-  // Three horizontal reference cross-lines: tail contact, waist, tip contact.
-  // Each spans the ski width at its station (touching both edges).
+  // Reference cross-lines: tail contact, waist, tip contact — each spans the width at its station.
+  // Labels always drawn horizontally at the projected anchor.
   marks.forEach(m => {
     const hw = getWidthAtPos(ski, m.skiY / ski.length) / 2;
-    dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
-    dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 4, y: m.skiY - 2 });
+    dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
+    dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
 
-  // Binding inserts (snowboard mode) on the INSERTS layer.
-  dxf += buildInsertsDXF(ski);
+  // Binding inserts (snowboard mode) on the INSERTS layer — pass P so they orient with the outline.
+  dxf += buildInsertsDXF(ski, (x, y) => P({ x, y }));
 
-  // Measurements table — to the right of the ski outline, same spec data as the combined export.
-  const maxHalfW = Math.max(...pts.map(p => Math.abs(p.x)));
-  dxf += buildMeasurementsTable(ski, maxHalfW + 60, ski.length, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
+  // Measurements table — to the right of the geometry, top-aligned. Text stays horizontal.
+  const projPts = pts.map(P);
+  const gMaxX = Math.max(...projPts.map(p => p.x));
+  const gMaxY = Math.max(...projPts.map(p => p.y));
+  dxf += buildMeasurementsTable(ski, gMaxX + 60, gMaxY, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-plan-${ski.length}mm.dxf`, "application/dxf");
@@ -1300,6 +1358,8 @@ function exportCoreSideDXF(ski){
   }
   const marks = getRegistrationMarks(ski);
   const maxT = Math.max(...topPts.map(p => p.y)) + 4;
+  const O = skiOrientation(ski);
+  const Q = (a, t) => orientPt(a, t, O);  // a = along-length, t = thickness
 
   const layers = [
     { name: 'CORE_SIDE_PROFILE', color: 3 },
@@ -1308,14 +1368,15 @@ function exportCoreSideDXF(ski){
   ];
   let dxf = dxfStart(layers);
 
-  // Closed side-profile polygon: flat bottom + thickness curve on top.
-  const poly = [{ x: 0, y: 0 }, ...topPts, { x: ski.length, y: 0 }];
+  // Closed side-profile polygon: flat bottom (t=0) + thickness curve on top.
+  const poly = [Q(0, 0), ...topPts.map(p => Q(p.x, p.y)), Q(ski.length, 0)];
   dxf += dxfLwpolyline('CORE_SIDE_PROFILE', poly, true);
 
-  // Reference: vertical lines + labels at tail contact, waist, tip contact.
+  // Reference lines + horizontal labels at tail contact, waist, tip contact.
   marks.forEach(m => {
-    dxf += dxfLine('REFERENCE', m.skiY, 0, m.skiY, maxT);
-    dxf += dxfText('TEXT', m.skiY + 2, maxT + 1, 6, m.label);
+    const a = Q(m.skiY, 0), b = Q(m.skiY, maxT), lbl = Q(m.skiY + 2, maxT + 1);
+    dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
+    dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
 
   dxf += dxfEnd();
@@ -1332,23 +1393,36 @@ function exportCoreSideSVG(ski){
   const maxT = Math.max(...topPts.map(p => p.y));
   const marks = getRegistrationMarks(ski);
   const L = ski.length, pad = 10, sz = 8;
-  // Labels sit to the right of each station line; include the rightmost label's text extent in width.
-  const labelRightExtent = Math.max(0, ...marks.map(m => pad + m.skiY + 2 + m.label.length * 4 * 0.6));
-  const w = Math.max(L + pad * 2, labelRightExtent + pad), h = maxT * sz + pad * 2;
-  const topPath = topPts.map((p, i) =>
-    `${i === 0 ? 'M' : 'L'}${(p.x + pad).toFixed(2)},${(pad + (maxT - p.y) * sz).toFixed(2)}`
-  ).join(' ');
-  const fillPath = topPath + ` L${L + pad},${pad + maxT * sz} L${pad},${pad + maxT * sz} Z`;
+  const O = skiOrientation(ski);
+  // Canonical math point (Y up): a = along, te = thickness * sz (exaggerated for readability).
+  const M = (a, t) => orientPt(a, t * sz, O);
+
+  const poly = [M(0, 0), ...topPts.map(p => M(p.x, p.y)), M(L, 0)];
+  const gMinX = Math.min(...poly.map(p => p.x)), gMaxX = Math.max(...poly.map(p => p.x));
+  const gMinY = Math.min(...poly.map(p => p.y)), gMaxY = Math.max(...poly.map(p => p.y));
+  const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
+  const sx = x => (x - gMinX + pad);
+  const sy = y => (gMaxY - y + pad);
+
+  const labelCharW = 4 * 0.6;
+  const labelRightExtent = Math.max(0, ...marks.map(m => {
+    const lp = M(m.skiY + 2, maxT);
+    return sx(lp.x) + m.label.length * labelCharW;
+  }));
+  const totalW = Math.max(pad + geomW + pad, labelRightExtent + pad);
+  const totalH = pad + geomH + pad;
+
+  const fillPath = poly.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)},${sy(p.y).toFixed(2)}`).join(' ') + ' Z';
   const regLines = marks.map(m => {
-    const x = pad + m.skiY;
-    return `<line x1="${x.toFixed(2)}" y1="${pad}" x2="${x.toFixed(2)}" y2="${(pad + maxT * sz).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${(x + 2).toFixed(2)}" y="${(pad + 5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    const a = M(m.skiY, 0), b = M(m.skiY, maxT), lbl = M(m.skiY + 2, maxT);
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - 2).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
   <title>Black Chapel Studios — Core Side Profile ${ski.length}mm</title>
-  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Y scale ${sz}x.</desc>
+  <desc>Closed shape for flat-bed CNC: flat bottom, thickness curve on top. Thickness scale ${sz}x. Orientation: ${O}.</desc>
   <g id="profile"><path d="${fillPath}" fill="rgba(200,147,90,0.18)" stroke="#C8935A" stroke-width="0.6"/></g>
   <g id="reference">${regLines}</g>
 </svg>`;
@@ -1382,6 +1456,8 @@ function exportCorePlanDXF(ski){
     }
   }
   const marks = getRegistrationMarks(ski);
+  const O = skiOrientation(ski);
+  const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
 
   const layers = [
     { name: 'CORE_PLAN_OUTLINE', color: 3 },
@@ -1392,26 +1468,30 @@ function exportCorePlanDXF(ski){
   let dxf = dxfStart(layers);
 
   // Closed core outline
-  dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts, true);
+  dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts.map(P), true);
 
   // V-cut note: mark the fill triangle(s) so the builder knows the core ends at the V.
   if (ski.vcutTip) {
     const apexY = (ski.length - ski.tipLength) + (ski.vcutTipExt || 0);
-    dxf += dxfText('TEXT', 6, Math.min(apexY, ski.length - 4), 6, "TIP V-CUT (fill beyond)");
+    const p = P({ x: 6, y: Math.min(apexY, ski.length - 4) });
+    dxf += dxfText('TEXT', p.x, p.y, 6, "TIP V-CUT (fill beyond)");
   }
   if (ski.vcutTail) {
     const apexY = ski.tailLength - (ski.vcutTailExt || 0);
-    dxf += dxfText('TEXT', 6, Math.max(apexY, 8), 6, "TAIL V-CUT (fill beyond)");
+    const p = P({ x: 6, y: Math.max(apexY, 8) });
+    dxf += dxfText('TEXT', p.x, p.y, 6, "TAIL V-CUT (fill beyond)");
   }
 
-  // Vertical centerline
-  dxf += dxfLine('CENTERLINE', 0, 0, 0, ski.length);
+  // Centerline along the full length at lateral 0.
+  const cc0 = P({ x: 0, y: 0 }), cc1 = P({ x: 0, y: ski.length });
+  dxf += dxfLine('CENTERLINE', cc0.x, cc0.y, cc1.x, cc1.y);
 
-  // Three horizontal reference cross-lines at tail contact, waist, tip contact (span core width).
+  // Reference cross-lines at tail contact, waist, tip contact (span core width). Labels horizontal.
   marks.forEach(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    dxf += dxfLine('REFERENCE', -hw, m.skiY, hw, m.skiY);
-    dxf += dxfText('TEXT', hw + 4, m.skiY - 2, 6, m.label);
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 4, y: m.skiY - 2 });
+    dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
+    dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
 
   dxf += dxfEnd();
@@ -1438,46 +1518,56 @@ function exportCorePlanSVG(ski){
     all = [...right, ...left];
   }
   const marks = getRegistrationMarks(ski);
+  const O = skiOrientation(ski);
+  const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
+  const pts = all.map(P);
   const pad = 10;
-  // Reference labels extend right of the geometry; include their text extent so they aren't clipped.
+  const gMinX = Math.min(...pts.map(p => p.x)), gMaxX = Math.max(...pts.map(p => p.x));
+  const gMinY = Math.min(...pts.map(p => p.y)), gMaxY = Math.max(...pts.map(p => p.y));
+  const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
+  const sx = x => (x - gMinX + pad);
+  const sy = y => (gMaxY - y + pad);
+
+  // Account for reference labels extending to the right of the geometry so nothing clips.
   const labelCharW = 4 * 0.6;
   const labelRightExtent = Math.max(0, ...marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    return hw + 3 + m.label.length * labelCharW;
+    const pl = P({ x: hw + 3, y: m.skiY });
+    return sx(pl.x) + m.label.length * labelCharW;
   }));
-  const minX = Math.min(...all.map(p => p.x)) - pad;
-  const maxX = Math.max(Math.max(...all.map(p => p.x)) + pad, labelRightExtent + pad);
-  const minY = Math.min(...all.map(p => p.y)) - pad;
-  const maxY = Math.max(...all.map(p => p.y)) + pad;
-  const w = maxX - minX, h = maxY - minY;
-  const toSvgY = y => (maxY - y + minY);
-  const pathD = all.map((p, i) =>
-    `${i === 0 ? 'M' : 'L'}${p.x.toFixed(3)},${toSvgY(p.y).toFixed(3)}`
+  const totalW = Math.max(pad + geomW + pad, labelRightExtent + pad);
+  const totalH = pad + geomH + pad;
+
+  const pathD = pts.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(3)},${sy(p.y).toFixed(3)}`
   ).join(' ') + ' Z';
   const regLines = marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const cy = toSvgY(m.skiY);
-    return `<line x1="${(-hw).toFixed(2)}" y1="${cy.toFixed(2)}" x2="${hw.toFixed(2)}" y2="${cy.toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
-    <text x="${(hw + 3).toFixed(2)}" y="${(cy + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 3, y: m.skiY });
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.5"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) + 1.5).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
-  const centerline = `<line x1="0" y1="${toSvgY(0).toFixed(2)}" x2="0" y2="${toSvgY(ski.length).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
+  const cc0 = P({ x: 0, y: 0 }), cc1 = P({ x: 0, y: ski.length });
+  const centerline = `<line x1="${sx(cc0.x).toFixed(2)}" y1="${sy(cc0.y).toFixed(2)}" x2="${sx(cc1.x).toFixed(2)}" y2="${sy(cc1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
   // V-cut fill notes — mark the triangular fill region at each enabled end (matches the DXF).
   const vcutNotes = [];
   if (ski.vcutTip) {
     const apexY = Math.min((ski.length - ski.tipLength) + (ski.vcutTipExt || 0), ski.length - 4);
-    vcutNotes.push(`<text x="6" y="${toSvgY(apexY).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
+    const p = P({ x: 6, y: apexY });
+    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TIP V-CUT (fill beyond)</text>`);
   }
   if (ski.vcutTail) {
     const apexY = Math.max(ski.tailLength - (ski.vcutTailExt || 0), 8);
-    vcutNotes.push(`<text x="6" y="${toSvgY(apexY).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
+    const p = P({ x: 6, y: apexY });
+    vcutNotes.push(`<text x="${sx(p.x).toFixed(2)}" y="${sy(p.y).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">TAIL V-CUT (fill beyond)</text>`);
   }
   const vcutNote = vcutNotes.join('\n    ');
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(2)}mm" height="${h.toFixed(2)}mm" viewBox="${minX.toFixed(2)} ${minY.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(2)}mm" height="${totalH.toFixed(2)}mm" viewBox="0 0 ${totalW.toFixed(2)} ${totalH.toFixed(2)}">
   <title>Black Chapel Studios — Core Plan Outline ${ski.length}mm</title>
-  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation${(ski.vcutTip || ski.vcutTail) ? "; tip/tail terminate in a V-cut fill" : ""}.</desc>
+  <desc>Top-down core outline narrowed by ${coreInset}mm/side for sidewall compensation${(ski.vcutTip || ski.vcutTail) ? "; tip/tail terminate in a V-cut fill" : ""}. Orientation: ${O}.</desc>
   <g id="outline" stroke="#000" stroke-width="0.6" fill="none"><path d="${pathD}"/></g>
   <g id="centerline">${centerline}</g>
   <g id="reference">${regLines}</g>
@@ -1498,6 +1588,8 @@ function exportRockerDXF(ski){
   }
   const marks = getRegistrationMarks(ski);
   const maxY = Math.max(...pts.map(p => p.y));
+  const O = skiOrientation(ski);
+  const Q = (a, t) => orientPt(a, t, O);  // a = along-length, t = height
 
   const layers = [
     { name: 'ROCKER_PROFILE', color: 3 },
@@ -1508,15 +1600,17 @@ function exportRockerDXF(ski){
   let dxf = dxfStart(layers);
 
   // Rocker curve as an open polyline (it's a line, not a closed shape)
-  dxf += dxfLwpolyline('ROCKER_PROFILE', pts, false);
+  dxf += dxfLwpolyline('ROCKER_PROFILE', pts.map(p => Q(p.x, p.y)), false);
 
   // Baseline (snow line)
-  dxf += dxfLine('BASELINE', 0, 0, ski.length, 0);
+  const bl0 = Q(0, 0), bl1 = Q(ski.length, 0);
+  dxf += dxfLine('BASELINE', bl0.x, bl0.y, bl1.x, bl1.y);
 
-  // Reference: vertical lines at tail contact, waist, tip contact
+  // Reference lines at tail contact, waist, tip contact; horizontal labels.
   marks.forEach(m => {
-    dxf += dxfLine('REFERENCE', m.skiY, -3, m.skiY, maxY + 4);
-    dxf += dxfText('TEXT', m.skiY + 2, maxY + 5, 6, m.label);
+    const a = Q(m.skiY, -3), b = Q(m.skiY, maxY + 4), lbl = Q(m.skiY + 2, maxY + 5);
+    dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
+    dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
 
   dxf += dxfEnd();
@@ -1532,22 +1626,41 @@ function exportRockerSVG(ski){
   }
   const maxY = Math.max(...pts.map(p => p.y));
   const L = ski.length, pad = 10;
-  const w = L + pad * 2, h = maxY + pad * 2 + 6;  // small extra space for labels
-  const toSY = y => (pad + (maxY - y));
-  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x + pad).toFixed(2)},${toSY(p.y).toFixed(2)}`).join(' ');
+  const O = skiOrientation(ski);
+  const M = (a, t) => orientPt(a, t, O);  // math space, Y up
+
+  const curve = pts.map(p => M(p.x, p.y));
+  const corners = [M(0, -3), M(L, -3), M(0, maxY + 5)];
+  const allPts = curve.concat(corners);
+  const gMinX = Math.min(...allPts.map(p => p.x)), gMaxX = Math.max(...allPts.map(p => p.x));
+  const gMinY = Math.min(...allPts.map(p => p.y)), gMaxY = Math.max(...allPts.map(p => p.y));
+  const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
+  const sx = x => (x - gMinX + pad);
+  const sy = y => (gMaxY - y + pad);
+
+  const labelCharW = 4 * 0.6;
+  const labelRightExtent = Math.max(0, ...getRegistrationMarks(ski).map(m => {
+    const lp = M(m.skiY + 2, maxY);
+    return sx(lp.x) + m.label.length * labelCharW;
+  }));
+  const totalW = Math.max(pad + geomW + pad, labelRightExtent + pad);
+  const totalH = pad + geomH + pad;
+
+  const pathD = curve.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)},${sy(p.y).toFixed(2)}`).join(' ');
   const marks = getRegistrationMarks(ski);
   const regLines = marks.map(m => {
-    const x = pad + m.skiY;
-    return `<line x1="${x.toFixed(2)}" y1="${(toSY(maxY) - 2).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(toSY(0) + 2).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
-    <text x="${(x + 2).toFixed(2)}" y="${(toSY(maxY) - 3).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
+    const a = M(m.skiY, -2), b = M(m.skiY, maxY + 2), lbl = M(m.skiY + 2, maxY);
+    return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="3,2"/>
+    <text x="${sx(lbl.x).toFixed(2)}" y="${(sy(lbl.y) - 3).toFixed(2)}" font-size="4" fill="#aa0000" font-family="monospace">${m.label}</text>`;
   }).join('\n    ');
+  const b0 = M(0, 0), b1 = M(L, 0);
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
   <title>Black Chapel Studios — Rocker/Mold Profile ${ski.length}mm</title>
-  <desc>Side-view rocker line for press mold. Units: mm, true 1:1 scale.</desc>
+  <desc>Side-view rocker line for press mold. Orientation: ${O}. Units: mm, true 1:1 scale.</desc>
   <g id="rocker"><path d="${pathD}" fill="none" stroke="#000" stroke-width="0.6"/></g>
-  <g id="baseline"><line x1="${pad}" y1="${toSY(0).toFixed(2)}" x2="${(L + pad).toFixed(2)}" y2="${toSY(0).toFixed(2)}" stroke="#888" stroke-width="0.3"/></g>
+  <g id="baseline"><line x1="${sx(b0.x).toFixed(2)}" y1="${sy(b0.y).toFixed(2)}" x2="${sx(b1.x).toFixed(2)}" y2="${sy(b1.y).toFixed(2)}" stroke="#888" stroke-width="0.3"/></g>
   <g id="registration">${regLines}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-rocker-${ski.length}mm.svg`, "image/svg+xml");
@@ -1683,46 +1796,57 @@ function exportCombinedDXF(ski){
   ];
   let dxf = dxfStart(layers);
 
+  // Orientation: the layout is composed horizontally (length on X, bands stacked in Y). R rotates the
+  // whole composition — identity for horizontal, 90° CCW for vertical (length runs up the page). Text
+  // anchors rotate but glyphs stay horizontal.
+  const O = skiOrientation(ski);
+  const R = p => O === "horizontal" ? { x: p.x, y: p.y } : { x: -p.y, y: p.x };
+  const poly = (layer, pts, closed) => dxfLwpolyline(layer, pts.map(R), closed);
+  const line = (layer, a, b) => { const A = R(a), B = R(b); return dxfLine(layer, A.x, A.y, B.x, B.y); };
+  const text = (layer, p, h, s) => { const P = R(p); return dxfText(layer, P.x, P.y, h, s); };
+
   // ── BASE BAND ──
   // Always draw the full outer profile (no edge offset) so the true ski shape is present.
-  dxf += dxfLwpolyline('FULL_PROFILE', shift(g.baseLoopPts, baseYoff), true);
+  dxf += poly('FULL_PROFILE', shift(g.baseLoopPts, baseYoff), true);
   // Plus the edge offset / base cut line on its own layer.
-  if (g.baseEdge) dxf += dxfLwpolyline('BASE_EDGE', shift(g.baseEdge, baseYoff), true);
-  dxf += dxfLine('CENTERLINE', 0, baseYoff, L, baseYoff);
+  if (g.baseEdge) dxf += poly('BASE_EDGE', shift(g.baseEdge, baseYoff), true);
+  dxf += line('CENTERLINE', { x: 0, y: baseYoff }, { x: L, y: baseYoff });
 
   // ── CORE BAND ──
-  dxf += dxfLwpolyline('CORE_OUTLINE', shift(g.coreLoopPts, coreYoff), true);
-  dxf += dxfLine('CENTERLINE', 0, coreYoff, L, coreYoff);
+  dxf += poly('CORE_OUTLINE', shift(g.coreLoopPts, coreYoff), true);
+  dxf += line('CENTERLINE', { x: 0, y: coreYoff }, { x: L, y: coreYoff });
 
   // ── CORE SIDE BAND ──
-  dxf += dxfLwpolyline('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
+  dxf += poly('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
 
   // ── SHARED REFERENCE LINES ── at tail/waist/tip contact, spanning all three bands for lofting.
   const topY = baseYoff + halfBaseW + 6;
   const botY = sideYoff - 6;
   g.marks.forEach(m => {
-    dxf += dxfLine('REFERENCE', m.skiY, botY, m.skiY, topY);
-    dxf += dxfText('TEXT', m.skiY + 2, topY + 3, 6, m.label);
+    dxf += line('REFERENCE', { x: m.skiY, y: botY }, { x: m.skiY, y: topY });
+    dxf += text('TEXT', { x: m.skiY + 2, y: topY + 3 }, 6, m.label);
   });
 
   // ── VIEW LABELS ── one per band, lifted into the empty GAP above each band's top edge so the
-  // text never crosses the geometry, and left-aligned at the drawing's left edge (x=0). The base
-  // label goes above the contact-label row so nothing stacks on it. ASCII only (DXF default font
-  // renders non-ASCII as "???").
+  // text never crosses the geometry. ASCII only (DXF default font renders non-ASCII as "???").
   const edgeWrap = ski.edgeWrap || "full";
   const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
   const lblX = 0, lblH = 9;
-  // Base: above the contact-label row (which sits at topY+3 above the base band).
-  dxf += dxfText('LABEL', lblX, topY + 22, lblH, baseLbl);
-  // Core: in the gap between the base and core bands (just above the core band's top edge).
-  dxf += dxfText('LABEL', lblX, coreYoff + halfCoreW + 12, lblH, `CORE: outline (inset ${g.coreInset}mm/side)`);
-  // Core side: in the gap between the core and side bands (just above the side profile).
-  dxf += dxfText('LABEL', lblX, sideYoff + maxThick + 12, lblH, "CORE SIDE: thickness taper (flat bottom)");
+  dxf += text('LABEL', { x: lblX, y: topY + 22 }, lblH, baseLbl);
+  dxf += text('LABEL', { x: lblX, y: coreYoff + halfCoreW + 12 }, lblH, `CORE: outline (inset ${g.coreInset}mm/side)`);
+  dxf += text('LABEL', { x: lblX, y: sideYoff + maxThick + 12 }, lblH, "CORE SIDE: thickness taper (flat bottom)");
 
-  // ── MEASUREMENTS TABLE ── (shared helper; identical to the base DXF)
-  // Combined layout swaps axes (length→X, width→Y) and shifts the base band by baseYoff.
-  dxf += buildInsertsDXF(ski, (x, y) => ({ x: y, y: x + baseYoff }));
-  dxf += buildMeasurementsTable(ski, L + 60, baseYoff + halfBaseW, { coreInset: g.coreInset });
+  // ── BINDING INSERTS ── snowboard mode; compose the combined swap then the orientation rotation.
+  dxf += buildInsertsDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
+
+  // ── MEASUREMENTS TABLE ── placed to the right of the rotated composition, text horizontal.
+  const allGeom = [
+    ...shift(g.baseLoopPts, baseYoff), ...shift(g.coreLoopPts, coreYoff), ...shift(g.sideLoop, sideYoff),
+    { x: 0, y: topY }, { x: L, y: botY },
+  ].map(R);
+  const tblAnchorX = Math.max(...allGeom.map(p => p.x)) + 60;
+  const tblAnchorY = Math.max(...allGeom.map(p => p.y));
+  dxf += buildMeasurementsTable(ski, tblAnchorX, tblAnchorY, { coreInset: g.coreInset });
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-combined-${ski.length}mm.dxf`, "application/dxf");
@@ -1735,83 +1859,83 @@ function exportCombinedSVG(ski){
   const halfCoreW = Math.max(...g.coreLoopPts.map(p => Math.abs(p.y)));
   const maxThick = Math.max(...g.sideTop.map(p => p.y));
   const gap = 40, pad = 15;
-  const topMargin = 26;   // extra room above the base band for the contact row + base label
-  const derived = computeDerived(ski);
-  // Compute band centers in a top-down SVG (Y grows down). Base at top.
-  const baseCY = topMargin + halfBaseW;
-  const coreCY = baseCY + halfBaseW + gap + halfCoreW;
-  const sideTopY = coreCY + halfCoreW + gap;          // side profile baseline
-  const totalH = sideTopY + maxThick + pad;
-  const tableW = 320;                                  // room for the measurements table
-  const totalW = L + pad * 2 + tableW;
+  const edgeWrap = ski.edgeWrap || "full";
 
-  const pathFrom = (pts, cy, close) => pts.map((p,i) =>
-    `${i===0?'M':'L'}${(p.x + pad).toFixed(2)},${(cy - p.y).toFixed(2)}`
+  // Build in the SAME math space (Y up) as the combined DXF so both formats match, then rotate for
+  // orientation, then flip once into SVG screen space. Band Y-offsets mirror the DXF exactly.
+  const baseYoff = 0;
+  const coreYoff = -(halfBaseW + gap + halfCoreW);
+  const sideYoff = coreYoff - (halfCoreW + gap + maxThick);
+  const shift = (pts, dy) => pts.map(p => ({ x: p.x, y: p.y + dy }));
+  const O = skiOrientation(ski);
+  const R = p => O === "horizontal" ? { x: p.x, y: p.y } : { x: -p.y, y: p.x };
+
+  const baseLoop = shift(g.baseLoopPts, baseYoff).map(R);
+  const baseEdge = g.baseEdge ? shift(g.baseEdge, baseYoff).map(R) : null;
+  const coreLoop = shift(g.coreLoopPts, coreYoff).map(R);
+  const sideLoop = shift(g.sideLoop, sideYoff).map(R);
+
+  const topY = baseYoff + halfBaseW + 6, botY = sideYoff - 6;
+  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
+  // Anchor points (math space) for reference lines + labels; rotate, then draw text horizontal.
+  const refData = g.marks.map(m => ({
+    a: R({ x: m.skiY, y: botY }), b: R({ x: m.skiY, y: topY }), lbl: R({ x: m.skiY + 2, y: topY + 3 }), label: m.label,
+  }));
+  const lblData = [
+    { p: R({ x: 0, y: topY + 22 }), t: baseLbl },
+    { p: R({ x: 0, y: coreYoff + halfCoreW + 12 }), t: `CORE: outline (inset ${g.coreInset}mm/side)` },
+    { p: R({ x: 0, y: sideYoff + maxThick + 12 }), t: "CORE SIDE: thickness taper (flat bottom)" },
+  ];
+
+  // Bounds over all geometry + anchors.
+  const allPts = [...baseLoop, ...(baseEdge || []), ...coreLoop, ...sideLoop,
+    ...refData.flatMap(r => [r.a, r.b, r.lbl]), ...lblData.map(l => l.p)];
+  const gMinX = Math.min(...allPts.map(p => p.x)), gMaxX = Math.max(...allPts.map(p => p.x));
+  const gMinY = Math.min(...allPts.map(p => p.y)), gMaxY = Math.max(...allPts.map(p => p.y));
+  const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
+  const sx = x => (x - gMinX + pad);
+  const sy = y => (gMaxY - y + pad);
+
+  // Table sits to the right of the composition; rows flow downward, text horizontal.
+  const rows = measurementRows(ski, { coreInset: g.coreInset });
+  const tblW = 300, tblGap = 24;
+  const tblH = 16 + rows.length * 13 + 6;
+  const tblX = pad + geomW + tblGap;
+  const tblTopY = pad + 6;
+  const totalW = tblX + tblW + pad;
+  const totalH = pad + Math.max(geomH, tblH) + pad;
+
+  const pathFrom = (pts, close) => pts.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)},${sy(p.y).toFixed(2)}`
   ).join(' ') + (close ? ' Z' : '');
 
-  const edgeWrap = ski.edgeWrap || "full";
-  // Always draw the full outer profile (black). Add the edge offset on top (green, dashed for
-  // full-wrap; solid for the contact cut loop).
   const baseGroup =
-    `<path d="${pathFrom(g.baseLoopPts, baseCY, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
-    (g.baseEdge ? `<path d="${pathFrom(g.baseEdge, baseCY, true)}" fill="none" stroke="#005000" stroke-width="0.5" ${edgeWrap === "contact" ? "" : 'stroke-dasharray="2,1.5"'}/>` : '');
+    `<path d="${pathFrom(baseLoop, true)}" fill="none" stroke="#000" stroke-width="0.6"/>` +
+    (baseEdge ? `<path d="${pathFrom(baseEdge, true)}" fill="none" stroke="#005000" stroke-width="0.5" ${edgeWrap === "contact" ? "" : 'stroke-dasharray="2,1.5"'}/>` : '');
+  const coreGroup = `<path d="${pathFrom(coreLoop, true)}" fill="none" stroke="#C8935A" stroke-width="0.6"/>`;
+  const sideGroup = `<path d="${pathFrom(sideLoop, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
 
-  const coreGroup = `<path d="${pathFrom(g.coreLoopPts, coreCY, true)}" fill="none" stroke="#C8935A" stroke-width="0.6"/>`;
-  const sideGroup = `<path d="${pathFrom(g.sideLoop, sideTopY, true)}" fill="rgba(200,147,90,0.15)" stroke="#0066cc" stroke-width="0.6"/>`;
+  const refLines = refData.map(r =>
+    `<line x1="${sx(r.a.x).toFixed(2)}" y1="${sy(r.a.y).toFixed(2)}" x2="${sx(r.b.x).toFixed(2)}" y2="${sy(r.b.y).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="4,3"/>
+    <text x="${sx(r.lbl.x).toFixed(2)}" y="${(sy(r.lbl.y)).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${r.label}</text>`
+  ).join('\n    ');
 
-  const refLines = g.marks.map(m => {
-    const x = m.skiY + pad;
-    return `<line x1="${x.toFixed(2)}" y1="${(baseCY - halfBaseW - 6).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(sideTopY + maxThick + 4).toFixed(2)}" stroke="#aa0000" stroke-width="0.4" stroke-dasharray="4,3"/>
-    <text x="${(x + 2).toFixed(2)}" y="${(baseCY - halfBaseW - 8).toFixed(2)}" font-size="5" fill="#aa0000" font-family="monospace">${m.label}</text>`;
-  }).join('\n    ');
+  const labels = lblData.map(l =>
+    `<text x="${sx(l.p.x).toFixed(1)}" y="${sy(l.p.y).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${l.t}</text>`
+  ).join('\n    ');
 
-  // View labels — lifted above each band (in SVG, smaller Y = higher). Base label goes above the
-  // contact-label row so nothing stacks on it.
-  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
-  const labels = `
-    <text x="${pad}" y="${(baseCY - halfBaseW - 16).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">${baseLbl}</text>
-    <text x="${pad}" y="${(coreCY - halfCoreW - 8).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE: outline (inset ${g.coreInset}mm/side)</text>
-    <text x="${pad}" y="${(sideTopY - 8).toFixed(1)}" font-size="6" fill="#3aa" font-family="monospace" font-weight="bold">CORE SIDE: thickness taper (flat bottom)</text>`;
-
-  // Measurements table (right of the drawing)
-  const rows = [
-    ["Overall length", `${ski.length}`],
-    ["Tip width", `${ski.tipWidth}`],
-    ["Waist width", `${ski.waistWidth}`],
-    ["Tail width", `${ski.tailWidth}`],
-    ["Tip length (shovel)", `${ski.tipLength}`],
-    ["Tail length", `${ski.tailLength}`],
-    ["Running edge", `${derived.effectiveEdge.toFixed(0)}`],
-    ["Rocker T/C/T %", `${rockerPercents(ski).tip.toFixed(0)}/${rockerPercents(ski).camber.toFixed(0)}/${rockerPercents(ski).tail.toFixed(0)}`],
-    ["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`],
-    ["Tip height", `${ski.tipHeight}`],
-    ["Tail height", `${ski.tailHeight}`],
-    ["Camber height", `${ski.camberHeight}`],
-    ["Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`],
-    ["Edge inset", `${ski.edgeInset}`],
-    ["Edge wrap", edgeWrap === "contact" ? "contact" : "full wrap"],
-  ];
-  if (edgeWrap === "contact") rows.push(["Edge ext tip/tail", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
-  rows.push(["Core inset", `${g.coreInset}`]);
-  const tblX = L + pad * 2 + 8;
-  let tblY = pad + 12;
-  const tblRows = [`<text x="${tblX}" y="${tblY}" font-size="8" fill="#000" font-family="monospace" font-weight="bold">MEASUREMENTS (mm)</text>`];
-  tblY += 16;
-  rows.forEach(([k,v]) => {
-    tblRows.push(`<text x="${tblX}" y="${tblY}" font-size="6.5" fill="#000" font-family="monospace">${k}</text><text x="${tblX + 210}" y="${tblY}" font-size="6.5" fill="#000" font-family="monospace">${v}</text>`);
-    tblY += 13;
-  });
+  const tbl = buildMeasurementsTableSVG(ski, tblX, tblTopY, { coreInset: g.coreInset });
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${totalW.toFixed(1)}mm" height="${totalH.toFixed(1)}mm" viewBox="0 0 ${totalW.toFixed(1)} ${totalH.toFixed(1)}">
   <title>Black Chapel Studios — Combined Views ${ski.length}mm</title>
-  <desc>Full profile, base edge, core outline, and core side profile — aligned on the length axis for lofting. Units: mm, 1:1.</desc>
+  <desc>Full profile, base edge, core outline, and core side profile — aligned on the length axis for lofting. Orientation: ${O}. Units: mm, 1:1.</desc>
   <g id="base">${baseGroup}</g>
   <g id="core">${coreGroup}</g>
   <g id="core_side">${sideGroup}</g>
   <g id="reference">${refLines}</g>
   <g id="labels">${labels}</g>
-  <g id="table">${tblRows.join('\n    ')}</g>
+  <g id="table">${tbl}</g>
 </svg>`;
   downloadFile(svg, `bcs-ski-combined-${ski.length}mm.svg`, "image/svg+xml");
 }
@@ -4720,6 +4844,32 @@ export default function App() {
             )}
           </div>
           {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          <div style={{ marginBottom: 9, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[
+                { val: "vertical", label: "Vertical" },
+                { val: "horizontal", label: "Horizontal" },
+              ].map(opt => {
+                const on = skiOrientation(ski) === opt.val;
+                return (
+                  <button key={opt.val}
+                    onClick={() => setSki(s => ({ ...s, exportOrientation: opt.val }))}
+                    style={{
+                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
+                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
+                    }}>{opt.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+              {skiOrientation(ski) === "vertical"
+                ? "All exports run length up the page (portrait). Labels stay horizontal."
+                : "All exports run length across the page (landscape). Labels stay horizontal."}
+            </div>
+          </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 12, marginTop: 8 }}>
             <b style={{color: C.heading}}>Edge inset:</b> P-Tex base cut offset (leaves room for metal edges).<br/>
             <b style={{color: C.heading}}>Core inset:</b> width reduction per side for sidewall material on core blank.
