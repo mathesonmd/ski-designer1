@@ -856,8 +856,15 @@ function dxfLwpolyline(layer, pts, closed) {
 function dxfLine(layer, x1, y1, x2, y2) {
   return `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n30\n0\n11\n${x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n31\n0\n`;
 }
-function dxfText(layer, x, y, h, str) {
-  return `0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${h.toFixed(3)}\n1\n${str}\n`;
+function dxfText(layer, x, y, h, str, align) {
+  let s = `0\nTEXT\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${h.toFixed(3)}\n1\n${str}\n`;
+  // Optional horizontal justification: right (72=2) or center (72=1) anchor the text edge exactly at
+  // (x,y) via the second alignment point (11/21), independent of the rendering font's glyph widths —
+  // so right-grown labels can't overrun their target no matter how wide the CAD font draws them.
+  if (align === 'right' || align === 'center') {
+    s += `72\n${align === 'right' ? 2 : 1}\n11\n${x.toFixed(3)}\n21\n${y.toFixed(3)}\n31\n0\n`;
+  }
+  return s;
 }
 function dxfCircle(layer, x, y, r) {
   return `0\nCIRCLE\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${r.toFixed(3)}\n`;
@@ -881,18 +888,21 @@ const HERSHEY = {"0":[10,"M9,1 L6,2 4,5 3,10 3,13 4,18 6,21 9,22 11,22 14,21 16,
 // <text>, this imports as real vector geometry in CAM tools (Vectric, LightBurn, Illustrator),
 // which typically ignore <text>. Baseline sits at (x, y); capitals are ~sizeMM tall; y increases
 // downward (SVG screen space). anchor: 'start' | 'middle' | 'end'.
+// Hershey advance widths are in a compressed unit — the canonical renderer multiplies them by 1.68
+// (the em factor) to get true spacing, so we do the same or characters overlap.
+const HFONT_ADV = 1.68;
 function hersheyPath(str, x, y, sizeMM, opts) {
   opts = opts || {};
   const s = sizeMM / 21, SPACE_W = 10;
   let total = 0;
-  for (const ch of str) { const g = HERSHEY[ch]; total += g ? g[0] : SPACE_W; }
+  for (const ch of str) { const g = HERSHEY[ch]; total += (g ? g[0] : SPACE_W) * HFONT_ADV; }
   let penX = x;
   if (opts.anchor === 'middle') penX = x - total * s / 2;
   else if (opts.anchor === 'end') penX = x - total * s;
   let d = '';
   for (const ch of str) {
     const g = HERSHEY[ch];
-    const w = g ? g[0] : SPACE_W;
+    const w = (g ? g[0] : SPACE_W) * HFONT_ADV;
     if (g && g[1]) {
       const toks = g[1].split(' ');
       let cmd = 'L';
@@ -907,13 +917,13 @@ function hersheyPath(str, x, y, sizeMM, opts) {
     }
     penX += w * s;
   }
-  const sw = (opts.strokeWidth !== undefined) ? opts.strokeWidth : sizeMM * 0.045;
+  const sw = (opts.strokeWidth !== undefined) ? opts.strokeWidth : sizeMM * 0.05;
   return `<path d="${d.trim()}" fill="none" stroke="${opts.color || '#000'}" stroke-width="${sw.toFixed(2)}"/>`;
 }
 // Approximate rendered width (mm) of a Hershey string at a given cap size — for layout/bounds.
 function hersheyWidth(str, sizeMM) {
   const s = sizeMM / 21; let total = 0;
-  for (const ch of str) { const g = HERSHEY[ch]; total += g ? g[0] : 10; }
+  for (const ch of str) { const g = HERSHEY[ch]; total += (g ? g[0] : 10) * HFONT_ADV; }
   return total * s;
 }
 // Compute a tight bounding box (with padding) over ALL geometry in an assembled SVG body — path 'd'
@@ -953,10 +963,12 @@ function buildInsertsDXF(ski, tf) {
     out += dxfLwpolyline('INSERTS', pts, true);
   });
   ins.packs.forEach(p => {
-    const c = T(0, p.y), a1 = T(-7, p.y), a2 = T(7, p.y), b1 = T(0, p.y - 7), b2 = T(0, p.y + 7), lbl = T(10, p.y - 2);
+    const c = T(0, p.y), a1 = T(-7, p.y), a2 = T(7, p.y), b1 = T(0, p.y - 7), b2 = T(0, p.y + 7);
     out += dxfLine('INSERTS', a1.x, a1.y, a2.x, a2.y);
     out += dxfLine('INSERTS', b1.x, b1.y, b2.x, b2.y);
-    out += dxfText('INSERTS', lbl.x, lbl.y, 6, p.foot === "front" ? "FRONT" : "BACK");
+    // Label placed in FINAL space past the cross's 7mm arm (x+11) and clear of the board centerline
+    // (y+9), grown right — clears both the cross marks and the centerline in either orientation.
+    out += dxfText('INSERTS', c.x + 11, c.y + 9, 6, p.foot === "front" ? "FRONT" : "BACK");
   });
   return out;
 }
@@ -1203,16 +1215,21 @@ function exportPlanSVG(ski){
 
   // Text is sized relative to the drawing so it stays legible when the whole SVG is viewed at once
   // (a 4mm label on an 1800mm sheet is invisible at fit-to-view). fL = contact-label height.
-  const fL = Math.max(ski.length / 60, 14);
-  const fTbl = Math.max(ski.length / 75, 12);
+  const fL = Math.max(ski.length / 200, 7);
+  const fTbl = Math.max(ski.length / 240, 6);
   const charW = fL * 0.62;
 
-  // Right extent of the contact labels (they sit to the right of the geometry at each station). The
-  // table must clear these so nothing overlaps.
+  // Contact labels are placed beyond the ski's MAXIMUM half-width (not the local width at each
+  // station), so the text always clears the whole curved outline — plus a gap past the reference
+  // line. Aligned in a neat column just outside the widest point.
+  const maxHW = Math.max(...ptsRaw.map(p => Math.abs(p.x)));
+  const refGap = fL;
+  const labelLat = maxHW + refGap;
+
+  // Right extent of the contact labels — the table must clear these so nothing overlaps.
   const labelRightExtent = Math.max(gMaxX, ...marks.map(m => {
-    const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
-    const pl = P({ x: halfW + fL * 0.4, y: m.skiY });
-    return pl.x + m.label.length * charW;
+    const pl = P({ x: labelLat, y: m.skiY });
+    return pl.x + hersheyWidth(m.label, fL);
   }));
 
   // Measurements table (top-right, beyond both the geometry and the contact labels).
@@ -1235,11 +1252,12 @@ function exportPlanSVG(ski){
   const baseCutPath = baseCutLoop ? pathFrom(baseCutLoop, true) : '';
 
   // Reference cross-lines + horizontal labels. Anchor points are defined in vertical convention then
-  // projected (P) so they land correctly in either orientation; text is always drawn horizontal.
+  // projected (P) so they land correctly in either orientation; text is always drawn horizontal and
+  // sits clear of the outline (past the widest point).
   const refMarks = marks.map(m => {
     const halfW = getWidthAtPos(ski, m.skiY / ski.length) / 2;
     const a = { x: -halfW, y: m.skiY }, b = { x: halfW, y: m.skiY };
-    const lbl = { x: halfW + fL * 0.4, y: m.skiY };
+    const lbl = { x: labelLat, y: m.skiY };
     const pa = P(a), pb = P(b), pl = P(lbl);
     return `    <line x1="${sx(pa.x).toFixed(2)}" y1="${sy(pa.y).toFixed(2)}" x2="${sx(pb.x).toFixed(2)}" y2="${sy(pb.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
     ${hersheyPath(m.label, sx(pl.x), sy(pl.y) + fL*0.35, fL, {color:'#aa0000'})}`;
@@ -1396,10 +1414,12 @@ function exportPlanDXF(ski){
   dxf += dxfLine('CENTERLINE', c0.x, c0.y, c1.x, c1.y);
 
   // Reference cross-lines: tail contact, waist, tip contact — each spans the width at its station.
-  // Labels always drawn horizontally at the projected anchor.
+  // Contact labels sit beyond the ski's MAXIMUM half-width so they clear the whole outline.
+  const maxHW = Math.max(...pts.map(p => Math.abs(p.x)));
+  const labelLat = maxHW + 12;
   marks.forEach(m => {
     const hw = getWidthAtPos(ski, m.skiY / ski.length) / 2;
-    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 4, y: m.skiY - 2 });
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: labelLat, y: m.skiY - 2 });
     dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
     dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
@@ -1407,11 +1427,12 @@ function exportPlanDXF(ski){
   // Binding inserts (snowboard mode) on the INSERTS layer — pass P so they orient with the outline.
   dxf += buildInsertsDXF(ski, (x, y) => P({ x, y }));
 
-  // Measurements table — to the right of the geometry, top-aligned. Text stays horizontal.
+  // Measurements table — beyond the geometry AND the contact labels so nothing overlaps it.
   const projPts = pts.map(P);
-  const gMaxX = Math.max(...projPts.map(p => p.x));
+  const lblPts = marks.map(m => P({ x: labelLat + m.label.length * 6 * 0.62, y: m.skiY }));
+  const gMaxX = Math.max(...projPts.map(p => p.x), ...lblPts.map(p => p.x));
   const gMaxY = Math.max(...projPts.map(p => p.y));
-  dxf += buildMeasurementsTable(ski, gMaxX + 60, gMaxY, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
+  dxf += buildMeasurementsTable(ski, gMaxX + 40, gMaxY, { coreInset: ski.coreInset !== undefined ? ski.coreInset : 0 });
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-plan-${ski.length}mm.dxf`, "application/dxf");
@@ -1474,7 +1495,7 @@ function exportCoreSideSVG(ski){
   const marks = getRegistrationMarks(ski);
   const L = ski.length, pad = 10, sz = 1;  // sz=1: true 1:1 thickness, matching the DXF (no exaggeration)
   const O = skiOrientation(ski);
-  const fL = Math.max(ski.length / 60, 14);
+  const fL = Math.max(ski.length / 200, 7);
   // Canonical math point (Y up): a = along, te = thickness * sz (exaggerated for readability).
   const M = (a, t) => orientPt(a, t * sz, O);
 
@@ -1553,15 +1574,19 @@ function exportCorePlanDXF(ski){
   // Closed core outline
   dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts.map(P), true);
 
+  // Labels sit beyond the core's MAXIMUM half-width so they clear the whole outline.
+  const maxHW = Math.max(...planPts.map(p => Math.abs(p.x)));
+  const labelLat = maxHW + 12;
+
   // V-cut note: mark the fill triangle(s) so the builder knows the core ends at the V.
   if (ski.vcutTip) {
     const apexY = (ski.length - ski.tipLength) + (ski.vcutTipExt || 0);
-    const p = P({ x: 6, y: Math.min(apexY, ski.length - 4) });
+    const p = P({ x: labelLat, y: Math.min(apexY, ski.length - 4) });
     dxf += dxfText('TEXT', p.x, p.y, 6, "TIP V-CUT (fill beyond)");
   }
   if (ski.vcutTail) {
     const apexY = ski.tailLength - (ski.vcutTailExt || 0);
-    const p = P({ x: 6, y: Math.max(apexY, 8) });
+    const p = P({ x: labelLat, y: Math.max(apexY, 8) });
     dxf += dxfText('TEXT', p.x, p.y, 6, "TAIL V-CUT (fill beyond)");
   }
 
@@ -1572,7 +1597,7 @@ function exportCorePlanDXF(ski){
   // Reference cross-lines at tail contact, waist, tip contact (span core width). Labels horizontal.
   marks.forEach(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + 4, y: m.skiY - 2 });
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: labelLat, y: m.skiY - 2 });
     dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y);
     dxf += dxfText('TEXT', lbl.x, lbl.y, 6, m.label);
   });
@@ -1605,19 +1630,21 @@ function exportCorePlanSVG(ski){
   const P = p => O === "horizontal" ? { x: p.y, y: p.x } : { x: p.x, y: p.y };
   const pts = all.map(P);
   const pad = 10;
-  const fL = Math.max(ski.length / 60, 14);
+  const fL = Math.max(ski.length / 200, 7);
   const gMinX = Math.min(...pts.map(p => p.x)), gMaxX = Math.max(...pts.map(p => p.x));
   const gMinY = Math.min(...pts.map(p => p.y)), gMaxY = Math.max(...pts.map(p => p.y));
   const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  // Account for reference labels extending to the right of the geometry so nothing clips.
+  // Contact labels placed beyond the core's MAXIMUM half-width so they clear the whole outline.
+  const maxHW = Math.max(...all.map(p => Math.abs(p.x)));
+  const refGap = fL;
+  const labelLat = maxHW + refGap;
   const labelCharW = fL * 0.62;
   const labelRightExtent = Math.max(0, ...marks.map(m => {
-    const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const pl = P({ x: hw + fL * 0.4, y: m.skiY });
-    return sx(pl.x) + m.label.length * labelCharW;
+    const pl = P({ x: labelLat, y: m.skiY });
+    return sx(pl.x) + hersheyWidth(m.label, fL);
   }));
   const totalW = Math.max(pad + geomW + pad, labelRightExtent + pad);
   const totalH = pad + geomH + pad;
@@ -1627,24 +1654,25 @@ function exportCorePlanSVG(ski){
   ).join(' ') + ' Z';
   const regLines = marks.map(m => {
     const hw = Math.max(1.0, getWidthAtPos(ski, m.skiY / ski.length) / 2 - coreInset);
-    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: hw + fL * 0.4, y: m.skiY });
+    const a = P({ x: -hw, y: m.skiY }), b = P({ x: hw, y: m.skiY }), lbl = P({ x: labelLat, y: m.skiY });
     return `<line x1="${sx(a.x).toFixed(2)}" y1="${sy(a.y).toFixed(2)}" x2="${sx(b.x).toFixed(2)}" y2="${sy(b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.08).toFixed(2)}"/>
     ${hersheyPath(m.label, sx(lbl.x), sy(lbl.y) + fL*0.35, fL, {color:'#aa0000'})}`;
   }).join('\n    ');
   const cc0 = P({ x: 0, y: 0 }), cc1 = P({ x: 0, y: ski.length });
   const centerline = `<line x1="${sx(cc0.x).toFixed(2)}" y1="${sy(cc0.y).toFixed(2)}" x2="${sx(cc1.x).toFixed(2)}" y2="${sy(cc1.y).toFixed(2)}" stroke="#0066cc" stroke-width="0.4" stroke-dasharray="6,3"/>`;
 
-  // V-cut fill notes — mark the triangular fill region at each enabled end (matches the DXF).
+  // V-cut fill notes — placed beyond the outline (past the max half-width) at the apex station so the
+  // text doesn't cross the core geometry. Matches the DXF's intent.
   const vcutNotes = [];
   if (ski.vcutTip) {
     const apexY = Math.min((ski.length - ski.tipLength) + (ski.vcutTipExt || 0), ski.length - 4);
-    const p = P({ x: 6, y: apexY });
-    vcutNotes.push(hersheyPath("TIP V-CUT (fill beyond)", sx(p.x), sy(p.y), fL*0.85, {color:'#aa0000'}));
+    const p = P({ x: labelLat, y: apexY });
+    vcutNotes.push(hersheyPath("TIP V-CUT (fill beyond)", sx(p.x), sy(p.y) + fL*0.3, fL*0.85, {color:'#aa0000'}));
   }
   if (ski.vcutTail) {
     const apexY = Math.max(ski.tailLength - (ski.vcutTailExt || 0), 8);
-    const p = P({ x: 6, y: apexY });
-    vcutNotes.push(hersheyPath("TAIL V-CUT (fill beyond)", sx(p.x), sy(p.y), fL*0.85, {color:'#aa0000'}));
+    const p = P({ x: labelLat, y: apexY });
+    vcutNotes.push(hersheyPath("TAIL V-CUT (fill beyond)", sx(p.x), sy(p.y) + fL*0.3, fL*0.85, {color:'#aa0000'}));
   }
   const vcutNote = vcutNotes.join('\n    ');
 
@@ -1713,7 +1741,7 @@ function exportRockerSVG(ski){
   const maxY = Math.max(...pts.map(p => p.y));
   const L = ski.length, pad = 10;
   const O = skiOrientation(ski);
-  const fL = Math.max(ski.length / 60, 14);
+  const fL = Math.max(ski.length / 200, 7);
   const M = (a, t) => orientPt(a, t, O);  // math space, Y up
 
   const curve = pts.map(p => M(p.x, p.y));
@@ -1909,31 +1937,41 @@ function exportCombinedDXF(ski){
   dxf += poly('CORE_SIDE', shift(g.sideLoop, sideYoff), true);
 
   // ── SHARED REFERENCE LINES ── at tail/waist/tip contact, spanning all three bands for lofting.
+  // Contact labels use LEFT-aligned text (many CAD importers, incl. Vectric, ignore DXF text
+  // justification), placed so growing rightward lands in open space clear of every shape vector.
   const topY = baseYoff + halfBaseW + 6;
   const botY = sideYoff - 6;
+  const lblH = 9;
+  const refGap = lblH;
+  const contactW = (str) => str.length * 6 * 1.0;  // generous width est (h=6) for table clearance
+  let maxLabelX = -Infinity;
   g.marks.forEach(m => {
     dxf += line('REFERENCE', { x: m.skiY, y: botY }, { x: m.skiY, y: topY });
-    dxf += text('TEXT', { x: m.skiY + 2, y: topY + 3 }, 6, m.label);
+    const a = R({ x: m.skiY, y: botY }), b = R({ x: m.skiY, y: topY });
+    if (O === "vertical") {
+      // The (horizontal) line's RIGHT end is `a`. Place the label just past it, growing right into
+      // the open margin — never crosses the line or any band regardless of the CAD font width.
+      const lx = a.x + refGap;
+      dxf += dxfText('TEXT', lx, a.y - 3, 6, m.label);
+      maxLabelX = Math.max(maxLabelX, lx + contactW(m.label));
+    } else {
+      // The (vertical) line's TOP end is `b`. Label sits above it, growing right, clear of the band.
+      dxf += dxfText('TEXT', b.x + 2, b.y + refGap, 6, m.label);
+    }
   });
 
-  // ── VIEW LABELS ── identify each band. Placed directly in FINAL (post-orientation) space so they
-  // never collapse onto one line. Horizontal has room for full descriptions above each stacked band;
-  // vertical uses short identifiers at the tip end of each side-by-side strip (details are in the
-  // table). ASCII only (DXF default font renders non-ASCII as "???").
-  const edgeWrap = ski.edgeWrap || "full";
-  const baseLbl = edgeWrap === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
-  const lblH = 9;
+  // ── VIEW LABELS ── short identifiers (BASE / CORE / CORE SIDE) in BOTH orientations, above each
+  // band/strip in the clear margin (short text never reaches the first reference line). Full spec
+  // detail is in the measurements table. ASCII only.
   const bands = [
-    { full: baseLbl, short: "BASE", cy: baseYoff, half: halfBaseW },
-    { full: `CORE: outline (inset ${g.coreInset}mm/side)`, short: "CORE", cy: coreYoff, half: halfCoreW },
-    { full: "CORE SIDE: thickness taper (flat bottom)", short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
+    { short: "BASE", cy: baseYoff, half: halfBaseW },
+    { short: "CORE", cy: coreYoff, half: halfCoreW },
+    { short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
   ];
   bands.forEach(b => {
     if (O === "horizontal") {
-      // Above each band (band top + a little), left-aligned at the tail end.
-      dxf += dxfText('LABEL', 0, b.cy + b.half + lblH * 1.6, lblH, b.full);
+      dxf += dxfText('LABEL', 0, b.cy + b.half + lblH * 1.6, lblH, b.short);
     } else {
-      // Left edge of each vertical strip, at the tip end (top).
       dxf += dxfText('LABEL', -(b.cy + b.half), L + lblH * 2, lblH, b.short);
     }
   });
@@ -1946,7 +1984,7 @@ function exportCombinedDXF(ski){
     ...shift(g.baseLoopPts, baseYoff), ...shift(g.coreLoopPts, coreYoff), ...shift(g.sideLoop, sideYoff),
     { x: 0, y: topY }, { x: L, y: botY },
   ].map(R);
-  const tblAnchorX = Math.max(...allGeom.map(p => p.x)) + 60;
+  const tblAnchorX = Math.max(Math.max(...allGeom.map(p => p.x)), maxLabelX) + 40;
   const tblAnchorY = Math.max(...allGeom.map(p => p.y));
   dxf += buildMeasurementsTable(ski, tblAnchorX, tblAnchorY, { coreInset: g.coreInset });
 
@@ -1982,39 +2020,51 @@ function exportCombinedSVG(ski){
   const baseLbl = edgeWrapC === "contact" ? "BASE: full profile + contact edge cut" : "BASE: full profile + edge offset";
 
   // Text sized to the drawing so it's legible at fit-to-view.
-  const fL = Math.max(ski.length / 60, 14);
-  const fTbl = Math.max(ski.length / 75, 12);
+  const fL = Math.max(ski.length / 200, 7);
+  const fTbl = Math.max(ski.length / 240, 6);
   const charW = fL * 0.62;
 
-  // Reference lines + contact labels; anchors rotate, text stays horizontal.
-  const refData = g.marks.map(m => ({
-    a: R({ x: m.skiY, y: botY }), b: R({ x: m.skiY, y: topY }), lbl: R({ x: m.skiY + 2, y: topY + 3 }), label: m.label,
-  }));
+  // Contact labels: placed BEYOND the far end of each reference line (in the clear margin) and
+  // anchored to grow away from the geometry, so no shape vector runs through the text.
+  const refGap = fL * 0.8;
+  const refData = g.marks.map(m => {
+    const a = R({ x: m.skiY, y: botY }), b = R({ x: m.skiY, y: topY });
+    // b is the base-band end of the line. In vertical it's the left end (label grows left);
+    // in horizontal it's the top end (label sits above, growing right).
+    const lbl = O === "vertical"
+      ? { x: b.x - refGap, y: b.y, anchor: 'end' }
+      : { x: b.x, y: b.y + refGap + fL, anchor: 'start' };
+    return { a, b, lbl, label: m.label };
+  });
 
-  // View labels placed directly in FINAL space (no R) so they never collapse onto one line.
-  // Horizontal: full descriptions above each stacked band. Vertical: short identifiers at the tip
-  // end of each side-by-side strip (details live in the table).
+  // View labels: short identifiers (BASE / CORE / CORE SIDE) in BOTH orientations, placed above each
+  // band/strip in the clear margin. Short text never reaches the first reference line. Full spec
+  // detail lives in the measurements table.
   const bandsV = [
-    { full: baseLbl, short: "BASE", cy: baseYoff, half: halfBaseW },
-    { full: `CORE: outline (inset ${g.coreInset}mm/side)`, short: "CORE", cy: coreYoff, half: halfCoreW },
-    { full: "CORE SIDE: thickness taper (flat bottom)", short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
+    { short: "BASE", cy: baseYoff, half: halfBaseW },
+    { short: "CORE", cy: coreYoff, half: halfCoreW },
+    { short: "CORE SIDE", cy: sideYoff + maxThick / 2, half: maxThick / 2 },
   ];
   const lblData = bandsV.map(b => O === "horizontal"
-    ? { x: 0, y: b.cy + b.half + fL * 1.4, t: b.full }
+    ? { x: 0, y: b.cy + b.half + fL * 1.4, t: b.short }
     : { x: -(b.cy + b.half), y: L + fL * 1.6, t: b.short });
 
-  // Bounds over all geometry + anchors + label anchors + label text extents.
-  const lblExtents = lblData.map(l => ({ x: l.x + l.t.length * charW, y: l.y }));
-  const refLblExtents = refData.map(r => ({ x: r.lbl.x + r.label.length * charW, y: r.lbl.y }));
+  // Bounds over all geometry + anchors + label text extents.
+  const lblExtents = lblData.map(l => ({ x: l.x + hersheyWidth(l.t, fL * 1.1), y: l.y - fL }));
+  const refLblExtents = refData.flatMap(r => {
+    const w = hersheyWidth(r.label, fL);
+    const x0 = r.lbl.anchor === 'end' ? r.lbl.x - w : r.lbl.x;
+    return [{ x: x0, y: r.lbl.y }, { x: x0 + w, y: r.lbl.y - fL }];
+  });
   const allPts = [...baseLoop, ...(baseEdge || []), ...coreLoop, ...sideLoop,
-    ...refData.flatMap(r => [r.a, r.b, r.lbl]), ...refLblExtents, ...lblData.map(l => ({ x: l.x, y: l.y })), ...lblExtents];
+    ...refData.flatMap(r => [r.a, r.b]), ...refLblExtents, ...lblData.map(l => ({ x: l.x, y: l.y })), ...lblExtents];
   const gMinX = Math.min(...allPts.map(p => p.x)), gMaxX = Math.max(...allPts.map(p => p.x));
   const gMinY = Math.min(...allPts.map(p => p.y)), gMaxY = Math.max(...allPts.map(p => p.y));
   const geomW = gMaxX - gMinX, geomH = gMaxY - gMinY;
   const sx = x => (x - gMinX + pad);
   const sy = y => (gMaxY - y + pad);
 
-  // Table sits to the right of everything (including contact labels), so nothing overlaps it.
+  // Table sits to the right of everything, so nothing overlaps it.
   const tblGap = fL;
   const tblX = pad + geomW + tblGap;
   const tblTopY = pad + 6;
@@ -2034,7 +2084,7 @@ function exportCombinedSVG(ski){
 
   const refLines = refData.map(r =>
     `<line x1="${sx(r.a.x).toFixed(2)}" y1="${sy(r.a.y).toFixed(2)}" x2="${sx(r.b.x).toFixed(2)}" y2="${sy(r.b.y).toFixed(2)}" stroke="#aa0000" stroke-width="${(fL*0.06).toFixed(2)}" stroke-dasharray="4,3"/>
-    ${hersheyPath(r.label, sx(r.lbl.x), sy(r.lbl.y), fL, {color:'#aa0000'})}`
+    ${hersheyPath(r.label, sx(r.lbl.x), sy(r.lbl.y), fL, {color:'#aa0000', anchor: r.lbl.anchor})}`
   ).join('\n    ');
 
   const labels = lblData.map(l =>
