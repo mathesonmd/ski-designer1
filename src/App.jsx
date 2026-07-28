@@ -1587,6 +1587,57 @@ ${body}
 // Top-down outline of the wood core, narrowed by coreInset on each side for sidewall comp.
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
+// 3D wood core as a binary STL: flat bottom (Z=0) with the top surface following the core thickness
+// taper from the Core Side view, held constant across the width at each length station. Length is
+// along X, width along Y, thickness up Z, centered on origin with the flat face on Z=0 — so it drops
+// straight into Vectric Aspire (import as millimetres) as a 3D model you can rough and finish on the
+// top, no vector-to-CAD modeling first. Non-V-cut cores only; a V-cut is a planform trim you'd apply
+// separately.
+function exportCoreSTL(ski) {
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
+  const L = ski.length, N = 240;
+  const hwAt = (pos) => Math.max(1.0, getWidthAtPos(ski, pos) / 2 - coreInset);
+  const tAt = (pos) => Math.max(0.3, getCoreThickAt(ski.coreProfile, pos));
+  const st = [];
+  for (let i = 0; i <= N; i++) { const pos = i / N; st.push({ x: pos * L - L / 2, hw: hwAt(pos), t: tAt(pos) }); }
+
+  const tris = [];
+  const nrm = (a, b, c) => {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1;
+    return [nx / m, ny / m, nz / m];
+  };
+  // Add a triangle, flipping its winding if needed so the facet normal points along `dir` (outward).
+  const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
+  const quad = (a, b, c, d, dir) => { tri(a, b, c, dir); tri(a, c, d, dir); };
+
+  for (let i = 0; i < N; i++) {
+    const s0 = st[i], s1 = st[i + 1];
+    const BL0 = [s0.x, -s0.hw, 0], BR0 = [s0.x, s0.hw, 0], TL0 = [s0.x, -s0.hw, s0.t], TR0 = [s0.x, s0.hw, s0.t];
+    const BL1 = [s1.x, -s1.hw, 0], BR1 = [s1.x, s1.hw, 0], TL1 = [s1.x, -s1.hw, s1.t], TR1 = [s1.x, s1.hw, s1.t];
+    quad(TL0, TR0, TR1, TL1, [0, 0, 1]);    // top (profiled)
+    quad(BL0, BR0, BR1, BL1, [0, 0, -1]);   // bottom (flat)
+    quad(BL0, TL0, TL1, BL1, [0, -1, 0]);   // left sidewall
+    quad(BR0, TR0, TR1, BR1, [0, 1, 0]);    // right sidewall
+  }
+  const cap = (s, dir) => { const BL = [s.x, -s.hw, 0], BR = [s.x, s.hw, 0], TL = [s.x, -s.hw, s.t], TR = [s.x, s.hw, s.t]; quad(BL, BR, TR, TL, dir); };
+  cap(st[0], [-1, 0, 0]);   // tail end
+  cap(st[N], [1, 0, 0]);    // tip end
+
+  const n = tris.length;
+  const buf = new ArrayBuffer(84 + n * 50);
+  const dv = new DataView(buf);
+  const hdr = `Black Chapel Studios core ${ski.length}mm (mm)`;
+  for (let i = 0; i < Math.min(hdr.length, 79); i++) dv.setUint8(i, hdr.charCodeAt(i) & 0xff);
+  let off = 80; dv.setUint32(off, n, true); off += 4;
+  for (const t of tris) {
+    dv.setFloat32(off, t.n[0], true); dv.setFloat32(off + 4, t.n[1], true); dv.setFloat32(off + 8, t.n[2], true); off += 12;
+    for (const v of t.v) { dv.setFloat32(off, v[0], true); dv.setFloat32(off + 4, v[1], true); dv.setFloat32(off + 8, v[2], true); off += 12; }
+    dv.setUint16(off, 0, true); off += 2;
+  }
+  downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.stl`, "model/stl");
+}
+
 function exportCorePlanDXF(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
@@ -6067,6 +6118,11 @@ export default function App() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideSVG)} style={expBtn}>Core Side SVG</button>
+          </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core 3D — flat-bottomed solid for CAM</div>
+          <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={{ ...expBtn, width: "100%", marginBottom: 4 }}>Core STL (3D)</button>
+          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Flat bottom, top follows the core-side taper. Import into Aspire/CAM as <span style={{ color: C.heading }}>millimetres</span> to rough &amp; finish the core \u2014 no CAD modeling needed.
           </div>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Combined — all views aligned for lofting</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
