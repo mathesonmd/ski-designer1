@@ -4790,6 +4790,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       </div>
       <div style={{ padding: "8px 16px", borderTop: "1px solid #37322c", color: "#6f685f", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
         Drag to rotate · scroll to zoom · topsheet is mapped onto the top surface with rocker &amp; camber
+<<<<<<< HEAD
       </div>
     </div>
   );
@@ -5004,6 +5005,8 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
         <div style={{ padding: "10px 18px", borderTop: `1px solid ${C.panelBorder}`, color: C.labelDim, fontSize: 9.5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
           {status === "ok" ? `${list.length} of ${skis.length} skis \u00b7 ` : ""}Reference specs are approximate \u2014 verify against manufacturer sources. Not affiliated with any manufacturer.
         </div>
+=======
+>>>>>>> 4393fb48f58f1488b30aa1e3c3c08dd44e2935e3
       </div>
     </div>
   );
@@ -5062,6 +5065,7 @@ export default function App() {
   const topsheetFileRef = useRef(null);
   const [show3D, setShow3D] = useState(false);
   const [pairView, setPairView] = useState(false);
+<<<<<<< HEAD
   // Ski reference database (browse industry shapes → load dimensions).
   const [showDb, setShowDb] = useState(false);
   const [dbMsg, setDbMsg] = useState(null);
@@ -5077,6 +5081,8 @@ export default function App() {
     setRefGhost({ ...DEFAULT_SKI, length: s.length * 10, tipWidth: s.tip, waistWidth: s.waist, tailWidth: s.tail, _label: `${s.brand} ${s.model} ${s.length}cm` });
     setShowDb(false);
   }, []);
+=======
+>>>>>>> 4393fb48f58f1488b30aa1e3c3c08dd44e2935e3
   // A snowboard is a single board, not a pair — keep pair view off (and its toggles hidden) in that mode.
   useEffect(() => { if (ski.mode === "snowboard" && pairView) setPairView(false); }, [ski.mode, pairView]);
   const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
@@ -5801,6 +5807,7 @@ export default function App() {
         </div>
 
         {groupHeader("1 · SET UP", "Start a design or open a saved one, and choose how to view it.")}
+<<<<<<< HEAD
         <button onClick={() => setShowDb(true)} style={{
           width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "10px 12px",
           borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
@@ -5813,6 +5820,8 @@ export default function App() {
             <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
           </div>
         )}
+=======
+>>>>>>> 4393fb48f58f1488b30aa1e3c3c08dd44e2935e3
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -6501,7 +6510,11 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
+<<<<<<< HEAD
             <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} refGhost={refGhost} />
+=======
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} />
+>>>>>>> 4393fb48f58f1488b30aa1e3c3c08dd44e2935e3
             {viewLabelChip("Plan")}
           </div>
         )}
@@ -6532,12 +6545,15 @@ export default function App() {
         trigger={feedbackTrigger}
       />
       {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
+<<<<<<< HEAD
       {showDb && <SkiDatabaseModal onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
       {dbMsg && (
         <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "12px 18px", borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", maxWidth: "92vw", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
           {dbMsg}
         </div>
       )}
+=======
+>>>>>>> 4393fb48f58f1488b30aa1e3c3c08dd44e2935e3
     </div>
   );
 }
