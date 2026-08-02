@@ -27,7 +27,7 @@ const C = {
   handle:       "#c8935a",  // brass
   handleLine:   "rgba(200,147,90,0.55)",
   label:        "#9b9388",  // bone-dim
-  labelDim:     "#6f685f",
+  labelDim:     "#928a7d",  // lighter dim so small captions stay readable
   value:        "#ede6d8",  // bone
   heading:      "#c8935a",  // brass
   dim:          "rgba(237,230,216,0.35)",
@@ -1587,6 +1587,67 @@ ${body}
 // Top-down outline of the wood core, narrowed by coreInset on each side for sidewall comp.
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
+// 3D wood core as a binary STL: flat bottom (Z=0) with the top surface following the core thickness
+// taper from the Core Side view, held constant across the width at each length station. Includes the
+// core inset (narrower than the ski by coreInset per side) and any tip/tail V-cuts (the core tapers to
+// the V apex and stops). Length along X, width along Y, thickness up Z, centered with the flat face on
+// Z=0 — drops into CAM (import as millimetres) as a solid to rough & finish the core top.
+function exportCoreSTL(ski) {
+  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
+  const L = ski.length, N = 300;
+  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const tipExt = ski.vcutTipExt || 0, tailExt = ski.vcutTailExt || 0;
+  const hwCore = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+  const tAt = (xmm) => Math.max(0.3, getCoreThickAt(ski.coreProfile, xmm / L));
+  // Half-width, tapering linearly to the apex across each V-cut region (core body unchanged).
+  const hwV = (xmm) => {
+    if (vTail && xmm < tailContactX) { const a = tailContactX - tailExt; return (tailExt > 0 && xmm > a) ? hwCore(tailContactX) * (xmm - a) / tailExt : 0; }
+    if (vTip && xmm > tipContactX) { const a = tipContactX + tipExt; return (tipExt > 0 && xmm < a) ? hwCore(tipContactX) * (a - xmm) / tipExt : 0; }
+    return hwCore(xmm);
+  };
+  const xMin = vTail ? tailContactX - tailExt : 0;
+  const xMax = vTip ? tipContactX + tipExt : L;
+  const st = [];
+  for (let i = 0; i <= N; i++) { const xmm = xMin + (xMax - xMin) * (i / N); st.push({ x: xmm - L / 2, hw: Math.max(0.4, hwV(xmm)), t: tAt(xmm) }); }
+
+  const tris = [];
+  const nrm = (a, b, c) => {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1;
+    return [nx / m, ny / m, nz / m];
+  };
+  // Add a triangle, flipping its winding if needed so the facet normal points along `dir` (outward).
+  const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
+  const quad = (a, b, c, d, dir) => { tri(a, b, c, dir); tri(a, c, d, dir); };
+
+  for (let i = 0; i < N; i++) {
+    const s0 = st[i], s1 = st[i + 1];
+    const BL0 = [s0.x, -s0.hw, 0], BR0 = [s0.x, s0.hw, 0], TL0 = [s0.x, -s0.hw, s0.t], TR0 = [s0.x, s0.hw, s0.t];
+    const BL1 = [s1.x, -s1.hw, 0], BR1 = [s1.x, s1.hw, 0], TL1 = [s1.x, -s1.hw, s1.t], TR1 = [s1.x, s1.hw, s1.t];
+    quad(TL0, TR0, TR1, TL1, [0, 0, 1]);    // top (profiled)
+    quad(BL0, BR0, BR1, BL1, [0, 0, -1]);   // bottom (flat)
+    quad(BL0, TL0, TL1, BL1, [0, -1, 0]);   // left sidewall
+    quad(BR0, TR0, TR1, BR1, [0, 1, 0]);    // right sidewall
+  }
+  const cap = (s, dir) => { const BL = [s.x, -s.hw, 0], BR = [s.x, s.hw, 0], TL = [s.x, -s.hw, s.t], TR = [s.x, s.hw, s.t]; quad(BL, BR, TR, TL, dir); };
+  cap(st[0], [-1, 0, 0]);   // tail end
+  cap(st[N], [1, 0, 0]);    // tip end
+
+  const n = tris.length;
+  const buf = new ArrayBuffer(84 + n * 50);
+  const dv = new DataView(buf);
+  const hdr = `Black Chapel Studios core ${ski.length}mm (mm)`;
+  for (let i = 0; i < Math.min(hdr.length, 79); i++) dv.setUint8(i, hdr.charCodeAt(i) & 0xff);
+  let off = 80; dv.setUint32(off, n, true); off += 4;
+  for (const t of tris) {
+    dv.setFloat32(off, t.n[0], true); dv.setFloat32(off + 4, t.n[1], true); dv.setFloat32(off + 8, t.n[2], true); off += 12;
+    for (const v of t.v) { dv.setFloat32(off, v[0], true); dv.setFloat32(off + 4, v[1], true); dv.setFloat32(off + 8, v[2], true); off += 12; }
+    dv.setUint16(off, 0, true); off += 2;
+  }
+  downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.stl`, "model/stl");
+}
+
 function exportCorePlanDXF(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
@@ -2223,19 +2284,30 @@ function offsetPolygonOutward(ptsIn, dist) {
 // BLEED line offset outward, corner crop marks, centerline + length/waist dimensions, and (if art is
 // supplied) the artwork embedded and clipped to the bleed so a print shop gets a correctly-sized,
 // full-bleed file. SVG <text> is fine here — print software (Illustrator/Corel/RIP) renders it.
-function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
+function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8, pair = false) {
   const outline = getFullOutlinePoints(ski);
-  const T = p => ({ x: p.y, y: p.x });                 // length horizontal
-  const cut = outline.map(T);
-  const bleed = offsetPolygonOutward(outline, bleedMM).map(T);
+  const bleedOutline = offsetPolygonOutward(outline, bleedMM);
+  const bleedMaxLat = Math.max(1, ...bleedOutline.map(p => Math.abs(p.x)));
+  const gap = 24;                                     // mm between the two skis
+  const bandH = 2 * bleedMaxLat;
+  const yA = bleedMaxLat;                              // ski A lateral center
+  const yB = yA + bandH + gap;                         // ski B lateral center (below A)
+  const TA = p => ({ x: p.y, y: yA + p.x });           // length horizontal
+  const TB = p => ({ x: p.y, y: yB - p.x });           // mirror partner
+  const cutA = outline.map(TA), bleedA = bleedOutline.map(TA);
+  const cutB = outline.map(TB), bleedB = bleedOutline.map(TB);
   const pathOf = pts => pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ") + " Z";
+
+  // Combined bounding box (both bleeds in pair mode) — the art is fit to THIS so one image spans the set.
+  const allBleed = pair ? bleedA.concat(bleedB) : bleedA;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  bleed.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
+  allBleed.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
   const margin = 16;
   const vbX = minX - margin, vbY = minY - margin, vbW = (maxX - minX) + margin * 2, vbH = (maxY - minY) + margin * 2;
 
-  // Optional embedded artwork, fit to the BLEED bounding box (cover/contain/stretch + scale/offset/rot).
-  let imgLayer = "";
+  // Artwork placement (identical math to the on-screen preview, fit to the combined box). One <image>
+  // geometry, clipped separately to each ski's bleed, so the picture reads continuously across the pair.
+  let imgSVG = "";
   if (topsheet && topsheet.src && imgDims && imgDims.w && imgDims.h) {
     const bw = maxX - minX, bh = maxY - minY, arImg = imgDims.w / imgDims.h, arBox = bw / bh;
     let dw, dh;
@@ -2245,32 +2317,35 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
     const cx = (minX + maxX) / 2 + (topsheet.offsetX || 0) * bw;
     const cy = (minY + maxY) / 2 + (topsheet.offsetY || 0) * bh;
     const rot = topsheet.rotation || 0;
-    imgLayer = `<g clip-path="url(#bleedclip)"><image href="${topsheet.src}" x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="none" opacity="${topsheet.opacity != null ? topsheet.opacity : 1}" transform="rotate(${rot} ${cx.toFixed(2)} ${cy.toFixed(2)})"/></g>`;
+    const op = topsheet.opacity != null ? topsheet.opacity : 1;
+    const image = `<image href="${topsheet.src}" x="${(cx - dw / 2).toFixed(2)}" y="${(cy - dh / 2).toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="none" opacity="${op}" transform="rotate(${rot} ${cx.toFixed(2)} ${cy.toFixed(2)})"/>`;
+    imgSVG = `<g clip-path="url(#bleedclipA)">${image}</g>` + (pair ? `<g clip-path="url(#bleedclipB)">${image}</g>` : "");
   }
 
-  // Corner crop marks around the bleed bbox.
   const ml = 10;
-  const crop = [];
   const corner = (x, y, sx, sy) => `<path d="M${(x + sx * 2).toFixed(1)},${y.toFixed(1)} L${(x + sx * (2 + ml)).toFixed(1)},${y.toFixed(1)} M${x.toFixed(1)},${(y + sy * 2).toFixed(1)} L${x.toFixed(1)},${(y + sy * (2 + ml)).toFixed(1)}" stroke="#000" stroke-width="0.3" fill="none"/>`;
-  crop.push(corner(minX, minY, -1, -1), corner(maxX, minY, 1, -1), corner(minX, maxY, -1, 1), corner(maxX, maxY, 1, 1));
+  const crop = [corner(minX, minY, -1, -1), corner(maxX, minY, 1, -1), corner(minX, maxY, -1, 1), corner(maxX, maxY, 1, 1)].join("");
 
-  const cenY = (minY + maxY) / 2;
   const dims = `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth} \u00B7 ${ski.length}mm`;
   const fs = Math.max(6, ski.length / 220);
+  const clips = `<clipPath id="bleedclipA"><path d="${pathOf(bleedA)}"/></clipPath>` + (pair ? `<clipPath id="bleedclipB"><path d="${pathOf(bleedB)}"/></clipPath>` : "");
+  const cutPaths = `<path d="${pathOf(cutA)}" fill="none" stroke="#000" stroke-width="0.5"/>` + (pair ? `<path d="${pathOf(cutB)}" fill="none" stroke="#000" stroke-width="0.5"/>` : "");
+  const bleedPaths = `<path d="${pathOf(bleedA)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` + (pair ? `<path d="${pathOf(bleedB)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` : "");
+  const centerlines = `<line x1="${minX.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yA.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` + (pair ? `<line x1="${minX.toFixed(1)}" y1="${yB.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` : "");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vbW.toFixed(1)}mm" height="${vbH.toFixed(1)}mm" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}">
-  <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm</title>
+  <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm${pair ? " (pair)" : ""}</title>
   <desc>1:1 mm scale. Solid = cut line (ski outline). Dashed = ${bleedMM}mm bleed. Print full-bleed, trim on the solid line.</desc>
-  <defs><clipPath id="bleedclip"><path d="${pathOf(bleed)}"/></clipPath></defs>
-  <g id="artwork">${imgLayer}</g>
-  <g id="bleed"><path d="${pathOf(bleed)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/></g>
-  <g id="cut"><path d="${pathOf(cut)}" fill="none" stroke="#000" stroke-width="0.5"/></g>
-  <g id="centerline"><line x1="${minX.toFixed(1)}" y1="${cenY.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${cenY.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/></g>
-  <g id="cropmarks">${crop.join("")}</g>
+  <defs>${clips}</defs>
+  <g id="artwork">${imgSVG}</g>
+  <g id="bleed">${bleedPaths}</g>
+  <g id="cut">${cutPaths}</g>
+  <g id="centerline">${centerlines}</g>
+  <g id="cropmarks">${crop}</g>
   <g id="labels" fill="#000" font-family="monospace">
-    <text x="${(minX).toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm</text>
-    <text x="${(minX).toFixed(1)}" y="${(maxY + fs + 5).toFixed(1)}" font-size="${fs.toFixed(1)}">${(ski.designName || "Topsheet")} \u00B7 ${dims}</text>
+    <text x="${minX.toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm${pair ? " \u00B7 PAIR" : ""}</text>
+    <text x="${minX.toFixed(1)}" y="${(maxY + fs + 5).toFixed(1)}" font-size="${fs.toFixed(1)}">${(ski.designName || "Topsheet")} \u00B7 ${dims}</text>
   </g>
 </svg>`;
 }
@@ -2285,7 +2360,7 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8) {
 // Builds plain vertex data for a 3D ski mesh (top surface = topsheet-mapped, bottom = base, walls =
 // edge). Kept dependency-free and pure so it can be unit-tested; the 3D modal uploads these arrays
 // into THREE BufferGeometries. Units are scaled by S (mm -> ~cm) for numerical comfort.
-function buildSki3DGeometry(ski) {
+function buildSki3DGeometry(ski, pair) {
   const L = ski.length, TL = ski.tipLength, TAIL = ski.tailLength, N = 160, S = 0.01;
   const halfW = (pos) => {
     const xmm = pos * L;
@@ -2301,25 +2376,37 @@ function buildSki3DGeometry(ski) {
     const hw = halfW(pos) * S, bz = sideProfileHeightAt(ski, xmm) * S, tz = bz + thick(pos) * S;
     st.push({ pos, y, hw, bz, tz });
   }
-  const topPos = [], topUV = [], topIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; topPos.push(-s.hw, s.tz, s.y, s.hw, s.tz, s.y); topUV.push(s.pos, 0, s.pos, 1); }
-  for (let i = 0; i < N; i++) { const a = i * 2; topIdx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
-  const botPos = [], botIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; botPos.push(-s.hw, s.bz, s.y, s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = i * 2; botIdx.push(a, a + 3, a + 1, a, a + 2, a + 3); }
-  const wallPos = [], wallIdx = [];
-  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(-s.hw, s.tz, s.y, -s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = i * 2; wallIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-  const lc = (N + 1) * 2;
-  for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(s.hw, s.tz, s.y, s.hw, s.bz, s.y); }
-  for (let i = 0; i < N; i++) { const a = lc + i * 2; wallIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-  const len = L * S, maxHW = Math.max(...st.map(s => s.hw));
-  return { topPos, topUV, topIdx, botPos, botIdx, wallPos, wallIdx, len, maxHW };
+  const maxHW = Math.max(0.001, ...st.map(s => s.hw));
+  const gap = maxHW * 0.4;
+  const cOff = pair ? (maxHW + gap / 2) : 0;
+  // The topsheet UV spans the WHOLE pair across its combined width, so one image flows continuously
+  // over both skis (not doubled/mirrored). u = along length, v = lateral position across the pair.
+  const combMin = -(cOff + maxHW), combSpan = 2 * (cOff + maxHW) || 1;
+  const topPos = [], topUV = [], topIdx = [], botPos = [], botIdx = [], wallPos = [], wallIdx = [];
+  // sign: +1 normal, -1 mirrored (flips lateral so an asymmetric tip mirrors). off: lateral world offset.
+  const emit = (sign, off) => {
+    const xL = (s) => off + sign * (-s.hw), xR = (s) => off + sign * (s.hw);
+    let b = topPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; const l = xL(s), r = xR(s); topPos.push(l, s.tz, s.y, r, s.tz, s.y); topUV.push(s.pos, (l - combMin) / combSpan, s.pos, (r - combMin) / combSpan); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; topIdx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    b = botPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; botPos.push(xL(s), s.bz, s.y, xR(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; botIdx.push(a, a + 3, a + 1, a, a + 2, a + 3); }
+    b = wallPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(xL(s), s.tz, s.y, xL(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; wallIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    b = wallPos.length / 3;
+    for (let i = 0; i <= N; i++) { const s = st[i]; wallPos.push(xR(s), s.tz, s.y, xR(s), s.bz, s.y); }
+    for (let i = 0; i < N; i++) { const a = b + i * 2; wallIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  };
+  if (pair) { emit(1, -cOff); emit(-1, cOff); } else { emit(1, 0); }
+  const len = L * S;
+  return { topPos, topUV, topIdx, botPos, botIdx, wallPos, wallIdx, len, maxHW: cOff + maxHW };
 }
 
 // Builds a branded one-page "build card" spec sheet (fixed 1400x900 SVG) summarizing the design:
 // silhouette + all key numbers + layup + flex + estimated core mass, in the Black Chapel palette.
-function buildSpecSheetSVG(ski, derived, flex, bom) {
+function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const W = 1400, H = 900, pad = 50;
   const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
   const rating = flexRating(flex.underfootK);
@@ -2363,11 +2450,24 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
   const dateStr = new Date().toISOString().slice(0, 10);
   const typeLabel = isBoard ? "SNOWBOARD SPEC SHEET" : "SKI SPEC SHEET";
 
+  // White-label header: builder's brand name (default Black Chapel Studios) + optional uploaded logo
+  // placed top-right. A small tool-attribution credit sits in the footer.
+  const brandName = (brand && brand.name && brand.name.trim()) ? brand.name.trim() : "BLACK CHAPEL STUDIOS";
+  let logoSVG = "";
+  if (brand && brand.logoSrc && brand.logoDims && brand.logoDims.w && brand.logoDims.h) {
+    const boxH = 118, boxW = 470;                       // generous logo box, top-right of header
+    let lw = boxH * (brand.logoDims.w / brand.logoDims.h), lh = boxH;
+    if (lw > boxW) { lw = boxW; lh = boxW * (brand.logoDims.h / brand.logoDims.w); }
+    const lx = W - pad - lw, ly = 100 - lh / 2;         // vertically centered in the header band
+    logoSVG = `<image href="${brand.logoSrc}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" width="${lw.toFixed(1)}" height="${lh.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="${bg}"/>
   <rect x="16" y="16" width="${W - 32}" height="${H - 32}" fill="none" stroke="${border}" stroke-width="1.5"/>
-  <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">BLACK CHAPEL STUDIOS</text>
+  <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">${esc(brandName)}</text>
+  ${logoSVG}
   <text x="${pad}" y="128" font-size="46" fill="${bone}" font-family="monospace" font-weight="bold">${esc(ski.designName || "Untitled Design")}</text>
   <text x="${pad}" y="160" font-size="18" fill="${torch}" font-family="monospace" letter-spacing="3">${typeLabel}</text>
   <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
@@ -2378,12 +2478,12 @@ function buildSpecSheetSVG(ski, derived, flex, bom) {
   </g>
   <g id="specs">${rowsSvg}</g>
   <line x1="${pad}" y1="${H - 96}" x2="${W - pad}" y2="${H - 96}" stroke="${border}" stroke-width="1"/>
-  <text x="${pad}" y="${H - 56}" font-size="30" fill="${brass}" font-family="monospace" letter-spacing="6" font-weight="bold">WORSHIP THE WORK</text>
-  <text x="${W - pad}" y="${H - 56}" font-size="18" fill="${dim}" font-family="monospace" text-anchor="end">${dateStr}</text>
+  <text x="${pad}" y="${H - 54}" font-size="17" fill="${dim}" font-family="monospace" letter-spacing="1">Generated with Black Chapel Studios Designer</text>
+  <text x="${W - pad}" y="${H - 54}" font-size="17" fill="${dim}" font-family="monospace" text-anchor="end">designer.blackchapelstudios.com \u00B7 ${dateStr}</text>
 </svg>`;
 }
 
-function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet, pairView }) {
+function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet, pairView, refGhost }) {
   const canvasRef = useRef(null);
   // Topsheet artwork: keep a decoded HTMLImageElement in a ref, and bump a counter when it finishes
   // loading so the drawing effect re-runs and paints it.
@@ -2448,9 +2548,13 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   // In vertical: length axis is canvas-Y, so we fit ski.length to plotH and max width to plotW.
   // In horizontal: length axis is canvas-X, so we fit ski.length to plotW and max width to plotH.
   const skiMaxW = Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8;
+  // Pair view: fit BOTH skis (side by side across the width) so the view resizes instead of clipping.
+  const pairGapMM = 24;
+  const pairLatW = pairView ? (skiMaxW * 2 + pairGapMM) : skiMaxW;   // lateral extent to fit
+  const cOff = pairView ? (skiMaxW + pairGapMM) / 2 : 0;             // each ski's offset from plot centerline
   const mainScale = isVertical
-    ? Math.min(mainPlotH / ski.length, mainPlotW / skiMaxW)
-    : Math.min(mainPlotW / ski.length, mainPlotH / skiMaxW);
+    ? Math.min(mainPlotH / ski.length, mainPlotW / pairLatW)
+    : Math.min(mainPlotW / ski.length, mainPlotH / pairLatW);
   const mainCenterY = mainRowY + mainPadY + mainPlotH / 2;
   const mainCenterX = mainPadX + mainPlotW / 2;
   const mainOriginX = mainPadX + (mainPlotW - ski.length * mainScale) / 2;
@@ -2459,16 +2563,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   // Pivot for main-view zoom: the center of the main plot region.
   const mainPivotX = isVertical ? (mainColW / 2) : (mainOriginX + ski.length * mainScale / 2);
   const mainPivotY = isVertical ? (mainRowY + mainRowH / 2) : mainCenterY;
-  const toMainBase = (skiX, skiY) => isVertical
-    ? { x: mainCenterX + skiX * mainScale, y: mainTailY - skiY * mainScale }
-    : { x: mainOriginX + skiY * mainScale, y: mainCenterY + skiX * mainScale };
-  const toMain = (skiX, skiY) => {
-    const b = toMainBase(skiX, skiY);
+  // Lateral is expressed in "plot" coordinates (0 = plot centerline). Ski A sits at -cOff, its mirror
+  // partner at +cOff. In single-ski mode cOff=0 so this reduces to the original transform exactly.
+  const toMainLat = (latPlot, skiY) => {
+    const b = isVertical
+      ? { x: mainCenterX + latPlot * mainScale, y: mainTailY - skiY * mainScale }
+      : { x: mainOriginX + skiY * mainScale, y: mainCenterY + latPlot * mainScale };
     return {
       x: mainPivotX + (b.x - mainPivotX) * mainZoom + mainPan.x,
       y: mainPivotY + (b.y - mainPivotY) * mainZoom + mainPan.y,
     };
   };
+  const toMain = (skiX, skiY) => toMainLat(skiX - cOff, skiY);
+  const toMainPartner = (skiX, skiY) => toMainLat(cOff - skiX, skiY);
 
   // ── Zoom row / column ──────────────────────────────────────
   // Horizontal: tail on left, tip on right, side-by-side across the bottom row.
@@ -2628,17 +2735,30 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
     ctx.stroke(); ctx.setLineDash([]);
 
+    // Reference ghost outline (from the Ski Database) drawn dashed behind the design so you can shape
+    // against it. Centered on the design regardless of length difference.
+    if (refGhost) {
+      try {
+        const gpts = getFullOutlinePoints(refGhost);
+        const shift = (ski.length - (refGhost.length || ski.length)) / 2;
+        ctx.save();
+        ctx.setLineDash([7, 5]);
+        ctx.strokeStyle = "rgba(200,147,90,0.5)";
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        gpts.forEach((p, i) => { const s = toMain(p.x, p.y + shift); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+        ctx.closePath(); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      } catch (e) {}
+    }
+
     // Ski outline(s). In pair view we also draw the mirrored partner ski below, and (if art is loaded)
     // project the topsheet across BOTH skis so asymmetric tips and split graphics read as a set.
     const mapA = (p) => toMain(p.x, p.y);
-    // Partner = mirror across the ski centerline (done in ski space so zoom/pan stay correct), then
-    // shifted laterally so the two skis sit side by side. Lateral axis is screen-Y (horizontal) or
-    // screen-X (vertical).
-    let aMinX = Infinity, aMinY = Infinity, aMaxX = -Infinity, aMaxY = -Infinity;
-    right.concat(left).forEach(p => { const s = toMain(p.x, p.y); if (s.x < aMinX) aMinX = s.x; if (s.x > aMaxX) aMaxX = s.x; if (s.y < aMinY) aMinY = s.y; if (s.y > aMaxY) aMaxY = s.y; });
-    const pairGap = 14;
-    const partnerShift = (isVertical ? (aMaxX - aMinX) : (aMaxY - aMinY)) + pairGap;
-    const mapB = (p) => { const s = toMain(-p.x, p.y); return isVertical ? { x: s.x + partnerShift, y: s.y } : { x: s.x, y: s.y + partnerShift }; };
+    // Partner ski = mirror across the plot centerline (handled by toMainPartner), auto-positioned in
+    // the second band. The view already resized (via pairLatW) so both fit without dragging.
+    const mapB = (p) => toMainPartner(p.x, p.y);
     const tracePath = (mapFn) => {
       ctx.beginPath();
       right.forEach((p, i) => { const s = mapFn(p); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
@@ -3064,7 +3184,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
       tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
-      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan, topsheet, topsheetTick, pairView]);
+      tipZoom, tailZoom, tipPan, tailPan, mainZoom, mainPan, topsheet, topsheetTick, pairView, refGhost]);
 
   // ── Hit testing ──────────────────────────────────────────────
   const findCP = useCallback((mx, my) => {
@@ -3447,8 +3567,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   );
 }
 // ══════════════ PROFILE VIEW (smooth continuous rise — no level-off at tips) ══════════════
-function ProfileView({ ski, width, height }) {
+function ProfileView({ ski, setSki, width, height }) {
   const canvasRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const [dragging, setDragging] = useState(null);
+  const handlesRef = useRef([]);        // last-drawn handle screen positions + metadata
+  const dragXformRef = useRef(null);     // vertical transform frozen for the duration of a drag
   const { tipLength: TL, tailLength: TAIL, tipHeight: TH, tailHeight: TAH, camberHeight: CH, length: L } = ski;
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -3461,25 +3585,22 @@ function ProfileView({ ski, width, height }) {
     const plotW = width - padX * 2;
     const plotH = height - padTop - padBot;
     const xScale = plotW / L;
-    // Profile heights are tiny vs length, so we exaggerate Y for readability — but with a HARD CAP
-    // so the rocker never stretches into an unrealistic shape when the panel is tall. We cap both the
-    // exaggeration factor AND the resulting pixel-scale, then anchor the baseline low and let the
-    // profile occupy only the space it truly needs. This keeps the rocker looking like a rocker at
-    // any panel size (viewed alone or stacked with the other views).
-    const MAX_Y_EXAGG = 3.0;         // never exaggerate height more than 3× the true aspect
-    const maxH = Math.max(TH, TAH, CH) + 5;
-    const trueHpx = maxH * xScale;
-    const idealHpx = plotH * 0.72;   // how much height we'd LIKE the profile to use
-    let yExagg = 1.0, yScale = xScale;
-    if (trueHpx < idealHpx) {
-      // Exaggerate toward the ideal, but never beyond MAX_Y_EXAGG.
-      yExagg = Math.min(MAX_Y_EXAGG, idealHpx / trueHpx);
-      yScale = xScale * yExagg;
+    // Profile heights are tiny vs length, so we exaggerate Y for readability (capped at 3×). While a
+    // handle is being dragged we FREEZE this vertical transform so the profile doesn't rescale under
+    // the cursor mid-drag (the max-height value changing would otherwise shift the whole curve).
+    let yScale, baseY, yExagg = 1.0;
+    if (dragging && dragXformRef.current) {
+      yScale = dragXformRef.current.yScale; baseY = dragXformRef.current.baseY; yExagg = dragXformRef.current.yExagg;
+    } else {
+      const MAX_Y_EXAGG = 3.0;
+      const maxH = Math.max(TH, TAH, CH) + 5;
+      const trueHpx = maxH * xScale;
+      const idealHpx = plotH * 0.72;
+      yScale = xScale;
+      if (trueHpx < idealHpx) { yExagg = Math.min(MAX_Y_EXAGG, idealHpx / trueHpx); yScale = xScale * yExagg; }
+      const profileHpx = maxH * yScale;
+      baseY = Math.min(padTop + plotH * 0.92, padTop + profileHpx + plotH * 0.12);
     }
-    // Baseline: anchor so the (capped) profile sits comfortably; if the panel is taller than the
-    // profile needs, the extra space stays empty below rather than stretching the curve.
-    const profileHpx = maxH * yScale;
-    const baseY = Math.min(padTop + plotH * 0.92, padTop + profileHpx + plotH * 0.12);
     const toC = (xmm, ymm) => ({ x: padX + xmm * xScale, y: baseY - ymm * yScale });
 
     // Snow line
@@ -3489,8 +3610,6 @@ function ProfileView({ ski, width, height }) {
     ctx.lineTo(padX + plotW, baseY);
     ctx.stroke();
 
-    // Build the profile points via the shared side-profile function so the rocker takeoff points
-    // (linked to contacts, or independent when unlinked) are honored consistently with the exports.
     const pts = [];
     const n = 400;
     for (let i = 0; i <= n; i++) {
@@ -3527,35 +3646,71 @@ function ProfileView({ ski, width, height }) {
     ctx.stroke();
     ctx.restore();
 
-    // Height value labels
+    // ── Draggable measurement handles: tail rise, tip rise, camber peak ──
+    const tk = rockerTakeoffLens(ski);
+    const camberMidX = (tk.tail + (L - tk.tip)) / 2;   // midpoint between takeoffs (camber peak)
+    const handleDefs = [
+      { key: "tailHeight", xmm: 0, ymm: TAH, min: 5, max: 60, step: 1, align: "left" },
+      { key: "tipHeight",  xmm: L, ymm: TH,  min: 5, max: 80, step: 1, align: "right" },
+      { key: "camberHeight", xmm: camberMidX, ymm: CH, min: 0, max: 10, step: 0.5, align: "center" },
+    ];
+    const handles = handleDefs.map(h => { const s = toC(h.xmm, h.ymm); return { ...h, x: s.x, y: s.y, yScale, baseY, yExagg }; });
+    handlesRef.current = handles;
+
+    // Value labels (kept, nudged above the handle)
     ctx.fillStyle = C.heading;
     ctx.font = "bold 10px 'JetBrains Mono', monospace";
-    const drawV = (xmm, ymm, align) => {
-      const top = toC(xmm, ymm);
-      ctx.textAlign = align;
-      ctx.fillText(`${ymm}mm`, top.x + (align === "left" ? 6 : align === "right" ? -6 : 0), top.y - 6);
-    };
-    drawV(0, TAH, "left");
-    drawV(L, TH, "right");
-    if (CH > 0) {
-      const tk = rockerTakeoffLens(ski);
-      const camberMidX = (tk.tail + (L - tk.tip)) / 2;  // midpoint between takeoffs (camber peak)
-      drawV(camberMidX, CH, "center");
-    }
+    handles.forEach(h => {
+      ctx.textAlign = h.align;
+      const val = h.step < 1 ? h.ymm.toFixed(1) : Math.round(h.ymm);
+      ctx.fillText(`${val}mm`, h.x + (h.align === "left" ? 8 : h.align === "right" ? -8 : 0), h.y - 11);
+    });
+
+    // Handle dots
+    handles.forEach(h => {
+      const active = dragging === h.key || hovered === h.key;
+      ctx.beginPath(); ctx.arc(h.x, h.y, active ? 7 : 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = active ? C.controlHover : C.heading; ctx.fill();
+      ctx.strokeStyle = C.bgDeep; ctx.lineWidth = 1.5; ctx.stroke();
+    });
 
     ctx.fillStyle = C.dimText;
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";  ctx.fillText("TAIL", padX + 6, baseY - 4);
     ctx.textAlign = "right"; ctx.fillText("TIP",  padX + plotW - 6, baseY - 4);
 
-    if (yExagg > 1.05) {
-      ctx.fillStyle = C.labelDim;
-      ctx.font = "8px 'JetBrains Mono', monospace";
-      ctx.textAlign = "left";
-      ctx.fillText(`Y-scale: ${yExagg.toFixed(1)}\u00D7 exaggerated for readability`, padX + 6, height - 6);
+    ctx.fillStyle = C.labelDim;
+    ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(`drag \u25CF to set tip / tail rise & camber${yExagg > 1.05 ? `  \u00B7  Y ${yExagg.toFixed(1)}\u00D7 exaggerated` : ""}`, padX + 6, height - 6);
+  }, [ski, setSki, width, height, TL, TAIL, TH, TAH, CH, L, hovered, dragging]);
+
+  const getPos = (e) => { const r = canvasRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const hitTest = (p) => handlesRef.current.find(h => Math.hypot(p.x - h.x, p.y - h.y) <= 11);
+  const onDown = (e) => {
+    const h = hitTest(getPos(e));
+    if (h) { dragXformRef.current = { yScale: h.yScale, baseY: h.baseY, yExagg: h.yExagg }; setDragging(h.key); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} }
+  };
+  const onMove = (e) => {
+    const p = getPos(e);
+    if (dragging) {
+      const xf = dragXformRef.current; if (!xf) return;
+      const meta = handlesRef.current.find(h => h.key === dragging); if (!meta) return;
+      let ymm = (xf.baseY - p.y) / xf.yScale;
+      ymm = Math.max(meta.min, Math.min(meta.max, ymm));
+      ymm = Math.round(ymm / meta.step) * meta.step;
+      setSki(s => (s[dragging] === ymm ? s : { ...s, [dragging]: ymm }));
+    } else {
+      const h = hitTest(p);
+      setHovered(h ? h.key : null);
     }
-  }, [ski, width, height, TL, TAIL, TH, TAH, CH, L]);
-  return (<canvas ref={canvasRef} style={{ width, height, cursor: "default", display: "block" }} />);
+  };
+  const onUp = (e) => { if (dragging) { setDragging(null); dragXformRef.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {} } };
+  const cursor = dragging ? "grabbing" : hovered ? "grab" : "default";
+  return (<canvas ref={canvasRef}
+    onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+    onPointerLeave={() => { if (!dragging) setHovered(null); }}
+    style={{ width, height, cursor, display: "block", touchAction: "none" }} />);
 }
 
 // ══════════════ CORE VIEW ══════════════
@@ -4274,7 +4429,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
         <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m)</span>
         <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
-          <span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
+          <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
           {segBtn("waist", "Waist")}
           {segBtn("tiptail", "Tip/Tail")}
         </span>
@@ -4291,7 +4446,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
       />
       {derived.asymmetric && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-          <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>
+          <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>
             front / back R
           </span>
           <span style={{ color: C.contactLabel || "#f0895c", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
@@ -4300,7 +4455,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         </div>
       )}
       {derived.asymmetric && (
-        <div style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
+        <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
           Waist off-center → each side turns at a different radius (highlighted on the plan view).
         </div>
       )}
@@ -4407,7 +4562,7 @@ function RockerProfileField({ ski, setSki, C }) {
 
   const cellStyle = { flex: 1, minWidth: 0 };
   const inputStyle = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", textAlign: "center" };
-  const subLabel = { color: C.labelDim, fontSize: 9, textAlign: "center", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" };
+  const subLabel = { color: C.labelDim, fontSize: 10.5, textAlign: "center", marginTop: 2, fontFamily: "'JetBrains Mono', monospace" };
 
   return (
     <div style={{ marginBottom: 7 }}>
@@ -4445,7 +4600,7 @@ function RockerProfileField({ ski, setSki, C }) {
           <div style={subLabel}>TAIL</div>
         </div>
       </div>
-      <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+      <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
         {linked
           ? "Linked: % sets tip/tail length (moves contacts + radius)."
           : "Unlinked: % sets rocker takeoff only. Contacts + radius stay fixed."}
@@ -4528,8 +4683,8 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const dir2 = new THREE.DirectionalLight(0xffffff, 0.35);
       dir2.position.set(-8, 6, -6); scene.add(dir2);
 
-      // Geometry.
-      const g = buildSki3DGeometry(ski);
+      // Geometry (one mesh set; in pair mode it already contains both skis with continuous UVs).
+      const g = buildSki3DGeometry(ski, pairView);
       const grp = new THREE.Group();
       const mkGeom = (pos, idx, uv) => {
         const geo = new THREE.BufferGeometry();
@@ -4559,19 +4714,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       grp.add(new THREE.Mesh(topGeo, topMat));
       grp.add(new THREE.Mesh(botGeo, botMat));
       grp.add(new THREE.Mesh(wallGeo, wallMat));
-      const off = pairView ? (g.maxHW + 0.18) : 0;
-      grp.position.x = off;
       scene.add(grp);
-      if (pairView) {
-        // Mirror partner: same geometries/materials, flipped across the long axis and offset.
-        const grpB = new THREE.Group();
-        grpB.add(new THREE.Mesh(topGeo, topMat));
-        grpB.add(new THREE.Mesh(botGeo, botMat));
-        grpB.add(new THREE.Mesh(wallGeo, wallMat));
-        grpB.position.x = -off;
-        grpB.scale.x = -1;
-        scene.add(grpB);
-      }
       cleanupFns.push(() => { [topGeo, botGeo, wallGeo].forEach(x => x.dispose()); [topMat, botMat, wallMat].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
 
       // Orbit (custom, no OrbitControls dep).
@@ -4632,9 +4775,9 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #37322c" }}>
         <div style={{ color: "#c8935a", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
-          3D PREVIEW \u00B7 {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " \u00B7 topsheet mapped" : ""}
+          3D PREVIEW · {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " · topsheet mapped" : ""}
         </div>
-        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close \u2715</button>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close ✕</button>
       </div>
       <div ref={mountRef} style={{ flex: 1, position: "relative", cursor: "grab", minHeight: 0 }}>
         {status !== "ok" && (
@@ -4646,7 +4789,221 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
         )}
       </div>
       <div style={{ padding: "8px 16px", borderTop: "1px solid #37322c", color: "#6f685f", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
-        Drag to rotate \u00B7 scroll to zoom \u00B7 topsheet is mapped onto the top surface with rocker &amp; camber
+        Drag to rotate · scroll to zoom · topsheet is mapped onto the top surface with rocker &amp; camber
+      </div>
+    </div>
+  );
+}
+
+// ══════════════ SKI REFERENCE DATABASE ══════════════
+// Loads a static /ski-database.json (curated industry reference specs) once, cached. No backend —
+// edit the JSON to grow the database without touching this file.
+let _skiDbCache = null, _skiDbPromise = null;
+function loadSkiDb() {
+  if (_skiDbCache) return Promise.resolve(_skiDbCache);
+  if (_skiDbPromise) return _skiDbPromise;
+  _skiDbPromise = fetch("/ski-database.json")
+    .then(r => { if (!r.ok) throw new Error("not found"); return r.json(); })
+    .then(d => { _skiDbCache = d; return d; })
+    .catch(e => { _skiDbPromise = null; throw e; });
+  return _skiDbPromise;
+}
+
+const WAIST_BANDS = [
+  { key: "all", label: "All widths", test: () => true },
+  { key: "carve", label: "\u2039 85", test: w => w < 85 },
+  { key: "am", label: "85\u201399", test: w => w >= 85 && w < 100 },
+  { key: "free", label: "100\u2013109", test: w => w >= 100 && w < 110 },
+  { key: "pow", label: "110 +", test: w => w >= 110 },
+];
+
+const CAT_COLORS = { "Carving": "#6ba3d6", "All-Mountain": "#c8935a", "Freeride": "#e8552a", "Powder": "#8fd3e0", "Park": "#8bc48a", "Touring": "#b08fd0" };
+
+// Industry explorer: scatter of waist (x) vs sidecut radius (y) at each ski's mid length, colored by
+// category. Tap a dot to select, then load its dimensions or drop it in as a ghost overlay.
+function ExploreChart({ list, onApply, onGhost }) {
+  const canvasRef = useRef(null);
+  const wrapRef = useRef(null);
+  const ptsRef = useRef([]);
+  const [sel, setSel] = useState(null);
+  const [size, setSize] = useState({ w: 600, h: 340 });
+  const midR = (s) => s.lengths[Math.floor(s.lengths.length / 2)];
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: Math.max(260, Math.min(420, el.clientWidth * 0.6)) }));
+    ro.observe(el); return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); const dpr = window.devicePixelRatio || 1;
+    const W = size.w, H = size.h;
+    canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    if (!list.length) { ctx.fillStyle = C.labelDim; ctx.font = "12px 'JetBrains Mono', monospace"; ctx.textAlign = "center"; ctx.fillText("No skis match those filters.", W / 2, H / 2); ptsRef.current = []; return; }
+    const padL = 46, padR = 14, padT = 14, padB = 34;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const waists = list.map(s => s.waist), rads = list.map(s => midR(s).r);
+    const wMin = Math.min(...waists) - 3, wMax = Math.max(...waists) + 3;
+    const rMin = Math.max(0, Math.min(...rads) - 2), rMax = Math.max(...rads) + 2;
+    const xOf = (w) => padL + ((w - wMin) / (wMax - wMin || 1)) * plotW;
+    const yOf = (r) => padT + plotH - ((r - rMin) / (rMax - rMin || 1)) * plotH;
+    ctx.strokeStyle = C.inputBorder; ctx.lineWidth = 1; ctx.fillStyle = C.labelDim; ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let w = Math.ceil(wMin / 10) * 10; w <= wMax; w += 10) { const x = xOf(w); ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillText(String(w), x, padT + plotH + 5); }
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let r = Math.ceil(rMin / 5) * 5; r <= rMax; r += 5) { const y = yOf(r); ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillText(r + "m", padL - 6, y); }
+    ctx.fillStyle = C.label; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.fillText("waist (mm)", padL + plotW / 2, H - 13);
+    ctx.save(); ctx.translate(13, padT + plotH / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("sidecut radius (m)", 0, 0); ctx.restore();
+    const pts = [];
+    list.forEach(s => {
+      const r = midR(s), x = xOf(s.waist), y = yOf(r.r), col = CAT_COLORS[s.category] || C.heading;
+      const on = sel && sel.brand === s.brand && sel.model === s.model;
+      ctx.beginPath(); ctx.arc(x, y, on ? 6 : 4, 0, Math.PI * 2); ctx.globalAlpha = on ? 1 : 0.85; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+      if (on) { ctx.strokeStyle = C.value; ctx.lineWidth = 1.5; ctx.stroke(); }
+      pts.push({ x, y, s, len: r.l, rad: r.r });
+    });
+    ptsRef.current = pts;
+  }, [list, size, sel]);
+  const pick = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bd = 18 * 18;
+    ptsRef.current.forEach(p => { const d = (p.x - mx) ** 2 + (p.y - my) ** 2; if (d < bd) { bd = d; best = p; } });
+    if (best) setSel({ ...best.s, _len: best.len, _rad: best.rad });
+  };
+  return (
+    <div>
+      <div ref={wrapRef} style={{ width: "100%" }}>
+        <canvas ref={canvasRef} onPointerDown={pick} style={{ width: size.w, height: size.h, display: "block", cursor: "pointer", touchAction: "none", borderRadius: 4 }} />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+        {Object.keys(CAT_COLORS).map(cat => (
+          <span key={cat} style={{ display: "flex", alignItems: "center", gap: 4, color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_COLORS[cat], display: "inline-block" }} />{cat}
+          </span>
+        ))}
+      </div>
+      {sel && (
+        <div style={{ marginTop: 10, padding: "10px 12px", border: `1px solid ${C.inputBorder}`, borderRadius: 6, background: C.inputBg }}>
+          <div style={{ color: C.value, fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{sel.brand} {sel.model} <span style={{ color: C.labelDim, fontSize: 11 }}>{sel.year}</span></div>
+          <div style={{ color: C.heading, fontSize: 12, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>{sel.tip}–{sel.waist}–{sel.tail} mm · R{sel._rad} @ {sel._len}cm</div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <button onClick={() => onApply({ brand: sel.brand, model: sel.model, tip: sel.tip, waist: sel.waist, tail: sel.tail, length: sel._len, radius: sel._rad })} style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>Use dimensions</button>
+            <button onClick={() => onGhost({ brand: sel.brand, model: sel.model, tip: sel.tip, waist: sel.waist, tail: sel.tail, length: sel._len })} style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>Ghost overlay</button>
+          </div>
+        </div>
+      )}
+      <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Each dot = one ski at its mid length. Tap to select. Powder skis trend top-right (wide, long radius); carvers bottom-left.</div>
+    </div>
+  );
+}
+
+function SkiDatabaseModal({ onClose, onApply, onGhost }) {
+  const [mode, setMode] = useState("list");   // list | explore
+  const [db, setDb] = useState(null);
+  const [status, setStatus] = useState("loading");   // loading | ok | error
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState("All");
+  const [band, setBand] = useState("all");
+  const [sort, setSort] = useState("brand");
+  useEffect(() => { loadSkiDb().then(d => { setDb(d); setStatus("ok"); }).catch(() => setStatus("error")); }, []);
+
+  const skis = (db && db.skis) || [];
+  const cats = ["All", ...((db && db.meta && db.meta.categories) || [...new Set(skis.map(s => s.category))])];
+  const bandDef = WAIST_BANDS.find(b => b.key === band) || WAIST_BANDS[0];
+  const ql = q.trim().toLowerCase();
+  let list = skis.filter(s =>
+    (cat === "All" || s.category === cat) &&
+    bandDef.test(s.waist) &&
+    (!ql || (`${s.brand} ${s.model}`).toLowerCase().includes(ql))
+  );
+  list = list.slice().sort((a, b) =>
+    sort === "waist" ? a.waist - b.waist :
+    sort === "year" ? (b.year - a.year) || a.brand.localeCompare(b.brand) :
+    (a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model)));
+
+  const chip = (active, label, onClick, key) => (
+    <button key={key} onClick={onClick} style={{
+      background: active ? C.heading : C.inputBg, color: active ? C.bgDeep : C.label,
+      border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, padding: "5px 10px",
+      cursor: "pointer", fontSize: 11, fontWeight: active ? 700 : 400, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap",
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 1000, display: "flex", flexDirection: "column" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: C.bg, margin: "auto", width: "min(920px, 94vw)", height: "min(88vh, 900px)", border: `1px solid ${C.panelBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${C.panelBorder}` }}>
+          <div>
+            <div style={{ color: C.heading, fontSize: 14, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>SKI DATABASE</div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Reference shapes from the industry · tap a length to load its dimensions</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[["list", "List"], ["explore", "Explore"]].map(([k, l]) => (
+                <button key={k} onClick={() => setMode(k)} style={{ background: mode === k ? C.heading : C.inputBg, color: mode === k ? C.bgDeep : C.label, border: `1px solid ${mode === k ? C.heading : C.inputBorder}`, borderRadius: 3, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: mode === k ? 700 : 400, fontFamily: "'JetBrains Mono', monospace" }}>{l}</button>
+              ))}
+            </div>
+            <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.value, padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close ✕</button>
+          </div>
+        </div>
+
+        {status === "ok" && (
+          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search brand or model\u2026"
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "8px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {cats.map(c => chip(cat === c, c, () => setCat(c), c))}
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              {WAIST_BANDS.map(b => chip(band === b.key, b.label, () => setBand(b.key), b.key))}
+              <div style={{ flex: 1 }} />
+              <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>sort</span>
+              {[["brand", "A\u2013Z"], ["waist", "Waist"], ["year", "Year"]].map(([k, l]) => chip(sort === k, l, () => setSort(k), k))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 18px", minHeight: 0 }}>
+          {status === "loading" && <div style={{ color: C.labelDim, fontSize: 13, textAlign: "center", padding: 40, fontFamily: "'JetBrains Mono', monospace" }}>Loading database…</div>}
+          {status === "error" && (
+            <div style={{ color: C.torch, fontSize: 12.5, lineHeight: 1.6, padding: 24, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
+              Couldn't load <b>ski-database.json</b>. Make sure the file is in your site's <b>public/</b> folder (served at <b>/ski-database.json</b>), then hard-refresh.
+            </div>
+          )}
+          {status === "ok" && mode === "list" && list.length === 0 && <div style={{ color: C.labelDim, fontSize: 13, textAlign: "center", padding: 40, fontFamily: "'JetBrains Mono', monospace" }}>No skis match those filters.</div>}
+          {status === "ok" && mode === "list" && list.map((s, i) => (
+            <div key={`${s.brand}-${s.model}-${i}`} style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: "12px 14px", marginBottom: 10, background: C.inputBg }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <span style={{ color: C.value, fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{s.brand} {s.model}</span>
+                  <span style={{ color: C.labelDim, fontSize: 11, marginLeft: 8, fontFamily: "'JetBrains Mono', monospace" }}>{s.year}</span>
+                </div>
+                <span style={{ background: C.heading + "22", color: C.heading, border: `1px solid ${C.heading}55`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{s.category}</span>
+              </div>
+              <div style={{ color: C.brass || C.heading, fontSize: 13, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                {s.tip}–{s.waist}–{s.tail} <span style={{ color: C.labelDim, fontSize: 11 }}>mm (tip·waist·tail)</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                {s.lengths.map(len => (
+                  <button key={len.l} onClick={() => onApply({ brand: s.brand, model: s.model, tip: s.tip, waist: s.waist, tail: s.tail, length: len.l, radius: len.r })}
+                    title={`Load ${s.brand} ${s.model} ${len.l}cm dimensions into the designer`}
+                    style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "6px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                    {len.l}cm <span style={{ color: C.labelDim, fontWeight: 400 }}>· R{len.r}</span>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => onGhost({ brand: s.brand, model: s.model, tip: s.tip, waist: s.waist, tail: s.tail, length: s.lengths[Math.floor(s.lengths.length / 2)].l })}
+                style={{ marginTop: 8, background: "transparent", border: `1px dashed ${C.inputBorder}`, color: C.label, borderRadius: 4, padding: "6px 10px", cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost overlay (compare)</button>
+            </div>
+          ))}
+          {status === "ok" && mode === "explore" && <ExploreChart list={list} onApply={onApply} onGhost={onGhost} />}
+        </div>
+
+        <div style={{ padding: "10px 18px", borderTop: `1px solid ${C.panelBorder}`, color: C.labelDim, fontSize: 9.5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          {status === "ok" ? `${list.length} of ${skis.length} skis \u00b7 ` : ""}Reference specs are approximate \u2014 verify against manufacturer sources. Not affiliated with any manufacturer.
+        </div>
       </div>
     </div>
   );
@@ -4677,6 +5034,26 @@ export default function App() {
   });
   useEffect(() => { try { localStorage.setItem("bcs_bom_prices", JSON.stringify(bomPrices)); } catch (e) {} }, [bomPrices]);
 
+  // White-label branding for the build card (a shop's own name + logo). Persisted so it's set once.
+  const [builderBrand, setBuilderBrand] = useState(() => {
+    try { const raw = localStorage.getItem("bcs_builder_brand"); if (raw) return { name: "", logoSrc: null, logoName: null, ...JSON.parse(raw) }; } catch (e) {}
+    return { name: "", logoSrc: null, logoName: null };
+  });
+  useEffect(() => { try { localStorage.setItem("bcs_builder_brand", JSON.stringify(builderBrand)); } catch (e) {} }, [builderBrand]);
+  const brandLogoRef = useRef(null);
+  const handleBrandLogoFile = useCallback((file) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { alert("Please choose an image file (PNG or SVG works best for logos)."); return; }
+    if (file.size > 4 * 1024 * 1024) { alert("Logo is larger than 4 MB — please use a smaller file."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setBuilderBrand(b => ({ ...b, logoSrc: reader.result, logoName: file.name }));
+    reader.readAsDataURL(file);
+  }, []);
+  const clearBrandLogo = useCallback(() => {
+    setBuilderBrand(b => ({ ...b, logoSrc: null, logoName: null }));
+    if (brandLogoRef.current) brandLogoRef.current.value = "";
+  }, []);
+
   // ── Topsheet artwork overlay ──────────────────────────────────
   // Kept in component state (not the saved ski JSON) so large base64 images don't bloat design files.
   const [topsheet, setTopsheet] = useState({
@@ -4685,6 +5062,23 @@ export default function App() {
   const topsheetFileRef = useRef(null);
   const [show3D, setShow3D] = useState(false);
   const [pairView, setPairView] = useState(false);
+  // Ski reference database (browse industry shapes → load dimensions).
+  const [showDb, setShowDb] = useState(false);
+  const [dbMsg, setDbMsg] = useState(null);
+  const applySkiFromDb = useCallback((s) => {
+    setSki(prev => ({ ...prev, length: s.length * 10, tipWidth: s.tip, waistWidth: s.waist, tailWidth: s.tail }));
+    setShowDb(false);
+    setDbMsg(`Loaded ${s.brand} ${s.model} \u00b7 ${s.length}cm \u00b7 ${s.tip}-${s.waist}-${s.tail}. Set your own rocker, core & layup.`);
+    setTimeout(() => setDbMsg(null), 5000);
+  }, []);
+  // Reference "ghost" overlay: trace a database ski behind the design without changing it.
+  const [refGhost, setRefGhost] = useState(null);   // { ...skiObj, _label }
+  const setGhostFromDb = useCallback((s) => {
+    setRefGhost({ ...DEFAULT_SKI, length: s.length * 10, tipWidth: s.tip, waistWidth: s.waist, tailWidth: s.tail, _label: `${s.brand} ${s.model} ${s.length}cm` });
+    setShowDb(false);
+  }, []);
+  // A snowboard is a single board, not a pair — keep pair view off (and its toggles hidden) in that mode.
+  useEffect(() => { if (ski.mode === "snowboard" && pairView) setPairView(false); }, [ski.mode, pairView]);
   const setTopsheetField = useCallback((k, v) => setTopsheet(t => ({ ...t, [k]: v })), []);
   const handleTopsheetFile = useCallback((file) => {
     if (!file) return;
@@ -4750,17 +5144,47 @@ export default function App() {
     img.src = topsheet.src;
   }, [ski, topsheet, pairView]);
 
-  // Export a 1:1 print-ready topsheet template (SVG): cut line + bleed + crop marks (+ embedded art).
-  const exportTopsheetTemplate = useCallback(() => {
+  // Export a 1:1 print-ready topsheet template. fmt "svg" = vector (Illustrator/CorelDraw). fmt "png"
+  // = flattened raster at ~150 DPI for print RIPs. In pair view it renders both skis with the art
+  // projected across the set.
+  const exportTopsheetTemplate = useCallback((fmt = "svg") => {
+    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template${pairView ? "-pair" : ""}`;
     const finish = (imgDims) => {
-      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8);
-      const blob = new Blob([svg], { type: "image/svg+xml" });
+      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8, pairView);
+      if (fmt === "svg") {
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      // PNG: rasterize the SVG at print DPI. viewBox units are mm, so px = mm * (dpi/25.4).
+      const vb = svg.match(/viewBox="([\d.\- ]+)"/);
+      const parts = vb ? vb[1].split(" ").map(Number) : [0, 0, ski.length + 40, 320];
+      const vbW = parts[2], vbH = parts[3];
+      const dpi = 150;
+      let pxPerMM = dpi / 25.4;
+      const MAXPX = 12000;
+      if (vbW * pxPerMM > MAXPX) pxPerMM = MAXPX / vbW;   // clamp huge long-side
+      const W = Math.round(vbW * pxPerMM), H = Math.round(vbH * pxPerMM);
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template.svg`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const im = new Image();
+      im.onload = () => {
+        const cv = document.createElement("canvas");
+        cv.width = W; cv.height = H;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(im, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        cv.toBlob((b) => {
+          const u = URL.createObjectURL(b);
+          const a = document.createElement("a"); a.href = u; a.download = `${nameBase}-${dpi}dpi.png`; a.click();
+          setTimeout(() => URL.revokeObjectURL(u), 1000);
+        }, "image/png");
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); alert("Could not rasterize the template to PNG. Use the SVG export."); };
+      im.src = url;
     };
     if (topsheet.src) {
       const img = new Image();
@@ -4768,38 +5192,48 @@ export default function App() {
       img.onerror = () => finish(null);
       img.src = topsheet.src;
     } else finish(null);
-  }, [ski, topsheet]);
+  }, [ski, topsheet, pairView]);
 
-  // Export the branded spec sheet as SVG or PNG.
+  // Export the branded (white-labelable) spec sheet as SVG or PNG.
   const exportSpecSheet = useCallback((fmt) => {
-    const svg = buildSpecSheetSVG(ski, derived, flex, bom);
-    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
-    if (fmt === "svg") {
-      const blob = new Blob([svg], { type: "image/svg+xml" });
+    const run = (logoDims) => {
+      const brand = { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims };
+      const svg = buildSpecSheetSVG(ski, derived, flex, bom, brand);
+      const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
+      if (fmt === "svg") {
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `${nameBase}.svg`; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return;
-    }
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const cv = document.createElement("canvas");
-      cv.width = 1400; cv.height = 900;
-      const ctx = cv.getContext("2d");
-      ctx.fillStyle = "#141210"; ctx.fillRect(0, 0, 1400, 900);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      cv.toBlob((b) => {
-        const u = URL.createObjectURL(b);
-        const a = document.createElement("a"); a.href = u; a.download = `${nameBase}.png`; a.click();
-        setTimeout(() => URL.revokeObjectURL(u), 1000);
-      }, "image/png");
+      const img = new Image();
+      img.onload = () => {
+        const cv = document.createElement("canvas");
+        cv.width = 1400; cv.height = 900;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#141210"; ctx.fillRect(0, 0, 1400, 900);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        cv.toBlob((b) => {
+          const u = URL.createObjectURL(b);
+          const a = document.createElement("a"); a.href = u; a.download = `${nameBase}.png`; a.click();
+          setTimeout(() => URL.revokeObjectURL(u), 1000);
+        }, "image/png");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); alert("Could not render the spec sheet to PNG. Try the SVG export."); };
+      img.src = url;
     };
-    img.onerror = () => { URL.revokeObjectURL(url); alert("Could not render the spec sheet to PNG. Try the SVG export."); };
-    img.src = url;
-  }, [ski, derived, flex, bom]);
+    // Load the logo first (if any) so we can preserve its aspect ratio in the layout.
+    if (builderBrand.logoSrc) {
+      const lg = new Image();
+      lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight });
+      lg.onerror = () => run(null);
+      lg.src = builderBrand.logoSrc;
+    } else run(null);
+  }, [ski, derived, flex, bom, builderBrand]);
 
   // ── Save / Load state ─────────────────────────────────────────
   const fileInputRef = useRef(null);
@@ -4948,6 +5382,7 @@ export default function App() {
     topsheet: false,
     flex: true,           // open by default so the rating chip is visible
     materials: false,
+    buildCard: false,
     cncExport: false,
     externalTools: false,
     beta: true,
@@ -5127,6 +5562,15 @@ export default function App() {
       borderRadius: 3, cursor: "pointer",
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
+  );
+  // Section-group label with an info bubble for its one-line explanation — condenses the sidebar to a
+  // single line per group while keeping the guidance one tap away.
+  const groupHeader = (label, caption) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "16px 2px 5px" }}>
+      <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{label}</span>
+      {caption && <InfoBubble C={C} width={230}>{caption}</InfoBubble>}
+      <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
+    </div>
   );
   const toggleBtn = (label, key) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -5356,6 +5800,19 @@ export default function App() {
           })}
         </div>
 
+        {groupHeader("1 · SET UP", "Start a design or open a saved one, and choose how to view it.")}
+        <button onClick={() => setShowDb(true)} style={{
+          width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "10px 12px",
+          borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+          letterSpacing: 0.5, marginBottom: 10,
+        }}>Browse Ski Database</button>
+        {refGhost && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
+            <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost: {refGhost._label}</span>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
+          </div>
+        )}
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -5371,7 +5828,7 @@ export default function App() {
               ["4", "Dial the Side Profile", "In Side Profile, set camber and tip / tail rise. This is the rocker line your press mold follows."],
               ["5", "Choose your Layup", "In Layup / Materials, pick wood core, fiberglass, optional metal and carbon. The Flex panel updates to show how stiff the ski will ride."],
               ["6", "Check the Flex", "Read the flex rating chip. Adjust core thickness, width, or materials until it feels right for the skier."],
-              ["7", "Set edges & export", "In CNC Export, set the edge inset and choose Full Wrap or Contact-to-Contact edges. Then export Base, Core, Core Side, or the Combined file for CAD."],
+              ["7", "Set edges & export", "In Edges & Core (Design), set the edge inset, core inset, and Full Wrap vs Contact-to-Contact edges. Then in CNC Export choose Base, Core, Core Side, Core STL, or the Combined file."],
             ].map(([n, title, body]) => (
               <div key={n} style={{ display: "flex", gap: 10, marginBottom: 11 }}>
                 <div style={{
@@ -5475,7 +5932,7 @@ export default function App() {
             <input readOnly value={shareCopyUrl} onFocus={e => e.target.select()}
               style={{ width: "100%", marginTop: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} />
           )}
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             A link that reopens this exact design in any browser. Artwork isn't included.
           </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
@@ -5504,8 +5961,15 @@ export default function App() {
               </>
             )}
           </div>
+          {ski.mode !== "snowboard" && (
+            <button onClick={() => setPairView(v => !v)}
+              style={{ width: "100%", marginTop: 8, background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              {pairView ? "Pair View: ON" : "Pair View: OFF"}
+            </button>
+          )}
         </AccordionSection>
 
+        {groupHeader("2 · DESIGN", "Shape the ski — dimensions, rocker & camber, core, and layup.")}
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
@@ -5558,7 +6022,7 @@ export default function App() {
                     );
                   })}
                 </div>
-                <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                   {ski.waistFullLength
                     ? "0.5 = geometric center of the ski (fraction of full length)."
                     : "0.5 = midway between the contact points (fraction of running edge)."}
@@ -5589,7 +6053,7 @@ export default function App() {
                   );
                 })}
               </div>
-              <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                 {(ski.insertPattern || "2x4") === "channel"
                   ? "Burton-style centered channel per foot."
                   : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
@@ -5612,19 +6076,69 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.coreFill !== false} onToggle={() => toggleSection("coreFill")}
-          title="Core Fill (V-cut)"
-          accent={<InfoBubble C={C} width={250}>
-            The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
-            across the core at the contact point, and the two sides converge to an apex pointing toward
-            the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
-            extension sets how far the apex reaches past the contact. Shows in the Core view and exports
-            to the Core / Combined DXF.
-          </InfoBubble>}>
+          title="Edges & Core">
+          <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>EDGES</div>
+          {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
+          <div style={{ marginBottom: 9 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[
+                { val: "full", label: "Full Wrap" },
+                { val: "contact", label: "Contact→Contact" },
+              ].map(opt => {
+                const on = (ski.edgeWrap || "full") === opt.val;
+                return (
+                  <button key={opt.val}
+                    onClick={() => setSki(s => ({ ...s, edgeWrap: opt.val }))}
+                    style={{
+                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
+                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
+                    }}>{opt.label}</button>
+                );
+              })}
+            </div>
+            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+              {(ski.edgeWrap || "full") === "contact"
+                ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
+                : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
+            </div>
+            {(ski.edgeWrap || "full") === "contact" && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
+                <div style={{ color: C.label, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Extension (mm past contact)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {inputField("Tip end", "edgeExtTip", 0, 400, 5)}
+                  {inputField("Tail end", "edgeExtTail", 0, 400, 5)}
+                </div>
+                <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 2 }}>
+                  Extends each partial edge past its contact point toward the tip / tail. Drag the square handles in the plan view to set these visually. Clamped at the physical ends.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE</div>
+          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Narrows the wood core inside the edges (sidewall material) per side.
+          </div>
+
+          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>CORE FILL (V-CUT)</span>
+            <InfoBubble C={C} width={250}>
+              The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
+              across the core at the contact point, and the two sides converge to an apex pointing toward
+              the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
+              extension sets how far the apex reaches past the contact. Shows in the Core view and exports
+              to the Core / Combined DXF.
+            </InfoBubble>
+          </div>
           {toggleBtn("Tip V-cut", "vcutTip")}
           {ski.vcutTip && inputField("Tip ext (mm)", "vcutTipExt", 10, Math.max(20, ski.tipLength))}
           {toggleBtn("Tail V-cut", "vcutTail")}
           {ski.vcutTail && inputField("Tail ext (mm)", "vcutTailExt", 10, Math.max(20, ski.tailLength))}
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Core terminates at the V; region beyond is fill. Preview in the Core view.
           </div>
         </AccordionSection>
@@ -5650,6 +6164,7 @@ export default function App() {
           )}
         </AccordionSection>
 
+        {groupHeader("3 · ARTWORK & PREVIEW", "Wrap a topsheet image, preview the pair, and view it in 3D.")}
         <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
           title="Topsheet Art"
           accent={topsheet.src
@@ -5666,12 +6181,19 @@ export default function App() {
             {topsheet.src ? "Replace Image" : "Upload Image"}
           </button>
 
-          <button onClick={exportTopsheetTemplate}
-            style={{ width: "100%", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
-            Export Print Template (SVG)
-          </button>
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            1:1 cut line + bleed + crop marks for a print shop. Embeds your art if loaded; works blank too.
+          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Print Template{pairView ? " (pair)" : ""}</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+            <button onClick={() => exportTopsheetTemplate("svg")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              SVG (vector)
+            </button>
+            <button onClick={() => exportTopsheetTemplate("png")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              PNG (150dpi)
+            </button>
+          </div>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            1:1 cut line + bleed + crop marks. Art is embedded and aligned exactly as shown above (use the Fit/Shift/Scale/Rotate controls to place it). For crisp prints, upload art at ~150 dpi of the final size (a full ski ≈ 10,600 px long).
           </div>
 
           <button onClick={() => setShow3D(true)}
@@ -5679,13 +6201,17 @@ export default function App() {
             View in 3D
           </button>
 
-          <button onClick={() => setPairView(v => !v)}
-            style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
-            {pairView ? "Pair View: ON" : "Pair View: OFF"}
-          </button>
-          <div style={{ color: C.labelDim, fontSize: 9, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
-          </div>
+          {ski.mode !== "snowboard" && (
+            <>
+              <button onClick={() => setPairView(v => !v)}
+                style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
+                {pairView ? "Pair View: ON" : "Pair View: OFF"}
+              </button>
+              <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
+              </div>
+            </>
+          )}
 
           {topsheet.src && (
             <>
@@ -5740,6 +6266,7 @@ export default function App() {
           )}
         </AccordionSection>
 
+        {groupHeader("4 · ANALYZE", "Check the flex profile and a materials + cost estimate.")}
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title="Flex Analysis"
           accent={
@@ -5775,7 +6302,7 @@ export default function App() {
               return Math.round(Object.keys(qv).reduce((s, k) => s + qv[k] * (bomPrices[k] || 0), 0));
             })()}
           </span>}>
-          <div style={{ color: C.labelDim, fontSize: 9.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Estimated from geometry + layup. Prices are editable (USD) and saved on this device. A rough guide, not a quote.
           </div>
           {(() => {
@@ -5792,7 +6319,7 @@ export default function App() {
             ];
             const total = rows.reduce((s, r) => s + r.qty * (bomPrices[r.key] || 0), 0);
             const cellL = { color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" };
-            const cellD = { color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" };
+            const cellD = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
             return (
               <>
                 {rows.map(r => (
@@ -5817,66 +6344,14 @@ export default function App() {
                   {stat("Core blank", `${bom.blank.L}\u00D7${bom.blank.W}\u00D7${bom.blank.T} mm`)}
                   {stat("Planform", `${(bom.areaM2 * 1e4).toFixed(0)} cm\u00B2`)}
                 </div>
-                <div style={{ borderTop: `1px solid ${C.inputBorder}`, marginTop: 12, paddingTop: 10 }}>
-                  <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Branded Build Card</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => exportSpecSheet("png")}
-                      style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-                      Spec Sheet PNG
-                    </button>
-                    <button onClick={() => exportSpecSheet("svg")}
-                      style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-                      SVG
-                    </button>
-                  </div>
-                </div>
               </>
             );
           })()}
         </AccordionSection>
 
+        {groupHeader("5 · EXPORT", "CNC cut files (DXF/SVG) and a branded build card.")}
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
-          {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           <div style={{ marginBottom: 9 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {[
-                { val: "full", label: "Full Wrap" },
-                { val: "contact", label: "Contact→Contact" },
-              ].map(opt => {
-                const on = (ski.edgeWrap || "full") === opt.val;
-                return (
-                  <button key={opt.val}
-                    onClick={() => setSki(s => ({ ...s, edgeWrap: opt.val }))}
-                    style={{
-                      flex: 1, padding: "6px 4px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
-                      background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
-                      border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3,
-                      cursor: "pointer", fontWeight: on ? 700 : 400, letterSpacing: 0.3,
-                    }}>{opt.label}</button>
-                );
-              })}
-            </div>
-            <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
-              {(ski.edgeWrap || "full") === "contact"
-                ? "Edge offset runs only tip-contact to tail-contact on each side (partial edges)."
-                : "Edge offset wraps fully around tip and tail (full-perimeter base cut)."}
-            </div>
-            {(ski.edgeWrap || "full") === "contact" && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
-                <div style={{ color: C.label, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Extension (mm past contact)</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {inputField("Tip end", "edgeExtTip", 0, 400, 5)}
-                  {inputField("Tail end", "edgeExtTail", 0, 400, 5)}
-                </div>
-                <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 2 }}>
-                  Extends each partial edge past its contact point toward the tip / tail. Drag the square handles in the plan view to set these visually. Clamped at the physical ends.
-                </div>
-              </div>
-            )}
-          </div>
-          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ marginBottom: 9, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}` }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
               {[
@@ -5911,10 +6386,16 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportPlanDXF)} style={expBtn}>Base DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportPlanSVG)} style={expBtn}>Base SVG</button>
           </div>
-          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — core-inset outline + contact marks</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>Core DXF</button>
-            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>Core SVG</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — outline + 3D solid</span>
+            <InfoBubble C={C} width={260}>
+              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D solid whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
+            </InfoBubble>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>SVG</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={expBtn}>STL</button>
           </div>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core Side — thickness taper profile</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
@@ -5934,6 +6415,48 @@ export default function App() {
           </div>
         </AccordionSection>
 
+        <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
+          <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 10, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            A one-page spec sheet for customers or your bench: dimensions, sidecut, flex, layup, and core mass. Add your own name and logo to white-label it.
+          </div>
+          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Your Branding</div>
+          <input type="text" value={builderBrand.name}
+            onChange={e => setBuilderBrand(b => ({ ...b, name: e.target.value }))}
+            placeholder="Your shop / brand name"
+            style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 8px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+          <input ref={brandLogoRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={e => handleBrandLogoFile(e.target.files && e.target.files[0])} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+            <button onClick={() => brandLogoRef.current && brandLogoRef.current.click()}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+              {builderBrand.logoSrc ? "Replace Logo" : "Upload Logo"}
+            </button>
+            {builderBrand.logoSrc && (
+              <button onClick={clearBrandLogo}
+                style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "8px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                Remove Logo
+              </button>
+            )}
+          </div>
+          {builderBrand.logoSrc && (
+            <div style={{ color: C.value, fontSize: 9.5, marginBottom: 6, wordBreak: "break-all", fontFamily: "'JetBrains Mono', monospace" }}>{builderBrand.logoName || "logo"}</div>
+          )}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            A wide logo (e.g. 800×200 px) reads best. Saved on this device; the footer credits the tool.
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => exportSpecSheet("png")}
+              style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              Spec Sheet PNG
+            </button>
+            <button onClick={() => exportSpecSheet("svg")}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              SVG
+            </button>
+          </div>
+        </AccordionSection>
+
+        {groupHeader("6 · MORE", "Handy external calculators and a place to send feedback.")}
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
@@ -5978,13 +6501,13 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView} />
+            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} refGhost={refGhost} />
             {viewLabelChip("Plan")}
           </div>
         )}
         {profH > 0 && (
           <div style={{ height: profH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <ProfileView ski={ski} width={canvasW} height={profH} />
+            <ProfileView ski={ski} setSki={setSki} width={canvasW} height={profH} />
             {viewLabelChip("Side Profile")}
           </div>
         )}
@@ -6008,7 +6531,13 @@ export default function App() {
         onClose={() => setFeedbackOpen(false)}
         trigger={feedbackTrigger}
       />
-      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView} onClose={() => setShow3D(false)} />}
+      {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
+      {showDb && <SkiDatabaseModal onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
+      {dbMsg && (
+        <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "12px 18px", borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", maxWidth: "92vw", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
+          {dbMsg}
+        </div>
+      )}
     </div>
   );
 }
