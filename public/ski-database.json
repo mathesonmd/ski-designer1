@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "version": 1,
+    "updated": "2026-07",
+    "note": "STARTER reference dataset for Black Chapel Studios Ski Designer. Specs (tip-waist-tail in mm, radius in m per length in cm) are compiled from public manufacturer/retailer sources for DESIGN REFERENCE ONLY and are approximate — verify against official specs before relying on them. Widths are given per model (they vary only slightly across lengths); radius is per length. Not affiliated with or endorsed by any manufacturer; brand and model names are used nominatively to identify the skis.",
+    "categories": ["Carving", "All-Mountain", "Freeride", "Powder", "Park", "Touring"],
+    "schema": "each ski: { brand, model, year, category, tip, waist, tail, lengths:[{l, r}] }"
+  },
+  "skis": [
+    { "brand": "Head", "model": "Supershape e-Rally", "year": 2024, "category": "Carving", "tip": 126, "waist": 76, "tail": 107, "lengths": [{"l":156,"r":12.4},{"l":163,"r":13.2},{"l":170,"r":14.1},{"l":177,"r":14.9}] },
+    { "brand": "Atomic", "model": "Redster G9 RS", "year": 2024, "category": "Carving", "tip": 115, "waist": 69, "tail": 99, "lengths": [{"l":165,"r":13.0},{"l":171,"r":14.5},{"l":177,"r":16.0}] },
+    { "brand": "Rossignol", "model": "Forza 70", "year": 2024, "category": "Carving", "tip": 122, "waist": 70, "tail": 105, "lengths": [{"l":159,"r":11.0},{"l":167,"r":12.5},{"l":175,"r":14.0}] },
+    { "brand": "Volkl", "model": "Deacon 84", "year": 2024, "category": "Carving", "tip": 129, "waist": 84, "tail": 110, "lengths": [{"l":161,"r":14.0},{"l":168,"r":15.5},{"l":175,"r":17.0},{"l":182,"r":18.5}] },
+
+    { "brand": "Nordica", "model": "Enforcer 100", "year": 2024, "category": "All-Mountain", "tip": 131, "waist": 100, "tail": 118, "lengths": [{"l":165,"r":15.5},{"l":172,"r":16.5},{"l":179,"r":17.5},{"l":186,"r":18.4},{"l":191,"r":19.5}] },
+    { "brand": "Blizzard", "model": "Bonafide 97", "year": 2022, "category": "All-Mountain", "tip": 136, "waist": 97, "tail": 118, "lengths": [{"l":165,"r":15.0},{"l":171,"r":16.0},{"l":177,"r":17.0},{"l":183,"r":18.5},{"l":189,"r":20.0}] },
+    { "brand": "Volkl", "model": "Mantra M7", "year": 2025, "category": "All-Mountain", "tip": 135, "waist": 96, "tail": 119, "lengths": [{"l":163,"r":18.0},{"l":170,"r":19.0},{"l":177,"r":20.0},{"l":184,"r":21.0},{"l":191,"r":22.0}] },
+    { "brand": "K2", "model": "Mindbender 99Ti", "year": 2024, "category": "All-Mountain", "tip": 133, "waist": 99, "tail": 118, "lengths": [{"l":168,"r":17.2},{"l":175,"r":18.4},{"l":182,"r":19.6},{"l":189,"r":20.8}] },
+    { "brand": "Head", "model": "Kore 99", "year": 2024, "category": "All-Mountain", "tip": 135, "waist": 99, "tail": 120, "lengths": [{"l":162,"r":15.7},{"l":171,"r":17.0},{"l":180,"r":18.3},{"l":189,"r":19.6}] },
+    { "brand": "Salomon", "model": "QST 98", "year": 2024, "category": "All-Mountain", "tip": 138, "waist": 98, "tail": 118, "lengths": [{"l":161,"r":16.0},{"l":169,"r":17.0},{"l":177,"r":18.0},{"l":185,"r":19.0},{"l":193,"r":20.0}] },
+    { "brand": "Elan", "model": "Ripstick 96", "year": 2024, "category": "All-Mountain", "tip": 134, "waist": 96, "tail": 110, "lengths": [{"l":167,"r":15.6},{"l":174,"r":16.8},{"l":181,"r":18.0},{"l":188,"r":18.9}] },
+    { "brand": "Fischer", "model": "Ranger 96", "year": 2024, "category": "All-Mountain", "tip": 134, "waist": 96, "tail": 125, "lengths": [{"l":162,"r":16.0},{"l":169,"r":17.0},{"l":176,"r":18.0},{"l":183,"r":19.0},{"l":190,"r":20.0}] },
+    { "brand": "Black Crows", "model": "Camox", "year": 2024, "category": "All-Mountain", "tip": 128, "waist": 97, "tail": 112, "lengths": [{"l":168,"r":17.0},{"l":174,"r":18.0},{"l":180,"r":19.0},{"l":186,"r":20.0}] },
+    { "brand": "Dynastar", "model": "M-Pro 99", "year": 2024, "category": "All-Mountain", "tip": 128, "waist": 99, "tail": 118, "lengths": [{"l":170,"r":16.0},{"l":178,"r":18.0},{"l":186,"r":19.0}] },
+    { "brand": "4FRNT", "model": "MSP 99", "year": 2024, "category": "All-Mountain", "tip": 131, "waist": 99, "tail": 119, "lengths": [{"l":171,"r":19.0},{"l":178,"r":21.0},{"l":185,"r":22.0}] },
+
+    { "brand": "Blizzard", "model": "Rustler 10", "year": 2024, "category": "Freeride", "tip": 133, "waist": 102, "tail": 122, "lengths": [{"l":164,"r":15.5},{"l":172,"r":17.0},{"l":180,"r":18.5},{"l":188,"r":19.5}] },
+    { "brand": "Nordica", "model": "Enforcer 104", "year": 2024, "category": "Freeride", "tip": 136, "waist": 104, "tail": 124, "lengths": [{"l":165,"r":16.5},{"l":172,"r":17.5},{"l":179,"r":18.5},{"l":186,"r":19.5},{"l":191,"r":20.5}] },
+    { "brand": "Atomic", "model": "Bent 110", "year": 2024, "category": "Freeride", "tip": 134, "waist": 110, "tail": 125, "lengths": [{"l":164,"r":18.0},{"l":172,"r":19.5},{"l":180,"r":20.5},{"l":188,"r":21.5}] },
+    { "brand": "Rossignol", "model": "Sender 104 Ti", "year": 2024, "category": "Freeride", "tip": 135, "waist": 104, "tail": 125, "lengths": [{"l":165,"r":18.0},{"l":172,"r":19.5},{"l":180,"r":21.0},{"l":187,"r":22.0}] },
+    { "brand": "Line", "model": "Blade Optic 104", "year": 2024, "category": "Freeride", "tip": 141, "waist": 104, "tail": 124, "lengths": [{"l":165,"r":16.0},{"l":172,"r":17.5},{"l":179,"r":18.5},{"l":186,"r":19.5}] },
+    { "brand": "Armada", "model": "ARV 106", "year": 2024, "category": "Freeride", "tip": 132, "waist": 106, "tail": 125, "lengths": [{"l":165,"r":17.0},{"l":172,"r":18.5},{"l":180,"r":19.5},{"l":188,"r":20.5}] },
+    { "brand": "Black Crows", "model": "Corvus", "year": 2024, "category": "Freeride", "tip": 135, "waist": 109, "tail": 121, "lengths": [{"l":175,"r":21.0},{"l":182,"r":22.0},{"l":188,"r":23.0}] },
+    { "brand": "K2", "model": "Mindbender 108Ti", "year": 2024, "category": "Freeride", "tip": 138, "waist": 108, "tail": 126, "lengths": [{"l":172,"r":19.4},{"l":179,"r":20.7},{"l":186,"r":22.0},{"l":193,"r":23.3}] },
+    { "brand": "Faction", "model": "Dancer 3", "year": 2024, "category": "Freeride", "tip": 134, "waist": 106, "tail": 124, "lengths": [{"l":170,"r":18.0},{"l":177,"r":19.0},{"l":184,"r":20.0},{"l":191,"r":21.0}] },
+
+    { "brand": "Atomic", "model": "Bent Chetler 120", "year": 2024, "category": "Powder", "tip": 143, "waist": 120, "tail": 134, "lengths": [{"l":176,"r":19.0},{"l":184,"r":20.5},{"l":192,"r":22.0}] },
+    { "brand": "Armada", "model": "ARV 116 JJ", "year": 2024, "category": "Powder", "tip": 141, "waist": 116, "tail": 139, "lengths": [{"l":175,"r":19.0},{"l":185,"r":21.0},{"l":195,"r":23.0}] },
+    { "brand": "Salomon", "model": "QST Blank 112", "year": 2024, "category": "Powder", "tip": 143, "waist": 112, "tail": 133, "lengths": [{"l":178,"r":20.0},{"l":186,"r":22.0},{"l":194,"r":24.0}] },
+    { "brand": "Volkl", "model": "Revolt 121", "year": 2024, "category": "Powder", "tip": 143, "waist": 121, "tail": 133, "lengths": [{"l":165,"r":16.0},{"l":175,"r":18.0},{"l":185,"r":20.0}] },
+    { "brand": "DPS", "model": "Kaizen 112", "year": 2024, "category": "Powder", "tip": 141, "waist": 112, "tail": 128, "lengths": [{"l":176,"r":18.0},{"l":184,"r":20.0},{"l":192,"r":22.0}] },
+
+    { "brand": "Line", "model": "Chronic 94", "year": 2024, "category": "Park", "tip": 128, "waist": 94, "tail": 118, "lengths": [{"l":164,"r":17.0},{"l":171,"r":18.5},{"l":178,"r":19.5},{"l":185,"r":20.5}] },
+    { "brand": "K2", "model": "Reckoner 92", "year": 2024, "category": "Park", "tip": 122, "waist": 92, "tail": 118, "lengths": [{"l":169,"r":17.0},{"l":177,"r":18.5},{"l":185,"r":20.0}] },
+    { "brand": "Armada", "model": "Edollo", "year": 2024, "category": "Park", "tip": 123, "waist": 98, "tail": 119, "lengths": [{"l":172,"r":19.5},{"l":180,"r":21.0},{"l":186,"r":22.0}] },
+
+    { "brand": "Blizzard", "model": "Zero G 105", "year": 2024, "category": "Touring", "tip": 133, "waist": 105, "tail": 119, "lengths": [{"l":164,"r":24.0},{"l":172,"r":26.0},{"l":180,"r":28.0},{"l":188,"r":30.0}] },
+    { "brand": "Black Crows", "model": "Navis Freebird", "year": 2024, "category": "Touring", "tip": 130, "waist": 102, "tail": 118, "lengths": [{"l":170,"r":18.0},{"l":178,"r":19.0},{"l":186,"r":20.0}] }
+  ]
+}
