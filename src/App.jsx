@@ -4823,29 +4823,37 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
   );
 }
 
-// ══════════════ SKI REFERENCE DATABASE ══════════════
-// Loads a static /ski-database.json (curated industry reference specs) once, cached. No backend —
+// ══════════════ REFERENCE DATABASE (skis + snowboards) ══════════════
+// Loads a static /ski-database.json or /snowboard-database.json once per kind, cached. No backend —
 // edit the JSON to grow the database without touching this file.
-let _skiDbCache = null, _skiDbPromise = null;
-function loadSkiDb() {
-  if (_skiDbCache) return Promise.resolve(_skiDbCache);
-  if (_skiDbPromise) return _skiDbPromise;
-  _skiDbPromise = fetch("/ski-database.json")
+const _dbCache = {}, _dbPromise = {};
+function loadDesignDb(kind) {
+  const file = kind === "snowboard" ? "/snowboard-database.json" : "/ski-database.json";
+  if (_dbCache[kind]) return Promise.resolve(_dbCache[kind]);
+  if (_dbPromise[kind]) return _dbPromise[kind];
+  _dbPromise[kind] = fetch(file)
     .then(r => { if (!r.ok) throw new Error("not found"); return r.json(); })
-    .then(d => { _skiDbCache = d; return d; })
-    .catch(e => { _skiDbPromise = null; throw e; });
-  return _skiDbPromise;
+    .then(d => { _dbCache[kind] = d; return d; })
+    .catch(e => { _dbPromise[kind] = null; throw e; });
+  return _dbPromise[kind];
 }
 
-const WAIST_BANDS = [
+const WAIST_BANDS_SKI = [
   { key: "all", label: "All widths", test: () => true },
   { key: "carve", label: "\u2039 85", test: w => w < 85 },
   { key: "am", label: "85\u201399", test: w => w >= 85 && w < 100 },
   { key: "free", label: "100\u2013109", test: w => w >= 100 && w < 110 },
   { key: "pow", label: "110 +", test: w => w >= 110 },
 ];
+const WAIST_BANDS_BOARD = [
+  { key: "all", label: "All widths", test: () => true },
+  { key: "narrow", label: "\u2039 250", test: w => w < 250 },
+  { key: "mid", label: "250\u2013255", test: w => w >= 250 && w < 256 },
+  { key: "wide", label: "256\u2013260", test: w => w >= 256 && w < 261 },
+  { key: "xwide", label: "261 +", test: w => w >= 261 },
+];
 
-const CAT_COLORS = { "Carving": "#6ba3d6", "All-Mountain": "#c8935a", "Freeride": "#e8552a", "Powder": "#8fd3e0", "Park": "#8bc48a", "Touring": "#b08fd0" };
+const CAT_COLORS = { "Carving": "#6ba3d6", "All-Mountain": "#c8935a", "Freeride": "#e8552a", "Powder": "#8fd3e0", "Park": "#8bc48a", "Touring": "#b08fd0", "Freestyle": "#8bc48a", "Splitboard": "#b08fd0" };
 
 // Industry explorer: scatter of waist (x) vs sidecut radius (y) at each ski's mid length, colored by
 // category. Tap a dot to select, then load its dimensions or drop it in as a ghost overlay.
@@ -4905,9 +4913,9 @@ function ExploreChart({ list, onApply, onGhost }) {
         <canvas ref={canvasRef} onPointerDown={pick} style={{ width: size.w, height: size.h, display: "block", cursor: "pointer", touchAction: "none", borderRadius: 4 }} />
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-        {Object.keys(CAT_COLORS).map(cat => (
+        {[...new Set(list.map(s => s.category))].map(cat => (
           <span key={cat} style={{ display: "flex", alignItems: "center", gap: 4, color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_COLORS[cat], display: "inline-block" }} />{cat}
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_COLORS[cat] || C.heading, display: "inline-block" }} />{cat}
           </span>
         ))}
       </div>
@@ -4926,7 +4934,12 @@ function ExploreChart({ list, onApply, onGhost }) {
   );
 }
 
-function SkiDatabaseModal({ onClose, onApply, onGhost }) {
+function SkiDatabaseModal({ kind = "ski", onClose, onApply, onGhost }) {
+  const isBoard = kind === "snowboard";
+  const bandsDef = isBoard ? WAIST_BANDS_BOARD : WAIST_BANDS_SKI;
+  const dbTitle = isBoard ? "SNOWBOARD DATABASE" : "SKI DATABASE";
+  const dimsWord = isBoard ? "nose\u00b7waist\u00b7tail" : "tip\u00b7waist\u00b7tail";
+  const dbFile = isBoard ? "snowboard-database.json" : "ski-database.json";
   const [mode, setMode] = useState("list");   // list | explore
   const [db, setDb] = useState(null);
   const [status, setStatus] = useState("loading");   // loading | ok | error
@@ -4934,11 +4947,11 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
   const [cat, setCat] = useState("All");
   const [band, setBand] = useState("all");
   const [sort, setSort] = useState("brand");
-  useEffect(() => { loadSkiDb().then(d => { setDb(d); setStatus("ok"); }).catch(() => setStatus("error")); }, []);
+  useEffect(() => { setStatus("loading"); loadDesignDb(kind).then(d => { setDb(d); setStatus("ok"); }).catch(() => setStatus("error")); }, [kind]);
 
   const skis = (db && db.skis) || [];
   const cats = ["All", ...((db && db.meta && db.meta.categories) || [...new Set(skis.map(s => s.category))])];
-  const bandDef = WAIST_BANDS.find(b => b.key === band) || WAIST_BANDS[0];
+  const bandDef = bandsDef.find(b => b.key === band) || bandsDef[0];
   const ql = q.trim().toLowerCase();
   let list = skis.filter(s =>
     (cat === "All" || s.category === cat) &&
@@ -4964,8 +4977,8 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
       <div style={{ background: C.bg, margin: "auto", width: "min(920px, 94vw)", height: "min(88vh, 900px)", border: `1px solid ${C.panelBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: `1px solid ${C.panelBorder}` }}>
           <div>
-            <div style={{ color: C.heading, fontSize: 14, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>SKI DATABASE</div>
-            <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Reference shapes from the industry · tap a length to load its dimensions</div>
+            <div style={{ color: C.heading, fontSize: 14, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>{dbTitle}</div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Reference shapes from the industry · tap a size to load its dimensions</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -4985,7 +4998,7 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
               {cats.map(c => chip(cat === c, c, () => setCat(c), c))}
             </div>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-              {WAIST_BANDS.map(b => chip(band === b.key, b.label, () => setBand(b.key), b.key))}
+              {bandsDef.map(b => chip(band === b.key, b.label, () => setBand(b.key), b.key))}
               <div style={{ flex: 1 }} />
               <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>sort</span>
               {[["brand", "A\u2013Z"], ["waist", "Waist"], ["year", "Year"]].map(([k, l]) => chip(sort === k, l, () => setSort(k), k))}
@@ -4997,7 +5010,7 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
           {status === "loading" && <div style={{ color: C.labelDim, fontSize: 13, textAlign: "center", padding: 40, fontFamily: "'JetBrains Mono', monospace" }}>Loading database…</div>}
           {status === "error" && (
             <div style={{ color: C.torch, fontSize: 12.5, lineHeight: 1.6, padding: 24, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
-              Couldn't load <b>ski-database.json</b>. Make sure the file is in your site's <b>public/</b> folder (served at <b>/ski-database.json</b>), then hard-refresh.
+              Couldn't load <b>{dbFile}</b>. Make sure the file is in your site's <b>public/</b> folder (served at <b>/ski-database.json</b>), then hard-refresh.
             </div>
           )}
           {status === "ok" && mode === "list" && list.length === 0 && <div style={{ color: C.labelDim, fontSize: 13, textAlign: "center", padding: 40, fontFamily: "'JetBrains Mono', monospace" }}>No skis match those filters.</div>}
@@ -5008,10 +5021,13 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
                   <span style={{ color: C.value, fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{s.brand} {s.model}</span>
                   <span style={{ color: C.labelDim, fontSize: 11, marginLeft: 8, fontFamily: "'JetBrains Mono', monospace" }}>{s.year}</span>
                 </div>
-                <span style={{ background: C.heading + "22", color: C.heading, border: `1px solid ${C.heading}55`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{s.category}</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {s.shape && <span style={{ background: C.inputBg, color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>{s.shape}</span>}
+                  <span style={{ background: C.heading + "22", color: C.heading, border: `1px solid ${C.heading}55`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{s.category}</span>
+                </div>
               </div>
               <div style={{ color: C.brass || C.heading, fontSize: 13, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
-                {s.tip}–{s.waist}–{s.tail} <span style={{ color: C.labelDim, fontSize: 11 }}>mm (tip·waist·tail)</span>
+                {s.tip}–{s.waist}–{s.tail} <span style={{ color: C.labelDim, fontSize: 11 }}>mm ({dimsWord})</span>
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
                 {s.lengths.map(len => (
@@ -5030,7 +5046,7 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
         </div>
 
         <div style={{ padding: "10px 18px", borderTop: `1px solid ${C.panelBorder}`, color: C.labelDim, fontSize: 9.5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-          {status === "ok" ? `${list.length} of ${skis.length} skis \u00b7 ` : ""}Reference specs are approximate \u2014 verify against manufacturer sources. Not affiliated with any manufacturer.
+          {status === "ok" ? `${list.length} of ${skis.length} ${isBoard ? "boards" : "skis"} \u00b7 ` : ""}Reference specs are approximate \u2014 verify against manufacturer sources. Not affiliated with any manufacturer.
         </div>
       </div>
     </div>
@@ -5833,7 +5849,7 @@ export default function App() {
           width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "10px 12px",
           borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
           letterSpacing: 0.5, marginBottom: 10,
-        }}>Browse Ski Database</button>
+        }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
         {refGhost && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
             <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
@@ -6560,7 +6576,7 @@ export default function App() {
         trigger={feedbackTrigger}
       />
       {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
-      {showDb && <SkiDatabaseModal onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
+      {showDb && <SkiDatabaseModal kind={ski.mode === "snowboard" ? "snowboard" : "ski"} onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
       {dbMsg && (
         <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "12px 18px", borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", maxWidth: "92vw", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
           {dbMsg}

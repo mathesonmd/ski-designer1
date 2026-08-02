@@ -1,0 +1,2054 @@
+{
+ "meta": {
+  "version": 1,
+  "updated": "2026-08",
+  "note": "STARTER reference dataset for Black Chapel Studios Snowboard Designer. Specs (nose-waist-tail in mm, radius in m per size in cm) are compiled from public manufacturer/retailer sources for DESIGN REFERENCE ONLY and are approximate - verify against official specs before relying on them. Widths are given per model (waist varies slightly across sizes); radius is per size. Not affiliated with or endorsed by any manufacturer; brand and model names are used nominatively.",
+  "categories": [
+   "All-Mountain",
+   "Freestyle",
+   "Freeride",
+   "Powder",
+   "Splitboard",
+   "Carving"
+  ],
+  "schema": "each board: { brand, model, year, category, shape, tip(nose), waist, tail, lengths:[{l, r}] }"
+ },
+ "skis": [
+  {
+   "brand": "Burton",
+   "model": "Custom",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 255,
+   "tail": 300,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 7.4
+    },
+    {
+     "l": 154,
+     "r": 7.8
+    },
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 158,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Custom X",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 300,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 158,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Process",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 292,
+   "waist": 250,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.6
+    },
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Lib Tech",
+   "model": "T.Rice Pro",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 295,
+   "waist": 252,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.5
+    },
+    {
+     "l": 157,
+     "r": 7.8
+    },
+    {
+     "l": 161.5,
+     "r": 8.2
+    },
+    {
+     "l": 164,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Lib Tech",
+   "model": "Skate Banana",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 295,
+   "waist": 252,
+   "tail": 295,
+   "lengths": [
+    {
+     "l": 148,
+     "r": 7.5
+    },
+    {
+     "l": 152,
+     "r": 7.8
+    },
+    {
+     "l": 156,
+     "r": 8.0
+    },
+    {
+     "l": 159,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "GNU",
+   "model": "Riders Choice",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 294,
+   "waist": 253,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 151.5,
+     "r": 7.6
+    },
+    {
+     "l": 154.5,
+     "r": 7.8
+    },
+    {
+     "l": 157.5,
+     "r": 8.0
+    },
+    {
+     "l": 160.5,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "GNU",
+   "model": "Antigravity",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 299,
+   "waist": 256,
+   "tail": 291,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.1
+    },
+    {
+     "l": 162,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Mountain Twin",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional Twin",
+   "tip": 296,
+   "waist": 252,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.4
+    },
+    {
+     "l": 157,
+     "r": 7.6
+    },
+    {
+     "l": 160,
+     "r": 7.9
+    },
+    {
+     "l": 163,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Explorer",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 255,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.6
+    },
+    {
+     "l": 159,
+     "r": 7.9
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "Proto Synthesis",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional Twin",
+   "tip": 296,
+   "waist": 253,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.0
+    },
+    {
+     "l": 157,
+     "r": 7.3
+    },
+    {
+     "l": 160,
+     "r": 7.6
+    },
+    {
+     "l": 163,
+     "r": 7.9
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "Proto FR",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 301,
+   "waist": 256,
+   "tail": 297,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.3
+    },
+    {
+     "l": 158,
+     "r": 7.6
+    },
+    {
+     "l": 161,
+     "r": 7.9
+    },
+    {
+     "l": 164,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Defenders of Awesome",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 296,
+   "waist": 251,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 7.3
+    },
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.7
+    },
+    {
+     "l": 158,
+     "r": 7.9
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Mercury",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 299,
+   "waist": 254,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.4
+    },
+    {
+     "l": 155,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    },
+    {
+     "l": 165,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "Ride",
+   "model": "Berzerker",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 255,
+   "tail": 295,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.2
+    },
+    {
+     "l": 163,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Ride",
+   "model": "Warpig",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Volume-Shifted",
+   "tip": 298,
+   "waist": 264,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 138,
+     "r": 6.7
+    },
+    {
+     "l": 143,
+     "r": 7.0
+    },
+    {
+     "l": 148,
+     "r": 7.4
+    },
+    {
+     "l": 153,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Ride",
+   "model": "Algorhythm",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 299,
+   "waist": 255,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.7
+    },
+    {
+     "l": 159,
+     "r": 8.1
+    },
+    {
+     "l": 163,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Salomon",
+   "model": "Assassin",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 296,
+   "waist": 252,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "YES",
+   "model": "Standard",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 298,
+   "waist": 254,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.3
+    },
+    {
+     "l": 156,
+     "r": 7.5
+    },
+    {
+     "l": 159,
+     "r": 7.8
+    },
+    {
+     "l": 162,
+     "r": 8.1
+    }
+   ]
+  },
+  {
+   "brand": "Arbor",
+   "model": "Foundation",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 295,
+   "waist": 252,
+   "tail": 295,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.6
+    },
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.0
+    },
+    {
+     "l": 161,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Nitro",
+   "model": "Team",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional Twin",
+   "tip": 298,
+   "waist": 255,
+   "tail": 298,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.9
+    },
+    {
+     "l": 155,
+     "r": 8.0
+    },
+    {
+     "l": 159,
+     "r": 8.2
+    },
+    {
+     "l": 162,
+     "r": 8.4
+    },
+    {
+     "l": 165,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "K2",
+   "model": "Manifest",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 297,
+   "waist": 253,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.1
+    },
+    {
+     "l": 162,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "K2",
+   "model": "Raygun",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 298,
+   "waist": 254,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.7
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    },
+    {
+     "l": 165,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "Rome",
+   "model": "Ravine",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.5
+    },
+    {
+     "l": 158,
+     "r": 7.8
+    },
+    {
+     "l": 161,
+     "r": 8.1
+    },
+    {
+     "l": 164,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Rome",
+   "model": "Stalefish",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 295,
+   "waist": 253,
+   "tail": 295,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "Bataleon",
+   "model": "Goliath",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.7
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.1
+    },
+    {
+     "l": 163,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Nidecker",
+   "model": "Escape",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.1
+    },
+    {
+     "l": 162,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Season",
+   "model": "Forma",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 299,
+   "waist": 255,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.2
+    },
+    {
+     "l": 163,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Endeavor",
+   "model": "Scout",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Directional",
+   "tip": 297,
+   "waist": 254,
+   "tail": 291,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.5
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 160,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Public",
+   "model": "General Public",
+   "year": 2024,
+   "category": "All-Mountain",
+   "shape": "Twin",
+   "tip": 294,
+   "waist": 252,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.4
+    },
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Ultrafear",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 289,
+   "waist": 249,
+   "tail": 289,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 7.2
+    },
+    {
+     "l": 153,
+     "r": 7.4
+    },
+    {
+     "l": 155,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Horrorscope",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 290,
+   "waist": 250,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.3
+    },
+    {
+     "l": 154,
+     "r": 7.5
+    },
+    {
+     "l": 157,
+     "r": 7.7
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Free Thinker",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 293,
+   "waist": 251,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.6
+    },
+    {
+     "l": 154,
+     "r": 7.8
+    },
+    {
+     "l": 157,
+     "r": 8.0
+    },
+    {
+     "l": 160,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "GNU",
+   "model": "Money",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 292,
+   "waist": 251,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.5
+    },
+    {
+     "l": 153,
+     "r": 7.7
+    },
+    {
+     "l": 155,
+     "r": 7.9
+    },
+    {
+     "l": 158,
+     "r": 8.1
+    }
+   ]
+  },
+  {
+   "brand": "Salomon",
+   "model": "Huck Knife",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 293,
+   "waist": 251,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.6
+    },
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.0
+    },
+    {
+     "l": 161,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Ride",
+   "model": "Twinpig",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Volume-Shifted",
+   "tip": 293,
+   "waist": 262,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 142,
+     "r": 6.9
+    },
+    {
+     "l": 148,
+     "r": 7.3
+    },
+    {
+     "l": 151,
+     "r": 7.6
+    },
+    {
+     "l": 154,
+     "r": 7.9
+    }
+   ]
+  },
+  {
+   "brand": "Rome",
+   "model": "Agent",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 294,
+   "waist": 252,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "K2",
+   "model": "Afterblack",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 292,
+   "waist": 250,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.6
+    },
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "Bataleon",
+   "model": "Evil Twin",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 296,
+   "waist": 254,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.5
+    },
+    {
+     "l": 154,
+     "r": 7.7
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.1
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "Funslinger",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 294,
+   "waist": 252,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.2
+    },
+    {
+     "l": 154,
+     "r": 7.5
+    },
+    {
+     "l": 157,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "YES",
+   "model": "Basic",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 296,
+   "waist": 254,
+   "tail": 296,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.4
+    },
+    {
+     "l": 156,
+     "r": 7.6
+    },
+    {
+     "l": 159,
+     "r": 7.9
+    },
+    {
+     "l": 162,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Arbor",
+   "model": "Draft",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 292,
+   "waist": 251,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 7.4
+    },
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "United Shapes",
+   "model": "Cadet",
+   "year": 2024,
+   "category": "Freestyle",
+   "shape": "Twin",
+   "tip": 293,
+   "waist": 252,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.5
+    },
+    {
+     "l": 155,
+     "r": 7.7
+    },
+    {
+     "l": 158,
+     "r": 7.9
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Flagship",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 302,
+   "waist": 258,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 161,
+     "r": 8.3
+    },
+    {
+     "l": 164,
+     "r": 8.7
+    },
+    {
+     "l": 169,
+     "r": 9.2
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Hovercraft",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Tapered",
+   "tip": 300,
+   "waist": 258,
+   "tail": 285,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.0
+    },
+    {
+     "l": 156,
+     "r": 7.4
+    },
+    {
+     "l": 160,
+     "r": 7.9
+    },
+    {
+     "l": 164,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Storm Chaser",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 260,
+   "tail": 280,
+   "lengths": [
+    {
+     "l": 148,
+     "r": 6.4
+    },
+    {
+     "l": 152,
+     "r": 6.8
+    },
+    {
+     "l": 156,
+     "r": 7.2
+    },
+    {
+     "l": 160,
+     "r": 7.6
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Mind Expander",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Tapered",
+   "tip": 305,
+   "waist": 260,
+   "tail": 285,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 6.9
+    },
+    {
+     "l": 158,
+     "r": 7.3
+    },
+    {
+     "l": 162,
+     "r": 7.7
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Flight Attendant",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 303,
+   "waist": 256,
+   "tail": 291,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.8
+    },
+    {
+     "l": 156,
+     "r": 8.0
+    },
+    {
+     "l": 159,
+     "r": 8.3
+    },
+    {
+     "l": 162,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Deep Thinker",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 297,
+   "waist": 252,
+   "tail": 291,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.6
+    },
+    {
+     "l": 154,
+     "r": 7.8
+    },
+    {
+     "l": 157,
+     "r": 8.0
+    },
+    {
+     "l": 160,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Hometown Hero",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 305,
+   "waist": 256,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 152,
+     "r": 7.5
+    },
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Lib Tech",
+   "model": "Orca",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Volume-Shifted",
+   "tip": 300,
+   "waist": 264,
+   "tail": 288,
+   "lengths": [
+    {
+     "l": 147,
+     "r": 7.0
+    },
+    {
+     "l": 150,
+     "r": 7.3
+    },
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 159,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Lib Tech",
+   "model": "Cortado",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 298,
+   "waist": 258,
+   "tail": 288,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 7.2
+    },
+    {
+     "l": 153,
+     "r": 7.5
+    },
+    {
+     "l": 156,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "GNU",
+   "model": "Mullair",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.6
+    },
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 159,
+     "r": 8.2
+    },
+    {
+     "l": 162,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "Swift",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 257,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.2
+    },
+    {
+     "l": 157,
+     "r": 7.6
+    },
+    {
+     "l": 161,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "West",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 302,
+   "waist": 260,
+   "tail": 288,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.4
+    },
+    {
+     "l": 159,
+     "r": 7.8
+    },
+    {
+     "l": 163,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Kazu Kokubo Pro",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 255,
+   "tail": 294,
+   "lengths": [
+    {
+     "l": 155,
+     "r": 7.8
+    },
+    {
+     "l": 158,
+     "r": 8.1
+    },
+    {
+     "l": 162,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Navigator",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 301,
+   "waist": 256,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.7
+    },
+    {
+     "l": 160,
+     "r": 8.1
+    },
+    {
+     "l": 164,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Capita",
+   "model": "Spring Break Slush Slasher",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 250,
+   "tail": 250,
+   "lengths": [
+    {
+     "l": 147,
+     "r": 6.5
+    },
+    {
+     "l": 152,
+     "r": 7.0
+    },
+    {
+     "l": 158,
+     "r": 7.6
+    }
+   ]
+  },
+  {
+   "brand": "Rossignol",
+   "model": "XV",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 303,
+   "waist": 259,
+   "tail": 291,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.4
+    },
+    {
+     "l": 159,
+     "r": 7.9
+    },
+    {
+     "l": 165,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Rossignol",
+   "model": "Sushi",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Volume-Shifted",
+   "tip": 300,
+   "waist": 264,
+   "tail": 280,
+   "lengths": [
+    {
+     "l": 145,
+     "r": 6.5
+    },
+    {
+     "l": 150,
+     "r": 7.0
+    },
+    {
+     "l": 155,
+     "r": 7.5
+    }
+   ]
+  },
+  {
+   "brand": "Salomon",
+   "model": "Dancehaul",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Volume-Shifted",
+   "tip": 296,
+   "waist": 262,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 147,
+     "r": 6.9
+    },
+    {
+     "l": 151,
+     "r": 7.3
+    },
+    {
+     "l": 154,
+     "r": 7.7
+    },
+    {
+     "l": 157,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Korua",
+   "model": "Dart",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 298,
+   "waist": 255,
+   "tail": 285,
+   "lengths": [
+    {
+     "l": 151,
+     "r": 7.2
+    },
+    {
+     "l": 157,
+     "r": 7.7
+    },
+    {
+     "l": 162,
+     "r": 8.2
+    }
+   ]
+  },
+  {
+   "brand": "Korua",
+   "model": "Nanuk",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Tapered",
+   "tip": 305,
+   "waist": 262,
+   "tail": 280,
+   "lengths": [
+    {
+     "l": 159,
+     "r": 7.5
+    },
+    {
+     "l": 164,
+     "r": 8.0
+    },
+    {
+     "l": 169,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "YES",
+   "model": "Pick Your Line",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 258,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.7
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    },
+    {
+     "l": 165,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "YES",
+   "model": "Hybrid",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 153,
+     "r": 7.4
+    },
+    {
+     "l": 156,
+     "r": 7.7
+    },
+    {
+     "l": 159,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "Slash",
+   "model": "Straight",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 158,
+     "r": 7.9
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Ride",
+   "model": "MTNpig",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Volume-Shifted",
+   "tip": 300,
+   "waist": 266,
+   "tail": 292,
+   "lengths": [
+    {
+     "l": 148,
+     "r": 7.0
+    },
+    {
+     "l": 153,
+     "r": 7.5
+    },
+    {
+     "l": 157,
+     "r": 8.0
+    }
+   ]
+  },
+  {
+   "brand": "Bataleon",
+   "model": "Surfer",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Tapered",
+   "tip": 305,
+   "waist": 262,
+   "tail": 275,
+   "lengths": [
+    {
+     "l": 150,
+     "r": 6.8
+    },
+    {
+     "l": 156,
+     "r": 7.3
+    },
+    {
+     "l": 160,
+     "r": 7.7
+    }
+   ]
+  },
+  {
+   "brand": "Arbor",
+   "model": "Bryan Iguchi Pro",
+   "year": 2024,
+   "category": "Freeride",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 256,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 157,
+     "r": 7.7
+    },
+    {
+     "l": 160,
+     "r": 8.0
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Nitro",
+   "model": "Squash",
+   "year": 2024,
+   "category": "Powder",
+   "shape": "Volume-Shifted",
+   "tip": 298,
+   "waist": 264,
+   "tail": 280,
+   "lengths": [
+    {
+     "l": 149,
+     "r": 6.8
+    },
+    {
+     "l": 153,
+     "r": 7.2
+    },
+    {
+     "l": 159,
+     "r": 7.8
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Solution",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 302,
+   "waist": 259,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 154,
+     "r": 7.6
+    },
+    {
+     "l": 158,
+     "r": 7.9
+    },
+    {
+     "l": 161,
+     "r": 8.2
+    },
+    {
+     "l": 164,
+     "r": 8.6
+    },
+    {
+     "l": 169,
+     "r": 9.1
+    }
+   ]
+  },
+  {
+   "brand": "Jones",
+   "model": "Ultra Solution",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 301,
+   "waist": 258,
+   "tail": 289,
+   "lengths": [
+    {
+     "l": 157,
+     "r": 7.9
+    },
+    {
+     "l": 161,
+     "r": 8.2
+    },
+    {
+     "l": 164,
+     "r": 8.6
+    }
+   ]
+  },
+  {
+   "brand": "Burton",
+   "model": "Hometown Hero Split",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 305,
+   "waist": 256,
+   "tail": 293,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.9
+    },
+    {
+     "l": 160,
+     "r": 8.3
+    }
+   ]
+  },
+  {
+   "brand": "Weston",
+   "model": "Backwoods",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 300,
+   "waist": 258,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 157,
+     "r": 7.8
+    },
+    {
+     "l": 162,
+     "r": 8.3
+    },
+    {
+     "l": 167,
+     "r": 8.8
+    }
+   ]
+  },
+  {
+   "brand": "Lib Tech",
+   "model": "Split BRD",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 298,
+   "waist": 256,
+   "tail": 290,
+   "lengths": [
+    {
+     "l": 159,
+     "r": 7.9
+    },
+    {
+     "l": 164,
+     "r": 8.4
+    }
+   ]
+  },
+  {
+   "brand": "Never Summer",
+   "model": "Prospector",
+   "year": 2024,
+   "category": "Splitboard",
+   "shape": "Directional",
+   "tip": 301,
+   "waist": 258,
+   "tail": 289,
+   "lengths": [
+    {
+     "l": 158,
+     "r": 7.7
+    },
+    {
+     "l": 162,
+     "r": 8.1
+    },
+    {
+     "l": 166,
+     "r": 8.5
+    }
+   ]
+  },
+  {
+   "brand": "Korua",
+   "model": "Pencil",
+   "year": 2024,
+   "category": "Carving",
+   "shape": "Directional",
+   "tip": 285,
+   "waist": 250,
+   "tail": 265,
+   "lengths": [
+    {
+     "l": 159,
+     "r": 8.0
+    },
+    {
+     "l": 165,
+     "r": 8.8
+    }
+   ]
+  },
+  {
+   "brand": "Korua",
+   "model": "Tranny Finder",
+   "year": 2024,
+   "category": "Carving",
+   "shape": "Directional",
+   "tip": 290,
+   "waist": 252,
+   "tail": 275,
+   "lengths": [
+    {
+     "l": 156,
+     "r": 7.8
+    },
+    {
+     "l": 161,
+     "r": 8.3
+    },
+    {
+     "l": 166,
+     "r": 8.8
+    }
+   ]
+  }
+ ]
+}
