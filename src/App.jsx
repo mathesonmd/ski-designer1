@@ -2483,6 +2483,26 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
 </svg>`;
 }
 
+// A reference "ghost" outline built ONLY from the four numbers we actually have (length + tip/waist/
+// tail widths). Tip/tail length and nose shape aren't in the database, so this is deliberately a plain
+// schematic envelope — a dimension reference, not a claim about the real ski's exact shape.
+function buildRefGhostOutline(L, tip, waist, tail) {
+  const ss = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+  const tipLen = L * 0.12, tailLen = L * 0.08;          // typical proportions (estimate only)
+  const tipContact = L - tipLen, tailContact = tailLen;
+  const tHW = tip / 2, wHW = waist / 2, taHW = tail / 2;
+  const N = 140, right = [];
+  for (let i = 0; i <= N; i++) {
+    const y = (i / N) * L; let hw;
+    if (y <= tailContact) { const t = tailContact > 0 ? y / tailContact : 1; hw = taHW * (0.30 + 0.70 * Math.sqrt(t)); }
+    else if (y >= tipContact) { const t = tipLen > 0 ? (L - y) / tipLen : 1; hw = tHW * (0.30 + 0.70 * Math.sqrt(t)); }
+    else { const u = (y - tailContact) / (tipContact - tailContact); hw = u <= 0.5 ? taHW + (wHW - taHW) * ss(u / 0.5) : wHW + (tHW - wHW) * ss((u - 0.5) / 0.5); }
+    right.push({ x: hw, y });
+  }
+  const left = right.slice().reverse().map(p => ({ x: -p.x, y: p.y }));
+  return { outline: right.concat(left), tipContact, tailContact, tHW, wHW, taHW };
+}
+
 function PlanView({ ski, setSki, width, height, orientation = "horizontal", topsheet, pairView, refGhost }) {
   const canvasRef = useRef(null);
   // Topsheet artwork: keep a decoded HTMLImageElement in a ref, and bump a counter when it finishes
@@ -2735,20 +2755,28 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
     ctx.stroke(); ctx.setLineDash([]);
 
-    // Reference ghost outline (from the Ski Database) drawn dashed behind the design so you can shape
-    // against it. Centered on the design regardless of length difference.
-    if (refGhost) {
+    // Reference ghost (from the Ski Database) — a plain dimension envelope from the four known numbers,
+    // drawn dashed behind the design with the tip/waist/tail widths labeled. Not the real ski's shape.
+    if (refGhost && refGhost.lengthMM) {
       try {
-        const gpts = getFullOutlinePoints(refGhost);
-        const shift = (ski.length - (refGhost.length || ski.length)) / 2;
+        const g = buildRefGhostOutline(refGhost.lengthMM, refGhost.tip, refGhost.waist, refGhost.tail);
+        const shift = (ski.length - refGhost.lengthMM) / 2;
         ctx.save();
-        ctx.setLineDash([7, 5]);
-        ctx.strokeStyle = "rgba(200,147,90,0.5)";
-        ctx.lineWidth = 1.3;
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = "rgba(200,147,90,0.55)";
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        gpts.forEach((p, i) => { const s = toMain(p.x, p.y + shift); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+        g.outline.forEach((p, i) => { const s = toMain(p.x, p.y + shift); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
         ctx.closePath(); ctx.stroke();
         ctx.setLineDash([]);
+        // Width labels at tip / waist / tail so it reads as a dimension reference.
+        ctx.fillStyle = "rgba(200,147,90,0.9)";
+        ctx.font = "9px 'JetBrains Mono', monospace";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const lab = (val, hw, y) => { const s = toMain(hw + 6, y + shift); ctx.fillText(String(val), s.x, s.y); };
+        lab(refGhost.tip, g.tHW, g.tipContact);
+        lab(refGhost.waist, g.wHW, refGhost.lengthMM / 2);
+        lab(refGhost.tail, g.taHW, g.tailContact);
         ctx.restore();
       } catch (e) {}
     }
@@ -4951,7 +4979,7 @@ function SkiDatabaseModal({ onClose, onApply, onGhost }) {
 
         {status === "ok" && (
           <div style={{ padding: "12px 18px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search brand or model\u2026"
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search brand or model…"
               style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "8px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
               {cats.map(c => chip(cat === c, c, () => setCat(c), c))}
@@ -5068,13 +5096,13 @@ export default function App() {
   const applySkiFromDb = useCallback((s) => {
     setSki(prev => ({ ...prev, length: s.length * 10, tipWidth: s.tip, waistWidth: s.waist, tailWidth: s.tail }));
     setShowDb(false);
-    setDbMsg(`Loaded ${s.brand} ${s.model} \u00b7 ${s.length}cm \u00b7 ${s.tip}-${s.waist}-${s.tail}. Set your own rocker, core & layup.`);
+    setDbMsg(`Loaded ${s.brand} ${s.model} · ${s.length}cm · ${s.tip}-${s.waist}-${s.tail}${s.radius ? ` (published radius ~${s.radius} m)` : ""}. The designer recomputes radius from tip/tail length & edges — set those, plus rocker, core & layup.`);
     setTimeout(() => setDbMsg(null), 5000);
   }, []);
   // Reference "ghost" overlay: trace a database ski behind the design without changing it.
   const [refGhost, setRefGhost] = useState(null);   // { ...skiObj, _label }
   const setGhostFromDb = useCallback((s) => {
-    setRefGhost({ ...DEFAULT_SKI, length: s.length * 10, tipWidth: s.tip, waistWidth: s.waist, tailWidth: s.tail, _label: `${s.brand} ${s.model} ${s.length}cm` });
+    setRefGhost({ lengthMM: s.length * 10, tip: s.tip, waist: s.waist, tail: s.tail, _label: `${s.brand} ${s.model} ${s.length}cm` });
     setShowDb(false);
   }, []);
   // A snowboard is a single board, not a pair — keep pair view off (and its toggles hidden) in that mode.
@@ -5808,7 +5836,7 @@ export default function App() {
         }}>Browse Ski Database</button>
         {refGhost && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
-            <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost: {refGhost._label}</span>
+            <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
             <div style={{ flex: 1 }} />
             <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
           </div>
