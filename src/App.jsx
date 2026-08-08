@@ -1587,29 +1587,54 @@ ${body}
 // Top-down outline of the wood core, narrowed by coreInset on each side for sidewall comp.
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
-// 3D wood core as a binary STL: flat bottom (Z=0) with the top surface following the core thickness
-// taper from the Core Side view, held constant across the width at each length station. Includes the
-// core inset (narrower than the ski by coreInset per side) and any tip/tail V-cuts (the core tapers to
-// the V apex and stops). Length along X, width along Y, thickness up Z, centered with the flat face on
-// Z=0 — drops into CAM (import as millimetres) as a solid to rough & finish the core top.
-function exportCoreSTL(ski) {
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
-  const L = ski.length, N = 300;
-  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
-  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
-  const tipExt = ski.vcutTipExt || 0, tailExt = ski.vcutTailExt || 0;
-  const hwCore = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
-  const tAt = (xmm) => Math.max(0.3, getCoreThickAt(ski.coreProfile, xmm / L));
-  // Half-width, tapering linearly to the apex across each V-cut region (core body unchanged).
-  const hwV = (xmm) => {
-    if (vTail && xmm < tailContactX) { const a = tailContactX - tailExt; return (tailExt > 0 && xmm > a) ? hwCore(tailContactX) * (xmm - a) / tailExt : 0; }
-    if (vTip && xmm > tipContactX) { const a = tipContactX + tipExt; return (tipExt > 0 && xmm < a) ? hwCore(tipContactX) * (a - xmm) / tipExt : 0; }
-    return hwCore(xmm);
+// Ear-clipping triangulation of a simple polygon (array of {x,y}); returns index triples.
+function triangulatePolygon(pts) {
+  const n = pts.length;
+  if (n < 3) return [];
+  let area = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; area += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
+  let V = []; for (let i = 0; i < n; i++) V.push(i);
+  if (area < 0) V.reverse();
+  const crs = (o, a, b) => (pts[a].x - pts[o].x) * (pts[b].y - pts[o].y) - (pts[a].y - pts[o].y) * (pts[b].x - pts[o].x);
+  const inTri = (p, a, b, c) => {
+    const d1 = crs(a, b, p), d2 = crs(b, c, p), d3 = crs(c, a, p);
+    return !(((d1 < 0) || (d2 < 0) || (d3 < 0)) && ((d1 > 0) || (d2 > 0) || (d3 > 0)));
   };
-  const xMin = vTail ? tailContactX - tailExt : 0;
-  const xMax = vTip ? tipContactX + tipExt : L;
-  const st = [];
-  for (let i = 0; i <= N; i++) { const xmm = xMin + (xMax - xMin) * (i / N); st.push({ x: xmm - L / 2, hw: Math.max(0.4, hwV(xmm)), t: tAt(xmm) }); }
+  const tris = [];
+  let guard = 0;
+  while (V.length > 3 && guard++ < 20000) {
+    let clipped = false;
+    for (let i = 0; i < V.length; i++) {
+      const a = V[(i + V.length - 1) % V.length], b = V[i], c = V[(i + 1) % V.length];
+      if (crs(a, b, c) <= 0) continue;                    // ear must be convex (working CCW)
+      let ok = true;
+      for (let j = 0; j < V.length; j++) { const p = V[j]; if (p === a || p === b || p === c) continue; if (inTri(p, a, b, c)) { ok = false; break; } }
+      if (!ok) continue;
+      tris.push([a, b, c]); V.splice(i, 1); clipped = true; break;
+    }
+    if (!clipped) break;
+  }
+  if (V.length === 3) tris.push([V[0], V[1], V[2]]);
+  return tris;
+}
+
+// 3D wood core as a binary STL — a WYSIWYG loft of the EXACT core outline the DXF uses (applyVCutToCore):
+// same core inset and same V-cuts, fully closed. Flat bottom at Z=0, top surface following the core-side
+// thickness taper, vertical side walls around the true outline. Honors the Export Orientation dropdown.
+// Import into CAM as millimetres. Because it lofts the DXF polygon directly, the solid is the DXF.
+function exportCoreSTL(ski) {
+  const L = ski.length;
+  const raw = applyVCutToCore(ski);                      // the exact 2D core outline {x:length, y:lateral}
+  // Dedupe consecutive points and drop any closing duplicate.
+  const poly = [];
+  for (const p of raw) { const last = poly[poly.length - 1]; if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 1e-4) poly.push({ x: p.x, y: p.y }); }
+  if (poly.length > 2 && Math.hypot(poly[0].x - poly[poly.length - 1].x, poly[0].y - poly[poly.length - 1].y) < 1e-4) poly.pop();
+  const M = poly.length;
+  const tAt = (xmm) => Math.max(0.3, getCoreThickAt(ski.coreProfile, xmm / L));
+  const cx = L / 2;                                       // center the model on length
+  let gx = 0, gy = 0; for (const p of poly) { gx += p.x; gy += p.y; } gx /= M; gy /= M;
+  const bot = poly.map(p => [p.x - cx, p.y, 0]);
+  const top = poly.map(p => [p.x - cx, p.y, tAt(p.x)]);
 
   const tris = [];
   const nrm = (a, b, c) => {
@@ -1617,22 +1642,24 @@ function exportCoreSTL(ski) {
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1;
     return [nx / m, ny / m, nz / m];
   };
-  // Add a triangle, flipping its winding if needed so the facet normal points along `dir` (outward).
   const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
   const quad = (a, b, c, d, dir) => { tri(a, b, c, dir); tri(a, c, d, dir); };
 
-  for (let i = 0; i < N; i++) {
-    const s0 = st[i], s1 = st[i + 1];
-    const BL0 = [s0.x, -s0.hw, 0], BR0 = [s0.x, s0.hw, 0], TL0 = [s0.x, -s0.hw, s0.t], TR0 = [s0.x, s0.hw, s0.t];
-    const BL1 = [s1.x, -s1.hw, 0], BR1 = [s1.x, s1.hw, 0], TL1 = [s1.x, -s1.hw, s1.t], TR1 = [s1.x, s1.hw, s1.t];
-    quad(TL0, TR0, TR1, TL1, [0, 0, 1]);    // top (profiled)
-    quad(BL0, BR0, BR1, BL1, [0, 0, -1]);   // bottom (flat)
-    quad(BL0, TL0, TL1, BL1, [0, -1, 0]);   // left sidewall
-    quad(BR0, TR0, TR1, BR1, [0, 1, 0]);    // right sidewall
+  // Side walls around the true outline (outward normal ≈ edge midpoint minus centroid).
+  for (let i = 0; i < M; i++) {
+    const j = (i + 1) % M;
+    const mx = (poly[i].x + poly[j].x) / 2, my = (poly[i].y + poly[j].y) / 2;
+    quad(bot[i], bot[j], top[j], top[i], [mx - gx, my - gy, 0]);
   }
-  const cap = (s, dir) => { const BL = [s.x, -s.hw, 0], BR = [s.x, s.hw, 0], TL = [s.x, -s.hw, s.t], TR = [s.x, s.hw, s.t]; quad(BL, BR, TR, TL, dir); };
-  cap(st[0], [-1, 0, 0]);   // tail end
-  cap(st[N], [1, 0, 0]);    // tip end
+  // Bottom (flat, -Z) and top (profiled, +Z) caps from one triangulation of the outline.
+  const capTris = triangulatePolygon(poly);
+  for (const [a, b, c] of capTris) tri(bot[a], bot[b], bot[c], [0, 0, -1]);
+  for (const [a, b, c] of capTris) tri(top[a], top[b], top[c], [0, 0, 1]);
+
+  // Honor the Export Orientation dropdown: "vertical" (default) runs length up +Y (matches DXF/SVG);
+  // "horizontal" keeps length along X. Applied as a true 90° rotation about Z so the solid stays valid.
+  const vertical = (ski.exportOrientation || "vertical") !== "horizontal";
+  if (vertical) for (const t of tris) { t.v = t.v.map(v => [-v[1], v[0], v[2]]); t.n = [-t.n[1], t.n[0], t.n[2]]; }
 
   const n = tris.length;
   const buf = new ArrayBuffer(84 + n * 50);
