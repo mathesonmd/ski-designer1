@@ -1587,56 +1587,77 @@ ${body}
 // Top-down outline of the wood core, narrowed by coreInset on each side for sidewall comp.
 // Intended to be imported into 3D modeling software on the XY (top-view) plane. Used to
 // boolean-cut the extruded side profile for the final 3D core shape.
-// 3D wood core as a binary STL — a slice-by-slice loft ALONG the length, so the top surface follows the
-// core-side thickness curve smoothly (flat bottom at Z=0). The planform half-width at each station is the
-// same as the DXF core outline (same core inset + V-cut geometry as applyVCutToCore), so the solid is
-// WYSIWYG with the DXF. Honors the Export Orientation dropdown. Import into CAM as millimetres.
+// 3D wood core as a binary STL. Lofts the core as left/right half-intervals along the length, which
+// captures the FULL V-cut in either direction: an OUTWARD spear (positive extension, apex past the
+// contact) or an INWARD notch / swallowtail (negative extension, apex back toward the center). The top
+// follows the core-side thickness curve (flat bottom at Z=0). Planform matches the DXF outline, so the
+// solid is WYSIWYG. Honors the Export Orientation dropdown. Import into CAM as millimetres.
 function exportCoreSTL(ski) {
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
-  const L = ski.length, N = 320;
+  const L = ski.length;
   const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
   const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
-  // The V-cut extension is how far the apex reaches PAST the contact toward the tip/tail — it must be
-  // >= 0. A negative value would fold the outline back on itself (self-intersection), so clamp it.
-  const tipExt = Math.max(0, ski.vcutTipExt || 0), tailExt = Math.max(0, ski.vcutTailExt || 0);
-  const hwCore = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
-  const tAt = (xmm) => Math.max(0.3, getCoreThickAt(ski.coreProfile, xmm / L));
-  // Planform half-width at length x: body follows the sidecut; each enabled V region tapers linearly
-  // from the contact width down to the apex.
-  const hwV = (xmm) => {
-    if (vTip && tipExt > 0 && xmm > tipContactX) { const a = tipContactX + tipExt; return xmm < a ? hwCore(tipContactX) * (a - xmm) / tipExt : 0; }
-    if (vTail && tailExt > 0 && xmm < tailContactX) { const a = tailContactX - tailExt; return xmm > a ? hwCore(tailContactX) * (xmm - a) / tailExt : 0; }
-    return hwCore(xmm);
-  };
-  const xMin = vTail ? tailContactX - tailExt : 0;   // ext=0 -> core ends bluntly at the contact
-  const xMax = vTip ? tipContactX + tipExt : L;
-  const st = [];
-  for (let i = 0; i <= N; i++) { const xmm = xMin + (xMax - xMin) * (i / N); st.push({ x: xmm - L / 2, hw: Math.max(0.3, hwV(xmm)), t: tAt(xmm) }); }
+  // Extension: POSITIVE reaches past the contact toward the tip/tail (outward spear); NEGATIVE reaches
+  // back toward the center (inward notch). Clamp to a safe range so the outline can't self-intersect.
+  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
+  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
+  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
+  const hw = (x) => Math.max(1.0, getWidthAtPos(ski, x / L) / 2 - coreInset);
+  const th = (x) => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
 
-  const tris = [];
-  const nrm = (a, b, c) => {
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1;
-    return [nx / m, ny / m, nz / m];
-  };
-  const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
-  const quad = (a, b, c, d, dir) => { tri(a, b, c, dir); tri(a, c, d, dir); };
-
-  for (let i = 0; i < N; i++) {
-    const s0 = st[i], s1 = st[i + 1];
-    const BL0 = [s0.x, -s0.hw, 0], BR0 = [s0.x, s0.hw, 0], TL0 = [s0.x, -s0.hw, s0.t], TR0 = [s0.x, s0.hw, s0.t];
-    const BL1 = [s1.x, -s1.hw, 0], BR1 = [s1.x, s1.hw, 0], TL1 = [s1.x, -s1.hw, s1.t], TR1 = [s1.x, s1.hw, s1.t];
-    quad(TL0, TR0, TR1, TL1, [0, 0, 1]);    // top (follows thickness taper)
-    quad(BL0, BR0, BR1, BL1, [0, 0, -1]);   // bottom (flat)
-    quad(BL0, TL0, TL1, BL1, [0, -1, 0]);   // left sidewall
-    quad(BR0, TR0, TR1, BR1, [0, 1, 0]);    // right sidewall
+  // Cross-section at length x -> { o: outer half-width, n: inner notch edge } or null (no core). Body:
+  // n=0. Outward spear: o tapers to 0 at the apex. Inward notch: n rises to o at the contact (two prongs).
+  function sec(x) {
+    if (vTip) {
+      if (tipExt > 0) { const apex = tipContactX + tipExt; if (x > tipContactX) { if (x > apex) return null; return { o: Math.max(0, hw(tipContactX) * (apex - x) / tipExt), n: 0 }; } }
+      else if (tipExt < 0) { const apex = tipContactX + tipExt; if (x > tipContactX) return null; if (x >= apex) { const o = hw(x); return { o, n: Math.min(hw(tipContactX) * (x - apex) / (-tipExt), o) }; } }
+      else { if (x > tipContactX) return null; }
+    }
+    if (vTail) {
+      if (tailExt > 0) { const apex = tailContactX - tailExt; if (x < tailContactX) { if (x < apex) return null; return { o: Math.max(0, hw(tailContactX) * (x - apex) / tailExt), n: 0 }; } }
+      else if (tailExt < 0) { const apex = tailContactX - tailExt; if (x < tailContactX) return null; if (x <= apex) { const o = hw(x); return { o, n: Math.min(hw(tailContactX) * (apex - x) / (-tailExt), o) }; } }
+      else { if (x < tailContactX) return null; }
+    }
+    return { o: hw(x), n: 0 };
   }
-  const cap = (s, dir) => { const BL = [s.x, -s.hw, 0], BR = [s.x, s.hw, 0], TL = [s.x, -s.hw, s.t], TR = [s.x, s.hw, s.t]; quad(BL, BR, TR, TL, dir); };
-  cap(st[0], [-1, 0, 0]);   // tail end
-  cap(st[N], [1, 0, 0]);    // tip end
 
-  // Honor the Export Orientation dropdown: "vertical" (default) runs length up +Y (matches DXF/SVG);
-  // "horizontal" keeps length along X. Applied as a true 90° rotation about Z so the solid stays valid.
+  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : 0;
+  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : L;
+  const NS = 360, xset = new Set();
+  for (let i = 0; i <= NS; i++) xset.add(xLo + (xHi - xLo) * i / NS);
+  [tipContactX, tipContactX + tipExt, tailContactX, tailContactX - tailExt].forEach(e => { if (e >= xLo - 1e-6 && e <= xHi + 1e-6) xset.add(e); });
+  const X = [...xset].filter(x => x >= xLo - 1e-6 && x <= xHi + 1e-6).sort((a, b) => a - b);
+  const XX = []; for (const x of X) { if (!XX.length || Math.abs(x - XX[XX.length - 1]) > 1e-4) XX.push(x); }
+
+  const cx = L / 2, tris = [];
+  const nrm = (a, b, c) => { const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]; let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1; return [nx / m, ny / m, nz / m]; };
+  const same = (p, q) => Math.abs(p[0] - q[0]) < 1e-6 && Math.abs(p[1] - q[1]) < 1e-6 && Math.abs(p[2] - q[2]) < 1e-6;
+  const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
+  const P = (x, y, z) => [x - cx, y, z];
+  const quad = (a, b, c, d, dir) => { const pts = [a, b, c, d], u = []; for (const p of pts) { const q = u[u.length - 1]; if (!q || !same(p, q)) u.push(p); } if (u.length > 1 && same(u[0], u[u.length - 1])) u.pop(); if (u.length === 4) { tri(u[0], u[1], u[2], dir); tri(u[0], u[2], u[3], dir); } else if (u.length === 3) tri(u[0], u[1], u[2], dir); };
+
+  // Loft one half-interval between two slices: top, bottom, outer wall, and (for a notch) the inner wall.
+  const loftHalf = (x0, x1, t0, t1, lo0, hi0, lo1, hi1, outer, innerOn) => {
+    quad(P(x0, lo0, t0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, lo1, t1), [0, 0, 1]);
+    quad(P(x0, lo0, 0), P(x0, hi0, 0), P(x1, hi1, 0), P(x1, lo1, 0), [0, 0, -1]);
+    if (outer === 'lo') { quad(P(x0, lo0, 0), P(x0, lo0, t0), P(x1, lo1, t1), P(x1, lo1, 0), [0, -1, 0]); if (innerOn) quad(P(x0, hi0, 0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, hi1, 0), [0, 1, 0]); }
+    else { quad(P(x0, hi0, 0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, hi1, 0), [0, 1, 0]); if (innerOn) quad(P(x0, lo0, 0), P(x0, lo0, t0), P(x1, lo1, t1), P(x1, lo1, 0), [0, -1, 0]); }
+  };
+
+  for (let i = 0; i < XX.length - 1; i++) {
+    const x0 = XX[i], x1 = XX[i + 1], s0 = sec(x0), s1 = sec(x1);
+    if (!s0 || !s1) continue;
+    const t0 = th(x0), t1 = th(x1), notch = s0.n > 1e-6 || s1.n > 1e-6;
+    loftHalf(x0, x1, t0, t1, -s0.o, -s0.n, -s1.o, -s1.n, 'lo', notch);
+    loftHalf(x0, x1, t0, t1, s0.n, s0.o, s1.n, s1.o, 'hi', notch);
+  }
+  // End caps at blunt / non-V ends (tapered ends converge to a point and need no cap).
+  const capX = (x, dir) => { const s = sec(x); if (!s) return; const t = th(x); quad(P(x, -s.o, 0), P(x, -s.n, 0), P(x, -s.n, t), P(x, -s.o, t), dir); quad(P(x, s.n, 0), P(x, s.o, 0), P(x, s.o, t), P(x, s.n, t), dir); };
+  const sA = sec(XX[0]); if (sA && sA.o - sA.n > 0.05 && !(vTail && tailExt > 0)) capX(XX[0], [-1, 0, 0]);
+  const sB = sec(XX[XX.length - 1]); if (sB && sB.o - sB.n > 0.05 && !(vTip && tipExt > 0)) capX(XX[XX.length - 1], [1, 0, 0]);
+
+  // Honor the Export Orientation dropdown: "vertical" (default) runs length up +Y; "horizontal" keeps
+  // length along X. Applied as a true 90° rotation about Z so the solid stays valid.
   const vertical = (ski.exportOrientation || "vertical") !== "horizontal";
   if (vertical) for (const t of tris) { t.v = t.v.map(v => [-v[1], v[0], v[2]]); t.n = [-t.n[1], t.n[0], t.n[2]]; }
 
@@ -1911,7 +1932,11 @@ function applyVCutToCore(ski) {
   const tailContactX = ski.tailLength;
   const tipContactX = L - ski.tipLength;
   const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
-  const tipExt = Math.max(0, ski.vcutTipExt || 0), tailExt = Math.max(0, ski.vcutTailExt || 0);   // apex must reach past the contact, not behind it
+  // POSITIVE extension = outward spear (apex past the contact); NEGATIVE = inward notch (apex toward
+  // the center). Clamp to a safe range so the outline can't self-intersect.
+  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
+  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
+  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
   const hwAt = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
 
   // Sample the core rails only within the (possibly clipped) X range.
@@ -6176,20 +6201,21 @@ export default function App() {
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>CORE FILL (V-CUT)</span>
-            <InfoBubble C={C} width={250}>
-              The wood core <b style={{ color: C.heading }}>ends</b> in a V at the enabled end: the base runs edge-to-edge
-              across the core at the contact point, and the two sides converge to an apex pointing toward
-              the tip/tail. The triangular region beyond is fill material (e.g. a lighter tip fill). The
-              extension sets how far the apex reaches past the contact. Shows in the Core view and exports
-              to the Core / Combined DXF.
+            <InfoBubble C={C} width={260}>
+              The wood core ends in a V at the enabled end. The extension sets the apex:
+              a <b style={{ color: C.heading }}>positive</b> value pushes it <b style={{ color: C.heading }}>outward</b>
+              past the contact (a spear pointing toward the tip/tail), a <b style={{ color: C.heading }}>negative</b>
+              value pulls it <b style={{ color: C.heading }}>inward</b> toward the center (a swallowtail-style notch
+              between two prongs). The region left open is fill material. Shows in the Core view and exports to
+              the Core / Combined DXF and the Core STL.
             </InfoBubble>
           </div>
           {toggleBtn("Tip V-cut", "vcutTip")}
-          {ski.vcutTip && inputField("Tip ext (mm)", "vcutTipExt", 10, Math.max(20, ski.tipLength))}
+          {ski.vcutTip && inputField("Tip ext (mm) \u2014 + out / \u2212 in", "vcutTipExt", -Math.round((ski.length - ski.tipLength - ski.tailLength) / 2 * 0.9), Math.max(20, ski.tipLength))}
           {toggleBtn("Tail V-cut", "vcutTail")}
-          {ski.vcutTail && inputField("Tail ext (mm)", "vcutTailExt", 10, Math.max(20, ski.tailLength))}
+          {ski.vcutTail && inputField("Tail ext (mm) \u2014 + out / \u2212 in", "vcutTailExt", -Math.round((ski.length - ski.tipLength - ski.tailLength) / 2 * 0.9), Math.max(20, ski.tailLength))}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Core terminates at the V; region beyond is fill. Preview in the Core view.
+            Positive = outward spear, negative = inward notch. Preview in the Core view.
           </div>
         </AccordionSection>
 
