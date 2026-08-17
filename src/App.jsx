@@ -57,8 +57,13 @@ const WOODS = {
   bamboo:{name:"Bamboo",E:14000,density:725},
 };
 const GLASS = {
-  triax23:{name:"Triax 23oz",E:26900,thick:0.57},triax19:{name:"Triax 19oz",E:24200,thick:0.48},
-  biax:{name:"Biaxial \u00B145",E:12000,thick:0.45},
+  triax23:{name:"Glass Triax 23oz",E:26900,thick:0.57},triax19:{name:"Glass Triax 19oz",E:24200,thick:0.48},
+  biax:{name:"Glass Biax \u00B145",E:12000,thick:0.45},
+  // Carbon fabrics (full-width facing, like the glass fabrics). Effective laminate moduli — carbon biax
+  // ±45 is matrix-influenced so only modestly stiffer than glass; carbon triax has 0° fibres that carry
+  // most of the bending load, so it's much stiffer. Combine with UD glass/carbon stringers below.
+  carbonBiax:{name:"Carbon Biax \u00B145",E:24000,thick:0.40},
+  carbonTriax:{name:"Carbon Triax",E:58000,thick:0.55},
   // bcomp natural-fibre flax (ampliTex). Laminate moduli from bcomp/measured data (see notes):
   //  - 2x2 twill 0/90 (e.g. 5040): ~9 GPa tensile / 7 GPa flexural at ~40% Vf. Replaces 495gsm glass 0/90.
   //  - UD 0° (e.g. 5009): ~11 GPa along fibres. Replaces 500gsm glass UD. User uses it for tip/tail torsion.
@@ -70,9 +75,15 @@ const METALS = {
   none:{name:"None",E:0,thick:0},titanal:{name:"Titanal 0.4mm",E:71700,thick:0.4},
   titanalH:{name:"Titanal 0.6mm",E:71700,thick:0.6},
 };
+// UD stringer slot: width-limited unidirectional reinforcement over/under the core. Carbon UD is the
+// stiff default; glass UD lets you pair UD glass with a carbon biax/triax fabric above (a common combo).
 const CARBON = {
-  none:{name:"None",E:0,width:0},narrow:{name:"UD 15mm",E:135000,width:15},
-  medium:{name:"UD 25mm",E:135000,width:25},wide:{name:"UD Full Width",E:135000,width:0},
+  none:{name:"None",E:0,width:0},
+  narrow:{name:"Carbon UD 15mm",E:135000,width:15},
+  medium:{name:"Carbon UD 25mm",E:135000,width:25},wide:{name:"Carbon UD Full",E:135000,width:0},
+  glassNarrow:{name:"Glass UD 15mm",E:40000,width:15,thick:0.5},
+  glassMedium:{name:"Glass UD 25mm",E:40000,width:25,thick:0.5},
+  glassWide:{name:"Glass UD Full",E:40000,width:0,thick:0.5},
 };
 const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=2,BASE_E=800,BASE_THICK=1.2;
 
@@ -472,15 +483,15 @@ function getCoreThickAt(profile, pos) {
 }
 function computeEIAtStation(skiWidth,coreThick,layup){
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
-  const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width;
+  const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width,cT=carbon.thick||CARBON_THICK;
   const layers=[];
   layers.push({E:BASE_E,b:skiWidth,t:BASE_THICK});
   layers.push({E:EDGE_E,b:EDGE_W*2,t:EDGE_H});
   for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});
   if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
-  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:CARBON_THICK});
+  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
   layers.push({E:wood.E,b:skiWidth,t:Math.max(coreThick,0.5)});
-  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:CARBON_THICK});
+  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
   if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
   for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});
   let yBot=0;const yc=[];
@@ -2464,9 +2475,9 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
     ["Flex", `${rating.label} (${Math.round(flex.underfootK)} N/mm)`],
     ...(isBoard ? [["Stance / setback", `${ski.stanceWidth || 0} / ${ski.setback || 0} mm`]] : []),
     ["Core", ski.layup.wood],
-    ["Fiber", `${ski.layup.glass} \u00D7${ski.layup.glassLayers}/side`],
+    ["Fabric", `${ski.layup.glass} \u00D7${ski.layup.glassLayers}/side`],
     ...(ski.layup.metal && ski.layup.metal !== "none" ? [["Metal", ski.layup.metal]] : []),
-    ...(ski.layup.carbon && ski.layup.carbon !== "none" ? [["Carbon", `${ski.layup.carbon} \u00D7${ski.layup.carbonLayers}`]] : []),
+    ...(ski.layup.carbon && ski.layup.carbon !== "none" ? [["Stringer", `${ski.layup.carbon} \u00D7${ski.layup.carbonLayers}`]] : []),
     ["Edge wrap", ski.edgeWrap || "full"],
     ["Core mass (est)", `~${bom.coreMassKg.toFixed(2)} kg`],
   ];
@@ -5460,6 +5471,7 @@ export default function App() {
     buildCard: false,
     cncExport: false,
     externalTools: false,
+    suppliers: false,
     beta: true,
   };
   const [sectionsOpen, setSectionsOpen] = useState(() => {
@@ -6221,23 +6233,26 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
-          {selectField("Fiber Layer", ski.layup.glass, GLASS, v => setLayup("glass", v))}
+          {selectField("Fabric (biax / triax)", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 7 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Fiber Layers / side</div>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Fabric Layers / side</div>
             <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
               onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
               style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
           </div>
           {selectField("Metal", ski.layup.metal, METALS, v => setLayup("metal", v))}
-          {selectField("Carbon", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
+          {selectField("UD Stringer", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
           {ski.layup.carbon !== "none" && (
             <div style={{ marginBottom: 7 }}>
-              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Carbon Layers</div>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Stringer Layers</div>
               <input type="number" value={ski.layup.carbonLayers} min={1} max={4} step={1}
                 onChange={e => setLayup("carbonLayers", parseInt(e.target.value) || 1)}
                 style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             </div>
           )}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Both slots take glass or carbon — e.g. a carbon triax fabric over UD glass stringers, or glass triax with UD carbon. The Flex panel updates as you mix.
+          </div>
         </AccordionSection>
 
         {groupHeader("3 · ARTWORK & PREVIEW", "Wrap a topsheet image, preview the pair, and view it in 3D.")}
@@ -6384,9 +6399,9 @@ export default function App() {
           {(() => {
             const rows = [
               { key: "wood", label: "Wood core", qty: bom.coreVolL, disp: `${bom.coreVolL.toFixed(2)} L`, unit: "$/L" },
-              { key: "glass", label: `Fiberglass (${bom.glassLayers}/side)`, qty: bom.glassM2, disp: `${bom.glassM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
+              { key: "glass", label: `Fabric (${bom.glassLayers}/side)`, qty: bom.glassM2, disp: `${bom.glassM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
               ...(bom.metalM2 > 0 ? [{ key: "metal", label: "Metal laminate", qty: bom.metalM2, disp: `${bom.metalM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" }] : []),
-              ...(bom.carbonM2 > 0 ? [{ key: "carbon", label: `Carbon (${bom.carbonLayers}/side)`, qty: bom.carbonM2, disp: `${bom.carbonM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" }] : []),
+              ...(bom.carbonM2 > 0 ? [{ key: "carbon", label: `UD stringer (${bom.carbonLayers}/side)`, qty: bom.carbonM2, disp: `${bom.carbonM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" }] : []),
               { key: "edge", label: `Steel edge (${bom.edgeWrap})`, qty: bom.edgeLenM, disp: `${bom.edgeLenM.toFixed(2)} m`, unit: "$/m" },
               { key: "base", label: "Base (P-tex)", qty: bom.baseM2, disp: `${bom.baseM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
               { key: "topsheet", label: "Topsheet", qty: bom.topsheetM2, disp: `${bom.topsheetM2.toFixed(2)} m\u00B2`, unit: "$/m\u00B2" },
@@ -6533,6 +6548,16 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader("6 · MORE", "Handy external calculators and a place to send feedback.")}
+        <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title="Material Suppliers">
+          <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            DIY ski &amp; snowboard build materials — wood cores, P-tex bases, steel edges, glass / carbon / flax fabric, epoxy, inserts.
+          </div>
+          <a href="https://sandwichtechskis.com/" target="_blank" rel="noopener noreferrer"
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Sandwich Tech — US ↗</a>
+          <a href="https://www.junksupply.com/" target="_blank" rel="noopener noreferrer"
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>JunkSupply — EU ↗</a>
+        </AccordionSection>
+
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
