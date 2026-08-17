@@ -4351,10 +4351,53 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
 // parent re-render. (When defined inline, every keystroke in any input triggers App to re-render,
 // which creates a fresh AccordionSection function reference, which makes React tear down and
 // rebuild the entire subtree — causing focused inputs to lose focus after each character.)
+// Sidebar navigation model — drives the jump-to chips, per-group collapse, and the search box. The
+// bespoke panel CONTENT stays in the JSX below; this only carries keys, labels and search terms.
+const SIDEBAR_GROUPS = [
+  { id: "g1", num: "1", label: "SET UP", caption: "Start a design or open a saved one, and choose how to view it.", sections: [
+    { key: "gettingStarted", title: "Getting Started", terms: "onboarding help start tutorial guide steps" },
+    { key: "file", title: "File", terms: "save load new open import export bcski download" },
+    { key: "views", title: "Views", terms: "pair single 3d view render preview" },
+  ]},
+  { id: "g2", num: "2", label: "DESIGN", caption: "Shape the ski — dimensions, rocker & camber, core, and layup.", sections: [
+    { key: "presets", title: "Presets", terms: "preset template starting shape example" },
+    { key: "dimensions", title: "Dimensions", terms: "length width waist tip tail nose radius sidecut mm dimensions taper" },
+    { key: "snowboard", title: "Snowboard", terms: "stance setback insert binding board pack", mode: "snowboard" },
+    { key: "sideProfile", title: "Side Profile", terms: "rocker camber tip rise tail rise profile height elevation" },
+    { key: "symmetry", title: "Symmetry", terms: "symmetric mirror tip tail nodes bezier asymmetric" },
+    { key: "coreFill", title: "Core", terms: "core inset v-cut vcut fill notch spear swallowtail sidewall" },
+    { key: "layup", title: "Layup / Materials", terms: "layup fiber fabric glass carbon biax triax metal titanal wood core flex stiffness ud stringer epoxy flax" },
+  ]},
+  { id: "g3", num: "3", label: "ARTWORK", caption: "Wrap a topsheet image, preview the pair, and view it in 3D.", sections: [
+    { key: "topsheet", title: "Topsheet Art", terms: "topsheet art image graphic overlay png preview scale rotate" },
+  ]},
+  { id: "g4", num: "4", label: "ANALYZE", caption: "Check the flex profile and a materials + cost estimate.", sections: [
+    { key: "flex", title: "Flex", terms: "flex stiffness ei bend rating profile soft stiff" },
+    { key: "materials", title: "Bill of Materials", terms: "bom bill materials cost price estimate mass budget" },
+  ]},
+  { id: "g5", num: "5", label: "EXPORT", caption: "CNC cut files (DXF/SVG/STL) and a branded build card.", sections: [
+    { key: "cncExport", title: "CNC Export", terms: "cnc export dxf svg stl core base cut orientation vertical horizontal" },
+    { key: "buildCard", title: "Build Card", terms: "build card spec sheet brand logo png svg summary" },
+  ]},
+  { id: "g6", num: "6", label: "MORE", caption: "Suppliers, external calculators, and a place to send feedback.", sections: [
+    { key: "suppliers", title: "Material Suppliers", terms: "materials suppliers junksupply sandwich tech buy shop store" },
+    { key: "externalTools", title: "External Tools", terms: "external tools calculator sooth junk link" },
+    { key: "beta", title: "Beta / Feedback", terms: "beta feedback contact bug report" },
+  ]},
+];
+const SECTION_META = {};
+SIDEBAR_GROUPS.forEach(g => g.sections.forEach(s => { SECTION_META[s.key] = { ...s, group: g.id }; }));
+
 function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   return (
     <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
-      <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+      <div style={{
+        display: "flex", alignItems: "center", width: "100%",
+        // Open panels keep their title pinned just below the sticky top bar while their (often long)
+        // content scrolls, so you always know which section you're in. Bounded by the panel, so the
+        // next open panel pushes it away.
+        position: isOpen ? "sticky" : "static", top: "var(--sb-bar-h, 66px)", zIndex: 4, background: C.panel,
+      }}>
         {/* Title button takes the available space so its click target is the whole left area. */}
         <button
           onClick={onToggle}
@@ -5481,9 +5524,32 @@ export default function App() {
     } catch (e) {}
     return defaultSectionsOpen;
   });
+  // One-panel-at-a-time: opening a panel auto-collapses the others. Opt-in, persisted.
+  const [singleOpen, setSingleOpen] = useState(() => { try { return localStorage.getItem("bcs_single_open") === "1"; } catch (e) { return false; } });
+  const singleOpenRef = useRef(singleOpen);
+  useEffect(() => { singleOpenRef.current = singleOpen; try { localStorage.setItem("bcs_single_open", singleOpen ? "1" : "0"); } catch (e) {} }, [singleOpen]);
+  const [sidebarQuery, setSidebarQuery] = useState("");
   const toggleSection = useCallback((key) => {
     setSectionsOpen(prev => {
-      const next = { ...prev, [key]: !prev[key] };
+      const opening = !prev[key];
+      let next;
+      if (opening && singleOpenRef.current) { next = {}; for (const k of Object.keys(prev)) next[k] = false; next[key] = true; }
+      else next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  }, []);
+  const setAllSections = useCallback((open) => {
+    setSectionsOpen(prev => {
+      const next = {}; for (const k of Object.keys(prev)) next[k] = open;
+      try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  }, []);
+  const toggleGroup = useCallback((keys) => {
+    setSectionsOpen(prev => {
+      const allOpen = keys.every(k => !!prev[k]);
+      const next = { ...prev }; keys.forEach(k => next[k] = !allOpen);
       try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {}
       return next;
     });
@@ -5536,6 +5602,40 @@ export default function App() {
   const isTablet = size.w >= 768 && size.w < 1024;
   const isCompact = isMobile || isTablet;  // both use drawer sidebar
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // ── Resizable sidebar + navigation refs ──
+  const [panelW, setPanelW] = useState(() => { try { const v = parseInt(localStorage.getItem("bcs_sidebar_w")); if (v >= 240 && v <= 560) return v; } catch (e) {} return 290; });
+  useEffect(() => { try { localStorage.setItem("bcs_sidebar_w", String(panelW)); } catch (e) {} }, [panelW]);
+  const [barH, setBarH] = useState(96);
+  const sidebarScrollRef = useRef(null);
+  const groupRefs = useRef({});
+  const barRef = useRef(null);
+  const startResize = useCallback((e) => {
+    const onMove = (ev) => setPanelW(Math.max(240, Math.min(560, ev.clientX)));
+    const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); document.body.style.userSelect = ""; };
+    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
+    document.body.style.userSelect = "none"; e.preventDefault();
+  }, []);
+  const scrollToGroup = useCallback((id) => { const el = groupRefs.current[id]; if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, []);
+  const runSearch = useCallback((q) => {
+    setSidebarQuery(q);
+    const ql = q.trim().toLowerCase(); if (!ql) return;
+    for (const g of SIDEBAR_GROUPS) {
+      for (const s of g.sections) {
+        if (s.mode && s.mode !== (ski.mode || "ski")) continue;
+        if (s.title.toLowerCase().includes(ql) || s.terms.includes(ql)) {
+          setSectionsOpen(prev => { const n = singleOpenRef.current ? Object.fromEntries(Object.keys(prev).map(k => [k, false])) : { ...prev }; n[s.key] = true; try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(n)); } catch (e) {} return n; });
+          setTimeout(() => scrollToGroup(g.id), 60);
+          return;
+        }
+      }
+    }
+  }, [ski.mode, scrollToGroup]);
+  // Keep the sticky-header offset in sync with the top bar's real height (it grows when search wraps).
+  useEffect(() => { const el = barRef.current; if (!el || typeof ResizeObserver === "undefined") return; const ro = new ResizeObserver(() => setBarH(el.offsetHeight)); ro.observe(el); setBarH(el.offsetHeight); return () => ro.disconnect(); }, []);
+  // Restore the sidebar scroll position from last visit, and save it as you scroll.
+  useEffect(() => { const el = sidebarScrollRef.current; if (!el) return; try { const t = parseInt(localStorage.getItem("bcs_sidebar_scroll")); if (t > 0) setTimeout(() => { if (sidebarScrollRef.current) sidebarScrollRef.current.scrollTop = t; }, 30); } catch (e) {} }, []);
+  const scrollSaveTimer = useRef(null);
+  const onSidebarScroll = useCallback(() => { if (scrollSaveTimer.current) return; scrollSaveTimer.current = setTimeout(() => { scrollSaveTimer.current = null; const el = sidebarScrollRef.current; if (el) { try { localStorage.setItem("bcs_sidebar_scroll", String(el.scrollTop)); } catch (e) {} } }, 350); }, []);
   // Close the drawer if the viewport grows back to desktop while it was open,
   // to prevent a lingering overlay when someone rotates or resizes a window.
   useEffect(() => {
@@ -5554,13 +5654,12 @@ export default function App() {
     }
   }, [isCompact, activeView]);
 
-  const panelW = 270;
   const mobileHeaderH = 52;
   const desktopHeaderH = 56;
   const headerH = isCompact ? mobileHeaderH : desktopHeaderH;
   // The persistent top header takes a fixed slice of height on all screen sizes.
   // On compact, the sidebar becomes a drawer so the canvas also gets full width.
-  const canvasW = isCompact ? size.w : (size.w - panelW);
+  const canvasW = isCompact ? size.w : (size.w - panelW - 5);
   const canvasAreaH = Math.max(0, size.h - headerH);
   let planH = 0, profH = 0, coreH = 0, flexH = 0;
   // On compact viewports, we simplify the view options down to two: "plan" (the interactive
@@ -5650,15 +5749,23 @@ export default function App() {
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
-  // Section-group label with an info bubble for its one-line explanation — condenses the sidebar to a
-  // single line per group while keeping the guidance one tap away.
-  const groupHeader = (label, caption) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "16px 2px 5px" }}>
-      <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{label}</span>
-      {caption && <InfoBubble C={C} width={230}>{caption}</InfoBubble>}
-      <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
-    </div>
-  );
+  // Section-group header. Carries a ref for jump-to scrolling and a click target that collapses /
+  // expands every panel in the group at once. The info bubble keeps the one-line guidance a tap away.
+  const groupHeader = (group) => {
+    const keys = group.sections.filter(s => !s.mode || s.mode === (ski.mode || "ski")).map(s => s.key);
+    const allOpen = keys.length > 0 && keys.every(k => !!sectionsOpen[k]);
+    return (
+      <div ref={el => { groupRefs.current[group.id] = el; }} style={{ display: "flex", alignItems: "center", gap: 7, margin: "16px 2px 5px", scrollMarginTop: (barH + 6) + "px" }}>
+        <button onClick={() => toggleGroup(keys)} title={allOpen ? "Collapse this group" : "Expand this group"}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", padding: 0, cursor: "pointer" }}>
+          <span style={{ color: C.heading, fontSize: 9, lineHeight: 1, width: 8, textAlign: "center" }}>{allOpen ? "\u25BC" : "\u25B6"}</span>
+          <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{group.num} · {group.label}</span>
+        </button>
+        {group.caption && <InfoBubble C={C} width={230}>{group.caption}</InfoBubble>}
+        <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
+      </div>
+    );
+  };
   const toggleBtn = (label, key) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
       <button onClick={() => {
@@ -5763,6 +5870,18 @@ export default function App() {
           >Save</button>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 2, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 2, marginRight: 2 }}>
+              {[["ski", "🎿 Ski"], ["snowboard", "🏂 Board"]].map(([m, lbl]) => {
+                const active = (ski.mode || "ski") === m;
+                return (
+                  <button key={m} onClick={() => switchMode(m)} style={{
+                    padding: "5px 10px", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+                    letterSpacing: 0.3, borderRadius: 3, border: "none", cursor: "pointer",
+                    background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                  }}>{lbl}</button>
+                );
+              })}
+            </div>
             <button onClick={handleSave} style={headerBtn}>Save</button>
             <button onClick={handleLoadClick} style={headerBtn}>Load</button>
             <button onClick={handleNewDesign} style={headerBtn}>New</button>
@@ -5786,7 +5905,7 @@ export default function App() {
         />
       )}
 
-      <div style={
+      <div ref={sidebarScrollRef} onScroll={onSidebarScroll} style={
         isCompact
           ? {
               // Mobile / tablet: sidebar becomes a slide-in left drawer, below the top header
@@ -5799,12 +5918,14 @@ export default function App() {
               transition: "transform 0.24s ease-out",
               boxShadow: drawerOpen ? "4px 0 24px rgba(0,0,0,0.4)" : "none",
               WebkitOverflowScrolling: "touch",
+              "--sb-bar-h": barH + "px",
             }
           : {
               // Desktop: original inline sidebar
               width: panelW, minWidth: panelW, background: C.panel,
               borderRight: `1px solid ${C.panelBorder}`,
               display: "flex", flexDirection: "column", overflowY: "auto",
+              "--sb-bar-h": barH + "px",
             }
       }>
         {/* Hidden file input for Load Design */}
@@ -5815,6 +5936,51 @@ export default function App() {
           accept=".bcski,.bcboard,.json,application/json"
           style={{ display: "none" }}
         />
+
+        {/* Sticky navigation bar — pinned to the top of the sidebar. Collapse/expand all, a one-panel
+            mode, a search box that jumps to the matching panel, and jump-to-group chips. */}
+        <div ref={barRef} style={{
+          position: "sticky", top: 0, zIndex: 30, background: C.panel,
+          borderBottom: `1px solid ${C.panelBorder}`, padding: "7px 12px 6px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <button onClick={() => setSingleOpen(v => !v)} title="Open only one panel at a time"
+              style={{
+                display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none",
+                cursor: "pointer", padding: 0, color: singleOpen ? C.heading : C.labelDim,
+                fontSize: 10, letterSpacing: 0.5, fontFamily: "'JetBrains Mono', monospace",
+              }}>
+              <span style={{ width: 26, height: 13, borderRadius: 7, position: "relative", background: singleOpen ? C.heading : C.inputBorder, flexShrink: 0 }}>
+                <span style={{ position: "absolute", top: 2, left: singleOpen ? 15 : 2, width: 9, height: 9, borderRadius: 5, background: "#F0EDE4", transition: "left 0.18s" }} />
+              </span>
+              ONE AT A TIME
+            </button>
+            {(() => {
+              const anyOpen = Object.values(sectionsOpen).some(Boolean);
+              return (
+                <button onClick={() => setAllSections(!anyOpen)} title={anyOpen ? "Collapse every panel" : "Open every panel"} style={{
+                  background: "transparent", border: `1px solid ${C.inputBorder}`, borderRadius: 3,
+                  padding: "3px 10px", color: C.label, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5,
+                  fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", flexShrink: 0,
+                }}>{anyOpen ? "Collapse all" : "Expand all"}</button>
+              );
+            })()}
+          </div>
+          <div style={{ position: "relative", marginTop: 6 }}>
+            <input value={sidebarQuery} onChange={e => runSearch(e.target.value)}
+              placeholder="Search panels (radius, rocker, layup…)"
+              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 24px 5px 9px", color: C.value, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+            {sidebarQuery && (
+              <button onClick={() => setSidebarQuery("")} aria-label="Clear search" style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: C.labelDim, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 4px" }}>{"\u2715"}</button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+            {SIDEBAR_GROUPS.map(g => (
+              <button key={g.id} onClick={() => scrollToGroup(g.id)} title={g.caption}
+                style={{ flex: 1, minWidth: 22, background: "transparent", border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "2px 0", color: C.labelDim, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>{g.num}</button>
+            ))}
+          </div>
+        </div>
 
         {isCompact && (
           <div style={{ padding: "10px 12px 8px", borderBottom: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -5870,7 +6036,8 @@ export default function App() {
           }}>{loadMessage.text}</div>
         )}
 
-        {/* ── Ski / Snowboard mode toggle ── shared engine; snowboard reveals stance/insert controls */}
+        {/* ── Ski / Snowboard mode toggle ── on compact only; desktop shows it in the header. */}
+        {isCompact && (
         <div style={{ display: "flex", gap: 5, margin: "8px 12px 10px" }}>
           {[["ski", "🎿 Ski"], ["snowboard", "🏂 Snowboard"]].map(([m, lbl]) => {
             const active = (ski.mode || "ski") === m;
@@ -5886,8 +6053,9 @@ export default function App() {
             );
           })}
         </div>
+        )}
 
-        {groupHeader("1 · SET UP", "Start a design or open a saved one, and choose how to view it.")}
+        {groupHeader(SIDEBAR_GROUPS[0])}
         <button onClick={() => setShowDb(true)} style={{
           width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "10px 12px",
           borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
@@ -6056,7 +6224,7 @@ export default function App() {
           )}
         </AccordionSection>
 
-        {groupHeader("2 · DESIGN", "Shape the ski — dimensions, rocker & camber, core, and layup.")}
+        {groupHeader(SIDEBAR_GROUPS[1])}
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
@@ -6255,7 +6423,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        {groupHeader("3 · ARTWORK & PREVIEW", "Wrap a topsheet image, preview the pair, and view it in 3D.")}
+        {groupHeader(SIDEBAR_GROUPS[2])}
         <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
           title="Topsheet Art"
           accent={topsheet.src
@@ -6357,7 +6525,7 @@ export default function App() {
           )}
         </AccordionSection>
 
-        {groupHeader("4 · ANALYZE", "Check the flex profile and a materials + cost estimate.")}
+        {groupHeader(SIDEBAR_GROUPS[3])}
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title="Flex Analysis"
           accent={
@@ -6440,7 +6608,7 @@ export default function App() {
           })()}
         </AccordionSection>
 
-        {groupHeader("5 · EXPORT", "CNC cut files (DXF/SVG) and a branded build card.")}
+        {groupHeader(SIDEBAR_GROUPS[4])}
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
@@ -6547,7 +6715,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        {groupHeader("6 · MORE", "Handy external calculators and a place to send feedback.")}
+        {groupHeader(SIDEBAR_GROUPS[5])}
         <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title="Material Suppliers">
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             DIY ski &amp; snowboard build materials — wood cores, P-tex bases, steel edges, glass / carbon / flax fabric, epoxy, inserts.
@@ -6586,6 +6754,14 @@ export default function App() {
           <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.</div>
         </div>
       </div>
+
+      {/* Drag handle to resize the sidebar (desktop). Width persists across sessions. */}
+      {!isCompact && (
+        <div onMouseDown={startResize} title="Drag to resize"
+          onMouseEnter={e => { e.currentTarget.style.background = C.heading; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+          style={{ width: 5, flexShrink: 0, cursor: "col-resize", background: "transparent", transition: "background 0.15s", zIndex: 5 }} />
+      )}
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {effectiveActiveView === "analysis" && (
