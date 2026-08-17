@@ -2496,15 +2496,14 @@ function buildLayerStackSVG(ski, opts) {
     base: { fill: "#1c1a17", txt: dim },
   };
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const S = layupStack(ski), gap = 3, skiW = 90;
+  const S = layupStack(ski), gap = 3;
   const hOf = L => L.role === "core" ? Math.max(38, Math.min(62, 16 + L.thick * 4)) : Math.max(20, Math.min(34, 13 + L.thick * 7));
   let totalH = S.reduce((a, L) => a + hOf(L) + gap, 0) - gap;
   const scale = (o.maxH && totalH > o.maxH) ? o.maxH / totalH : 1;
   let cy = y, bars = "";
   for (const L of S) {
     const h = hOf(L) * scale, c = COL[L.role] || COL.fabric;
-    let bw = w, bx = x;
-    if ((L.role === "stringerC" || L.role === "stringerG") && L.width && L.width > 0) { bw = Math.max(w * 0.16, Math.min(w, w * (L.width / skiW))); bx = x + (w - bw) / 2; }
+    const bw = w, bx = x;   // every layer spans full width so labels never clip
     bars += `<rect x="${bx.toFixed(1)}" y="${cy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${c.fill}" stroke="${border}" stroke-width="0.8"/>`;
     if (L.count > 1) for (let k = 1; k < L.count; k++) { const ly = cy + h * k / L.count; bars += `<line x1="${bx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(bx + bw).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${c.txt}" stroke-opacity="0.35" stroke-width="0.6"/>`; }
     if (h >= 13) {
@@ -5785,12 +5784,15 @@ export default function App() {
     coreH = Math.floor(available / 3);
     flexH = available - profH - coreH;
   } else {
-    // Desktop "All" — plan gets more height because it has 2 rows internally; layup gets a scrollable band.
-    planH = Math.floor(canvasAreaH * 0.42);
-    profH = Math.floor(canvasAreaH * 0.13);
-    coreH = Math.floor(canvasAreaH * 0.14);
-    flexH = Math.floor(canvasAreaH * 0.14);
-    layersH = canvasAreaH - planH - profH - coreH - flexH;
+    // Desktop "All" — give the layup band its natural height (capped) so it never needs scrolling, and
+    // compress the other rows to make room.
+    const stackNatH = buildLayerStackSVG(ski, { w: 460 }).height + 70;
+    layersH = Math.min(stackNatH, Math.floor(canvasAreaH * 0.42));
+    const rest = canvasAreaH - layersH;
+    planH = Math.floor(rest * 0.50);
+    profH = Math.floor(rest * 0.16);
+    coreH = Math.floor(rest * 0.17);
+    flexH = rest - planH - profH - coreH;
   }
 
   const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
@@ -6928,11 +6930,11 @@ export default function App() {
           <div style={{ height: layersH, position: "relative", overflow: "auto", background: "#141210" }}>
             {(() => {
               const w = Math.min(560, Math.max(280, canvasW - 40));
-              const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40 });
+              const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40, maxH: layersH - 64 });
               const h = r.height + 64;
               const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#141210"/><text x="20" y="28" font-size="13" fill="#c8935a" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>${r.svg}</svg>`;
               return (
-                <div style={{ display: "flex", justifyContent: "center", padding: "18px 0 24px" }}>
+                <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
                   <img src={"data:image/svg+xml;utf8," + encodeURIComponent(svg)} alt="Layup cross-section" style={{ maxWidth: "100%", height: "auto" }} />
                 </div>
               );
