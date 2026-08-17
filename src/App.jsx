@@ -2497,7 +2497,7 @@ function buildLayerStackSVG(ski, opts) {
   };
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const S = layupStack(ski), gap = 3, skiW = 90;
-  const hOf = L => L.role === "core" ? Math.max(34, Math.min(74, 12 + L.thick * 4.4)) : Math.max(13, Math.min(30, 9 + L.thick * 7));
+  const hOf = L => L.role === "core" ? Math.max(38, Math.min(62, 16 + L.thick * 4)) : Math.max(20, Math.min(34, 13 + L.thick * 7));
   let totalH = S.reduce((a, L) => a + hOf(L) + gap, 0) - gap;
   const scale = (o.maxH && totalH > o.maxH) ? o.maxH / totalH : 1;
   let cy = y, bars = "";
@@ -2507,10 +2507,10 @@ function buildLayerStackSVG(ski, opts) {
     if ((L.role === "stringerC" || L.role === "stringerG") && L.width && L.width > 0) { bw = Math.max(w * 0.16, Math.min(w, w * (L.width / skiW))); bx = x + (w - bw) / 2; }
     bars += `<rect x="${bx.toFixed(1)}" y="${cy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${c.fill}" stroke="${border}" stroke-width="0.8"/>`;
     if (L.count > 1) for (let k = 1; k < L.count; k++) { const ly = cy + h * k / L.count; bars += `<line x1="${bx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(bx + bw).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${c.txt}" stroke-opacity="0.35" stroke-width="0.6"/>`; }
-    if (h >= 11) {
-      const fs = Math.min(13, Math.max(9, h * 0.5)).toFixed(0);
-      bars += `<text x="${(bx + 9).toFixed(1)}" y="${(cy + h / 2 + 4).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
-      bars += `<text x="${(bx + bw - 9).toFixed(1)}" y="${(cy + h / 2 + 4).toFixed(1)}" font-size="11" fill="${c.txt}" font-family="monospace" text-anchor="end" opacity="0.8">${L.thick.toFixed(1)}mm${L.role === "core" ? " max" : ""}</text>`;
+    if (h >= 13) {
+      const fs = Math.min(17, Math.max(12, h * 0.6)).toFixed(0);
+      bars += `<text x="${(bx + 10).toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace" font-weight="bold">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
+      bars += `<text x="${(bx + bw - 10).toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="13" fill="${c.txt}" font-family="monospace" text-anchor="end" opacity="0.85">${L.thick.toFixed(1)}mm${L.role === "core" ? " max" : ""}</text>`;
     }
     cy += h + gap * scale;
   }
@@ -5785,11 +5785,12 @@ export default function App() {
     coreH = Math.floor(available / 3);
     flexH = available - profH - coreH;
   } else {
-    // Desktop "All" — plan gets more height because it has 2 rows internally
-    planH = Math.floor(canvasAreaH * 0.48);
-    profH = Math.floor(canvasAreaH * 0.16);
-    coreH = Math.floor(canvasAreaH * 0.18);
-    flexH = canvasAreaH - planH - profH - coreH;
+    // Desktop "All" — plan gets more height because it has 2 rows internally; layup gets a scrollable band.
+    planH = Math.floor(canvasAreaH * 0.42);
+    profH = Math.floor(canvasAreaH * 0.13);
+    coreH = Math.floor(canvasAreaH * 0.14);
+    flexH = Math.floor(canvasAreaH * 0.14);
+    layersH = canvasAreaH - planH - profH - coreH - flexH;
   }
 
   const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
