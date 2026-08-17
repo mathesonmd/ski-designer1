@@ -197,7 +197,7 @@ function syncCoreContacts(ski){
     return { ...n, pos: tailPos + frac * (tipPos - tailPos) };
   });
 }
-const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,metal:"none",carbon:"none",carbonLayers:1};
+const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,fabricSplit:false,glassBot:"triax23",glassBotLayers:1,metal:"none",carbon:"none",carbonLayers:1};
 const DEFAULT_SKI={
   designName: "Untitled Design",
   mode: "ski",       // "ski" | "snowboard". Snowboard mode reveals stance/setback/insert controls
@@ -484,16 +484,20 @@ function getCoreThickAt(profile, pos) {
 function computeEIAtStation(skiWidth,coreThick,layup){
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
   const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width,cT=carbon.thick||CARBON_THICK;
+  // Fabric can differ top vs bottom when fabricSplit is on (e.g. biax carbon above, triax carbon below);
+  // otherwise the top fabric is mirrored on the bottom. Stack is built base->top.
+  const split=!!layup.fabricSplit;
+  const botFab=split?(GLASS[layup.glassBot]||glass):glass, nGb=split?(layup.glassBotLayers||1):nG;
   const layers=[];
   layers.push({E:BASE_E,b:skiWidth,t:BASE_THICK});
   layers.push({E:EDGE_E,b:EDGE_W*2,t:EDGE_H});
-  for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});
+  for(let i=0;i<nGb;i++)layers.push({E:botFab.E,b:skiWidth,t:botFab.thick});   // bottom fabric
   if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
   if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
   layers.push({E:wood.E,b:skiWidth,t:Math.max(coreThick,0.5)});
   if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
   if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
-  for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});
+  for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});      // top fabric
   let yBot=0;const yc=[];
   for(const l of layers){yc.push(yBot+l.t/2);yBot+=l.t;}
   let sEA=0,sEAy=0;
@@ -534,7 +538,8 @@ function computeBOM(ski) {
   const edgeWrap = ski.edgeWrap || "full";
   const edgeLenM = (edgeWrap === "contact" ? 2 * effEdge : perimMM) / 1000;
   const glassLayers = (ski.layup && ski.layup.glassLayers) || 1;
-  const glassM2 = areaM2 * 2 * glassLayers;               // top + bottom
+  const glassBotLayers = (ski.layup && ski.layup.fabricSplit) ? ((ski.layup.glassBotLayers) || 1) : glassLayers;
+  const glassM2 = areaM2 * (glassLayers + glassBotLayers);   // top + bottom faces (may differ if split)
   const hasMetal = ski.layup && ski.layup.metal && ski.layup.metal !== "none";
   const metalM2 = hasMetal ? areaM2 * 2 : 0;
   const carbonLayers = (ski.layup && ski.layup.carbon && ski.layup.carbon !== "none") ? (ski.layup.carbonLayers || 1) : 0;
@@ -2448,6 +2453,70 @@ function buildSki3DGeometry(ski, pair) {
 
 // Builds a branded one-page "build card" spec sheet (fixed 1400x900 SVG) summarizing the design:
 // silhouette + all key numbers + layup + flex + estimated core mass, in the Black Chapel palette.
+// Ordered physical layer stack (top surface -> base) derived from the layup. Drives the cross-section
+// diagram used in the Layers view and the build sheet.
+function layupStack(ski) {
+  const lu = ski.layup || {};
+  const g = GLASS[lu.glass] || GLASS.triax23;
+  const split = !!lu.fabricSplit;
+  const gb = split ? (GLASS[lu.glassBot] || g) : g;
+  const nGt = lu.glassLayers || 1, nGb = split ? (lu.glassBotLayers || 1) : nGt;
+  const metal = METALS[lu.metal]; const hasMetal = metal && metal.E > 0;
+  const carbon = CARBON[lu.carbon]; const hasCarbon = carbon && carbon.E > 0 && lu.carbon !== "none";
+  const nC = lu.carbonLayers || 1;
+  const wood = WOODS[lu.wood] || WOODS.poplar;
+  const coreThick = (ski.coreProfile && ski.coreProfile.length) ? Math.max(...ski.coreProfile.map(p => p.thick || 0)) : 8;
+  const isCarbon = k => typeof k === "string" && k.toLowerCase().includes("carbon");
+  const isFlax = k => typeof k === "string" && k.toLowerCase().includes("flax");
+  const fabRole = k => isCarbon(k) ? "fabricC" : (isFlax(k) ? "fabricF" : "fabric");
+  const strRole = k => (typeof k === "string" && k.startsWith("glass")) ? "stringerG" : "stringerC";
+  const S = [];
+  S.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 });
+  S.push({ role: fabRole(lu.glass), name: g.name, thick: g.thick, count: nGt });
+  if (hasMetal) S.push({ role: "metal", name: metal.name, thick: metal.thick, count: 1 });
+  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });
+  S.push({ role: "core", name: (wood.name || "Wood") + " core", thick: coreThick, count: 1 });
+  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });
+  if (hasMetal) S.push({ role: "metal", name: metal.name, thick: metal.thick, count: 1 });
+  S.push({ role: fabRole(split ? lu.glassBot : lu.glass), name: gb.name, thick: gb.thick, count: nGb });
+  S.push({ role: "base", name: "Base + steel edges", thick: 1.5, count: 1 });
+  return S;
+}
+
+// Cross-section diagram of the layup — a stack of labelled bars, top surface at the top, base at the
+// bottom. Returns { svg, height }. Coloured by role; width-limited UD stringers draw narrower & centred.
+function buildLayerStackSVG(ski, opts) {
+  const o = opts || {}, x = o.x || 0, y = o.y || 0, w = o.w || 520;
+  const bone = "#ede6d8", dim = "#9b9388", border = "#37322c";
+  const COL = {
+    topsheet: { fill: "#2a2620", txt: dim }, fabric: { fill: "#c8935a", txt: "#141210" },
+    fabricC: { fill: "#4b4742", txt: bone }, fabricF: { fill: "#8a9a5f", txt: "#141210" },
+    metal: { fill: "#8f99a6", txt: "#141210" }, stringerC: { fill: "#e8552a", txt: "#141210" },
+    stringerG: { fill: "#d8b48a", txt: "#141210" }, core: { fill: "#b0824e", txt: "#141210" },
+    base: { fill: "#1c1a17", txt: dim },
+  };
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const S = layupStack(ski), gap = 3, skiW = 90;
+  const hOf = L => L.role === "core" ? Math.max(34, Math.min(74, 12 + L.thick * 4.4)) : Math.max(13, Math.min(30, 9 + L.thick * 7));
+  let totalH = S.reduce((a, L) => a + hOf(L) + gap, 0) - gap;
+  const scale = (o.maxH && totalH > o.maxH) ? o.maxH / totalH : 1;
+  let cy = y, bars = "";
+  for (const L of S) {
+    const h = hOf(L) * scale, c = COL[L.role] || COL.fabric;
+    let bw = w, bx = x;
+    if ((L.role === "stringerC" || L.role === "stringerG") && L.width && L.width > 0) { bw = Math.max(w * 0.16, Math.min(w, w * (L.width / skiW))); bx = x + (w - bw) / 2; }
+    bars += `<rect x="${bx.toFixed(1)}" y="${cy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${c.fill}" stroke="${border}" stroke-width="0.8"/>`;
+    if (L.count > 1) for (let k = 1; k < L.count; k++) { const ly = cy + h * k / L.count; bars += `<line x1="${bx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(bx + bw).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${c.txt}" stroke-opacity="0.35" stroke-width="0.6"/>`; }
+    if (h >= 11) {
+      const fs = Math.min(13, Math.max(9, h * 0.5)).toFixed(0);
+      bars += `<text x="${(bx + 9).toFixed(1)}" y="${(cy + h / 2 + 4).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
+      bars += `<text x="${(bx + bw - 9).toFixed(1)}" y="${(cy + h / 2 + 4).toFixed(1)}" font-size="11" fill="${c.txt}" font-family="monospace" text-anchor="end" opacity="0.8">${L.thick.toFixed(1)}mm${L.role === "core" ? " max" : ""}</text>`;
+    }
+    cy += h + gap * scale;
+  }
+  return { svg: `<g>${bars}</g>`, height: cy - y - gap * scale };
+}
+
 function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const W = 1400, H = 900, pad = 50;
   const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
@@ -2457,12 +2526,15 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
 
   let outline = [];
   try { outline = getFullOutlinePoints(ski); } catch (e) {}
-  const rx = pad, ry = 210, rw = 540, rh = H - ry - 150;
+  const rx = pad, ry = 210, rw = 540, rh = 300;
   const maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
   const sc = Math.min(rw / ski.length, rh / (2 * maxLat));
   const ox = rx + (rw - ski.length * sc) / 2, oy = ry + rh / 2;
   const mp = p => ({ x: ox + p.y * sc, y: oy - p.x * sc });
   const silPath = outline.length ? outline.map((p, i) => `${i ? "L" : "M"}${mp(p).x.toFixed(1)},${mp(p).y.toFixed(1)}`).join(" ") + " Z" : "";
+  // Layup cross-section, stacked below the silhouette in the left column.
+  const stackTop = 590;
+  const stack = buildLayerStackSVG(ski, { x: rx, y: stackTop + 6, w: rw, maxH: (H - 110) - (stackTop + 6) });
 
   const rows = [
     ["Length", `${ski.length} mm`],
@@ -2475,7 +2547,9 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
     ["Flex", `${rating.label} (${Math.round(flex.underfootK)} N/mm)`],
     ...(isBoard ? [["Stance / setback", `${ski.stanceWidth || 0} / ${ski.setback || 0} mm`]] : []),
     ["Core", ski.layup.wood],
-    ["Fabric", `${ski.layup.glass} \u00D7${ski.layup.glassLayers}/side`],
+    ["Fabric", ski.layup.fabricSplit
+      ? `top ${ski.layup.glass} \u00D7${ski.layup.glassLayers} / bot ${ski.layup.glassBot || ski.layup.glass} \u00D7${ski.layup.glassBotLayers || ski.layup.glassLayers}`
+      : `${ski.layup.glass} \u00D7${ski.layup.glassLayers}/side`],
     ...(ski.layup.metal && ski.layup.metal !== "none" ? [["Metal", ski.layup.metal]] : []),
     ...(ski.layup.carbon && ski.layup.carbon !== "none" ? [["Stringer", `${ski.layup.carbon} \u00D7${ski.layup.carbonLayers}`]] : []),
     ["Edge wrap", ski.edgeWrap || "full"],
@@ -2515,8 +2589,12 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
   <g id="silhouette">
     <path d="${silPath}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>
-    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 40).toFixed(0)}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
-    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 64).toFixed(0)}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
+    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 34).toFixed(0)}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
+    <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 56).toFixed(0)}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
+  </g>
+  <g id="layup">
+    <text x="${pad}" y="${stackTop}" font-size="16" fill="${brass}" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>
+    ${stack.svg}
   </g>
   <g id="specs">${rowsSvg}</g>
   <line x1="${pad}" y1="${H - 96}" x2="${W - pad}" y2="${H - 96}" stroke="${border}" stroke-width="1"/>
@@ -4388,6 +4466,18 @@ const SIDEBAR_GROUPS = [
 const SECTION_META = {};
 SIDEBAR_GROUPS.forEach(g => g.sections.forEach(s => { SECTION_META[s.key] = { ...s, group: g.id }; }));
 
+// Material suppliers, ordered nearest-first from the browser's IANA timezone — no geolocation prompt,
+// no IP lookup, no network call. Americas → the US supplier first; everywhere else → the EU supplier.
+const USER_REGION = (() => {
+  try { return /^America\//.test(Intl.DateTimeFormat().resolvedOptions().timeZone || "") ? "US" : "EU"; }
+  catch (e) { return "EU"; }
+})();
+const SUPPLIERS = [
+  { name: "Sandwich Tech", region: "US", url: "https://sandwichtechskis.com/" },
+  { name: "JunkSupply", region: "EU", url: "https://www.junksupply.com/" },
+];
+const ORDERED_SUPPLIERS = [...SUPPLIERS].sort((a, b) => (a.region === USER_REGION ? 0 : 1) - (b.region === USER_REGION ? 0 : 1));
+
 function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   return (
     <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
@@ -5364,6 +5454,14 @@ export default function App() {
     } else run(null);
   }, [ski, derived, flex, bom, builderBrand]);
 
+  // Build-sheet PREVIEW — render the spec sheet on screen before exporting so you can see the layup
+  // cross-section and every spec. Loads the logo dims first (same as export) so the preview matches 1:1.
+  const [previewSvg, setPreviewSvg] = useState(null);
+  const openSpecPreview = useCallback(() => {
+    const run = (logoDims) => setPreviewSvg(buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims }));
+    if (builderBrand.logoSrc) { const lg = new Image(); lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight }); lg.onerror = () => run(null); lg.src = builderBrand.logoSrc; } else run(null);
+  }, [ski, derived, flex, bom, builderBrand]);
+
   // ── Save / Load state ─────────────────────────────────────────
   const fileInputRef = useRef(null);
   const [loadMessage, setLoadMessage] = useState(null);  // { type: "ok"|"error"|"warn", text }
@@ -5661,7 +5759,7 @@ export default function App() {
   // On compact, the sidebar becomes a drawer so the canvas also gets full width.
   const canvasW = isCompact ? size.w : (size.w - panelW - 5);
   const canvasAreaH = Math.max(0, size.h - headerH);
-  let planH = 0, profH = 0, coreH = 0, flexH = 0;
+  let planH = 0, profH = 0, coreH = 0, flexH = 0, layersH = 0;
   // On compact viewports, we simplify the view options down to two: "plan" (the interactive
   // rotated vertical ski) and "analysis" (a compact stack of Profile + Core + Flex). Any legacy
   // activeView value that isn't "plan" collapses into "analysis". This avoids the terrible
@@ -5679,6 +5777,7 @@ export default function App() {
   else if (effectiveActiveView === "profile")   profH = canvasAreaH;
   else if (effectiveActiveView === "core")      coreH = canvasAreaH;
   else if (effectiveActiveView === "flex")      flexH = canvasAreaH;
+  else if (effectiveActiveView === "layers")    layersH = canvasAreaH;
   else if (effectiveActiveView === "analysis") {
     // Compact stacked analysis: divide remaining area equally among Profile, Core, Flex.
     const available = canvasAreaH - analysisNoticeH;
@@ -6212,7 +6311,7 @@ export default function App() {
               </>
             ) : (
               <>
-                {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("All", "all")}
+                {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("Layup", "layers")}{viewBtn("All", "all")}
               </>
             )}
           </div>
@@ -6401,13 +6500,33 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
-          {selectField("Fabric (biax / triax)", ski.layup.glass, GLASS, v => setLayup("glass", v))}
+          {selectField(ski.layup.fabricSplit ? "Fabric — TOP (biax / triax)" : "Fabric (biax / triax)", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 7 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Fabric Layers / side</div>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{ski.layup.fabricSplit ? "Top layers / side" : "Fabric Layers / side"}</div>
             <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
               onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
               style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
           </div>
+          {/* Split the fabric so the top and bottom faces can use different weaves (e.g. biax carbon
+              above the core, triax carbon below). Off = the top fabric is mirrored on the bottom. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: ski.layup.fabricSplit ? 8 : 6 }}>
+            <button onClick={() => setSki(s => { const sp = !s.layup.fabricSplit; const lu = { ...s.layup, fabricSplit: sp }; if (sp && lu.glassBot === undefined) { lu.glassBot = lu.glass; lu.glassBotLayers = lu.glassLayers; } return { ...s, layup: lu }; })}
+              style={{ width: 30, height: 14, borderRadius: 7, border: "none", cursor: "pointer", position: "relative", background: ski.layup.fabricSplit ? C.heading : C.inputBorder, flexShrink: 0 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 5, background: "#F0EDE4", position: "absolute", top: 2, left: ski.layup.fabricSplit ? 18 : 2, transition: "left 0.2s" }} />
+            </button>
+            <span style={{ color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>Different bottom fabric</span>
+          </div>
+          {ski.layup.fabricSplit && (
+            <>
+              {selectField("Fabric — BOTTOM (biax / triax)", ski.layup.glassBot || ski.layup.glass, GLASS, v => setLayup("glassBot", v))}
+              <div style={{ marginBottom: 7 }}>
+                <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Bottom layers / side</div>
+                <input type="number" value={ski.layup.glassBotLayers || ski.layup.glassLayers} min={1} max={4} step={1}
+                  onChange={e => setLayup("glassBotLayers", parseInt(e.target.value) || 1)}
+                  style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              </div>
+            </>
+          )}
           {selectField("Metal", ski.layup.metal, METALS, v => setLayup("metal", v))}
           {selectField("UD Stringer", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
           {ski.layup.carbon !== "none" && (
@@ -6419,7 +6538,7 @@ export default function App() {
             </div>
           )}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Both slots take glass or carbon — e.g. a carbon triax fabric over UD glass stringers, or glass triax with UD carbon. The Flex panel updates as you mix.
+            Both slots take glass or carbon — e.g. a carbon triax fabric over UD glass stringers. Turn on "Different bottom fabric" to run, say, biax carbon on top and triax below. The Flex panel updates as you mix.
           </div>
         </AccordionSection>
 
@@ -6703,6 +6822,10 @@ export default function App() {
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             A wide logo (e.g. 800×200 px) reads best. Saved on this device; the footer credits the tool.
           </div>
+          <button onClick={openSpecPreview}
+            style={{ width: "100%", marginBottom: 6, background: C.control, border: "none", color: C.bgDeep, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+            Preview Build Card
+          </button>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => exportSpecSheet("png")}
               style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
@@ -6718,12 +6841,12 @@ export default function App() {
         {groupHeader(SIDEBAR_GROUPS[5])}
         <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title="Material Suppliers">
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-            DIY ski &amp; snowboard build materials — wood cores, P-tex bases, steel edges, glass / carbon / flax fabric, epoxy, inserts.
+            DIY ski &amp; snowboard build materials — wood cores, P-tex bases, steel edges, glass / carbon / flax fabric, epoxy, inserts. Nearest to you first.
           </div>
-          <a href="https://sandwichtechskis.com/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Sandwich Tech — US ↗</a>
-          <a href="https://www.junksupply.com/" target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>JunkSupply — EU ↗</a>
+          {ORDERED_SUPPLIERS.map(s => (
+            <a key={s.name} href={s.url} target="_blank" rel="noopener noreferrer"
+              style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>{s.name} — {s.region} ↗</a>
+          ))}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
@@ -6800,6 +6923,22 @@ export default function App() {
             {viewLabelChip("Flex")}
           </div>
         )}
+        {layersH > 0 && (
+          <div style={{ height: layersH, position: "relative", overflow: "auto", background: "#141210" }}>
+            {(() => {
+              const w = Math.min(560, Math.max(280, canvasW - 40));
+              const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40 });
+              const h = r.height + 64;
+              const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#141210"/><text x="20" y="28" font-size="13" fill="#c8935a" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>${r.svg}</svg>`;
+              return (
+                <div style={{ display: "flex", justifyContent: "center", padding: "18px 0 24px" }}>
+                  <img src={"data:image/svg+xml;utf8," + encodeURIComponent(svg)} alt="Layup cross-section" style={{ maxWidth: "100%", height: "auto" }} />
+                </div>
+              );
+            })()}
+            {viewLabelChip("Layup")}
+          </div>
+        )}
       </div>
       </div>
 
@@ -6810,6 +6949,25 @@ export default function App() {
       />
       {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
       {showDb && <SkiDatabaseModal kind={ski.mode === "snowboard" ? "snowboard" : "ski"} onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
+
+      {previewSvg && (
+        <div onClick={() => setPreviewSvg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 8, padding: 16, width: "min(1040px, 95vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ color: C.heading, fontSize: 12, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>BUILD CARD PREVIEW</span>
+              <button onClick={() => setPreviewSvg(null)} aria-label="Close" style={{ background: "transparent", border: "none", color: C.label, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>{"\u2715"}</button>
+            </div>
+            <div style={{ overflow: "auto", border: `1px solid ${C.panelBorder}`, borderRadius: 4, background: "#141210" }}>
+              <img src={"data:image/svg+xml;utf8," + encodeURIComponent(previewSvg)} alt="Build card preview" style={{ display: "block", width: "100%", height: "auto" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button onClick={() => exportSpecSheet("png")} style={{ background: C.heading, border: "none", color: C.bgDeep, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download PNG</button>
+              <button onClick={() => exportSpecSheet("svg")} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download SVG</button>
+              <button onClick={() => setPreviewSvg(null)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
       {dbMsg && (
         <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "12px 18px", borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", maxWidth: "92vw", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
           {dbMsg}
