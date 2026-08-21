@@ -681,8 +681,8 @@ function computeOutline(ski) {
   const tipCYout = L - oc.tipL, tailCYout = oc.tailL;
   const tipCYin = L - ic.tipL, tailCYin = ic.tailL;
   return {
-    right: buildSide(tailR, tipR,  1, wOut2, tipCYout, tailCYout),
-    left:  buildSide(tailL, tipL, -1, wIn2, tipCYin, tailCYin),
+    right: buildSide(tailR, tipR,  1, wIn2, tipCYin, tailCYin),     // +x edge = INSIDE
+    left:  buildSide(tailL, tipL, -1, wOut2, tipCYout, tailCYout),  // -x edge = OUTSIDE
     waistY, tipContactY, tailContactY,
   };
 }
@@ -1129,8 +1129,8 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
     return out;
   };
 
-  const rightRaw = sliceSide(outline.right, rOut.startY, rOut.endY);
-  const leftRaw = sliceSide(outline.left, rIn.startY, rIn.endY);
+  const rightRaw = sliceSide(outline.right, rIn.startY, rIn.endY);   // +x = inside
+  const leftRaw = sliceSide(outline.left, rOut.startY, rOut.endY);   // -x = outside
 
   const offsetInward = (edge) => {
     const out = [];
@@ -3057,8 +3057,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     // Waist dots are editable in BOTH axes: lateral drag → waistWidth, along-ski drag → waistPosition
     // (so you can slide the waist fore/aft right on the plan view instead of hunting for the sidebar
     // setting). Handled by the dedicated "waist" drag type below.
-    cps.push({ id:"ww_r",  skiX: (ski.asymSidecut ? ski.waistOutside : ski.waistWidth)/2, skiY: waistY, type:"waist", param: ski.asymSidecut ? "waistOutside" : "waistWidth", mult:2,  frames:["main"] });
-    cps.push({ id:"ww_l",  skiX:-(ski.asymSidecut ? ski.waistInside : ski.waistWidth)/2, skiY: waistY, type:"waist", param: ski.asymSidecut ? "waistInside" : "waistWidth", mult:-2, frames:["main"] });
+    cps.push({ id:"ww_r",  skiX: (ski.asymSidecut ? ski.waistInside : ski.waistWidth)/2, skiY: waistY, type:"waist", param: ski.asymSidecut ? "waistInside" : "waistWidth", mult:2,  frames:["main"] });
+    cps.push({ id:"ww_l",  skiX:-(ski.asymSidecut ? ski.waistOutside : ski.waistWidth)/2, skiY: waistY, type:"waist", param: ski.asymSidecut ? "waistOutside" : "waistWidth", mult:-2, frames:["main"] });
 
     // Bezier nodes and tangent handles — handles ONLY appear in zoom panels (not main view)
     // to keep the main view uncluttered.
@@ -3174,8 +3174,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
 
-    // Inside / outside edge labels when asymmetric sidecut is on, so it's obvious which edge is which.
-    if (ski.asymSidecut) {
+    // Inside / outside edge labels when either asymmetry mode is on (outside = -x edge, inside = +x edge).
+    if (ski.asymSidecut || ski.asymContact) {
       try {
         const wy = resolveWaistY(ski);
         const oHW = (ski.waistOutside != null ? ski.waistOutside : ski.waistWidth) / 2;
@@ -3183,7 +3183,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         ctx.save();
         ctx.font = "bold 9px 'JetBrains Mono', monospace";
         ctx.fillStyle = C.heading; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        const sO = toMain(oHW + 11, wy), sI = toMain(-(iHW + 11), wy);
+        const sO = toMain(-(oHW + 11), wy), sI = toMain(iHW + 11, wy);
         ctx.fillText("OUTSIDE", sO.x, sO.y);
         ctx.fillText("INSIDE", sI.x, sI.y);
         ctx.restore();
@@ -3213,12 +3213,15 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     // torch so you can see where the running edge starts and ends — and, with an off-center waist,
     // how much shorter the sidecut is on one side. Also marks the waist apex on each edge.
     {
-      const eps = 0.5;
-      const drawEdgeSpan = (side) => {
+      const eps = 0.5, Lp = ski.length;
+      const oc = sideContact(ski, "out"), ic = sideContact(ski, "in");
+      const tipCYin = Lp - ic.tipL, tailCYin = ic.tailL;    // right (+x) = inside
+      const tipCYout = Lp - oc.tipL, tailCYout = oc.tailL;  // left (-x) = outside
+      const drawEdgeSpan = (side, tailCY, tipCY) => {
         ctx.beginPath();
         let started = false;
         side.forEach(p => {
-          if (p.y >= tailContactY - eps && p.y <= tipContactY + eps) {
+          if (p.y >= tailCY - eps && p.y <= tipCY + eps) {
             const s = toMain(p.x, p.y);
             if (!started) { ctx.moveTo(s.x, s.y); started = true; } else ctx.lineTo(s.x, s.y);
           }
@@ -3229,13 +3232,13 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.strokeStyle = C.contactLabel || "#f0895c";
       ctx.lineWidth = 2.6;
       ctx.shadowColor = "rgba(232,85,42,0.5)"; ctx.shadowBlur = 6;
-      drawEdgeSpan(right);
-      drawEdgeSpan(left);
+      drawEdgeSpan(right, tailCYin, tipCYin);
+      drawEdgeSpan(left, tailCYout, tipCYout);
       ctx.restore();
-      // Contact-point dots on each edge (4: both sides × tip/tail contact)
+      // Contact-point dots on each edge (both sides × tip/tail contact), per-side.
       ctx.fillStyle = C.contactLabel || "#f0895c";
-      [[ski.tailWidth / 2, tailContactY], [ski.tipWidth / 2, tipContactY],
-       [-ski.tailWidth / 2, tailContactY], [-ski.tipWidth / 2, tipContactY]].forEach(([x, y]) => {
+      [[ski.tailWidth / 2, tailCYin], [ski.tipWidth / 2, tipCYin],
+       [-ski.tailWidth / 2, tailCYout], [-ski.tipWidth / 2, tipCYout]].forEach(([x, y]) => {
         const s = toMain(x, y);
         ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill();
       });
@@ -3656,21 +3659,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
-    // Check edge-extension handles first (contact mode only). Generous hit radius for touch.
-    const eh = edgeHandleRef.current;
-    if (eh && (ski.edgeWrap || "full") === "contact") {
-      const hitR = isVertical ? 22 : 14;
-      if (eh.tip && Math.hypot(mx - eh.tip.x, my - eh.tip.y) < hitR) {
-        setDragging("edgeExtTip");
-        setDragStart({ mx, my, frame: "main", ski: JSON.parse(JSON.stringify(ski)) });
-        return;
-      }
-      if (eh.tail && Math.hypot(mx - eh.tail.x, my - eh.tail.y) < hitR) {
-        setDragging("edgeExtTail");
-        setDragStart({ mx, my, frame: "main", ski: JSON.parse(JSON.stringify(ski)) });
-        return;
-      }
-    }
+    // Edge-extension endpoints (square markers) are visual reference only — edited via the sidebar
+    // "Tip end / Tail end" inputs for accuracy, not by dragging (dragging them was error-prone at the tip).
 
     const id = findCP(mx, my);
     if (id) {
