@@ -204,6 +204,7 @@ const DEFAULT_SKI={
                      // and renders + exports binding inserts; the geometry engine is shared.
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   asymSidecut:false,waistOutside:98,waistInside:98,
+  asymContact:false,tipLengthOutside:240,tipLengthInside:240,tailLengthOutside:170,tailLengthInside:170,
   tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
   waistPosition:0.48,
   // How waistPosition is interpreted: false (default) = fraction of the contact-to-contact span
@@ -534,10 +535,10 @@ function computeBOM(ski) {
   const wood = (ski.layup && ski.layup.wood) || "";
   const density = WOOD_DENSITY[wood] || 500;
   const coreMassKg = (vol / 1e9) * density;               // mm^3 -> m^3
-  let effEdge = 0;
-  try { effEdge = computeDerived(ski).effectiveEdge || 0; } catch (e) {}
+  let effEdge = 0, effEdgeSum = 0;
+  try { const d = computeDerived(ski); effEdge = d.effectiveEdge || 0; effEdgeSum = ski.asymContact ? (d.effectiveEdgeOutside + d.effectiveEdgeInside) : 2 * effEdge; } catch (e) {}
   const edgeWrap = ski.edgeWrap || "full";
-  const edgeLenM = (edgeWrap === "contact" ? 2 * effEdge : perimMM) / 1000;
+  const edgeLenM = (edgeWrap === "contact" ? effEdgeSum : perimMM) / 1000;
   const glassLayers = (ski.layup && ski.layup.glassLayers) || 1;
   const glassBotLayers = (ski.layup && ski.layup.fabricSplit) ? ((ski.layup.glassBotLayers) || 1) : glassLayers;
   const glassM2 = areaM2 * (glassLayers + glassBotLayers);   // top + bottom faces (may differ if split)
@@ -608,6 +609,15 @@ function resolveWaistY(ski) {
   }
   return tailContactY + (tipContactY - tailContactY) * wp;
 }
+// Per-side contact lengths (effective edge). side: "out" = right/+x edge, "in" = left/-x edge.
+// Off → both sides use the shared tipLength/tailLength. Missing per-side values fall back to shared.
+function sideContact(ski, side) {
+  if (!ski.asymContact) return { tipL: ski.tipLength, tailL: ski.tailLength };
+  const tipL = side === "out" ? ski.tipLengthOutside : ski.tipLengthInside;
+  const tailL = side === "out" ? ski.tailLengthOutside : ski.tailLengthInside;
+  return { tipL: tipL != null ? tipL : ski.tipLength, tailL: tailL != null ? tailL : ski.tailLength };
+}
+
 function computeOutline(ski) {
   const { length: L, tipWidth: TW, waistWidth: WW, tailWidth: TAW, tipLength: TL, tailLength: TAIL } = ski;
   const tipContactY = L - TL, tailContactY = TAIL;
@@ -620,31 +630,28 @@ function computeOutline(ski) {
   const tailR = sampleShape(ski.tailNodesR, nSamplesShape);
   const tailL = ski.tailSymmetric ? tailR : sampleShape(ski.tailNodesL, nSamplesShape);
 
-  const buildSide = (tailPtsNorm, tipPtsNorm, sign, ww2) => {
+  const buildSide = (tailPtsNorm, tipPtsNorm, sign, ww2, tipCY, tailCY) => {
     const side = [];
     const tw2 = TAW / 2, tipw2 = TW / 2;
-    // Tail curve: same convention as tip — node 0 (pt.y=0) is the contact point, node 1 (pt.y=1) is the tail-end.
-    //   pt.y=0 ↔ skiY=tailContactY,  pt.y=1 ↔ skiY=0
-    // We need to draw the outline from skiY=0 (tail-end) UP to skiY=tailContactY (contact), so
-    // we iterate the sampled curve points from LAST to FIRST.
+    // Tail curve: node 0 (pt.y=0) is the contact point, node 1 (pt.y=1) is the tail-end.
     for (let i = tailPtsNorm.length - 1; i >= 0; i--) {
       const pt = tailPtsNorm[i];
       side.push({
         x: sign * pt.x * tw2,
-        y: (1 - pt.y) * tailContactY,
+        y: (1 - pt.y) * tailCY,
       });
     }
     // Sidecut: tail-contact (width=TAW) → waist (width=WW)
-    const tailRunLen = waistY - tailContactY;
+    const tailRunLen = waistY - tailCY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
       const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
       side.push({
         x: sign * (tw2 + b * (ww2 - tw2)),
-        y: tailContactY + t * tailRunLen,
+        y: tailCY + t * tailRunLen,
       });
     }
     // Sidecut: waist → tip-contact (width=TW)
-    const tipRunLen = tipContactY - waistY;
+    const tipRunLen = tipCY - waistY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
       const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
       side.push({
@@ -652,11 +659,12 @@ function computeOutline(ski) {
         y: waistY + t * tipRunLen,
       });
     }
-    // Tip curve: y=0 is tip-contact (skiY=tipContactY), y=1 is nose-end (skiY=ski.length)
+    // Tip curve: pt.y=0 is tip-contact (skiY=tipCY), pt.y=1 is nose-end (skiY=L)
+    const tipSpan = L - tipCY;
     tipPtsNorm.forEach(pt => {
       side.push({
         x: sign * pt.x * tipw2,
-        y: tipContactY + pt.y * TL,
+        y: tipCY + pt.y * tipSpan,
       });
     });
     return side;
@@ -667,9 +675,14 @@ function computeOutline(ski) {
   const asym = !!ski.asymSidecut;
   const wOut2 = (asym && ski.waistOutside != null ? ski.waistOutside : WW) / 2;
   const wIn2 = (asym && ski.waistInside != null ? ski.waistInside : WW) / 2;
+  // Per-side contact points (effective edge). Waist Y is a single shared line; each edge runs its own
+  // sidecut from its own contacts to that waist. Tip/tail curves span from each side's contact to the ends.
+  const oc = sideContact(ski, "out"), ic = sideContact(ski, "in");
+  const tipCYout = L - oc.tipL, tailCYout = oc.tailL;
+  const tipCYin = L - ic.tipL, tailCYin = ic.tailL;
   return {
-    right: buildSide(tailR, tipR,  1, wOut2),
-    left:  buildSide(tailL, tipL, -1, wIn2),
+    right: buildSide(tailR, tipR,  1, wOut2, tipCYout, tailCYout),
+    left:  buildSide(tailL, tipL, -1, wIn2, tipCYin, tailCYin),
     waistY, tipContactY, tailContactY,
   };
 }
@@ -697,15 +710,18 @@ function computeDerived(ski){
   // Inside/outside (left/right edge) radii when asymmetric sidecut is on. Each edge uses its own waist
   // width across the full effective edge; a narrower waist on a side gives a tighter radius there.
   const asymOn = !!ski.asymSidecut;
+  const oc = sideContact(ski, "out"), ic = sideContact(ski, "in");
+  const eeOut = ski.length - oc.tipL - oc.tailL, eeIn = ski.length - ic.tipL - ic.tailL;
   const wOut = asymOn && ski.waistOutside != null ? ski.waistOutside : ski.waistWidth;
   const wIn = asymOn && ski.waistInside != null ? ski.waistInside : ski.waistWidth;
-  const edgeR = w => { const d = (avg - w) / 2; return d > 0.5 ? (ee * ee) / (8 * d) / 1000 : Infinity; };
-  const radiusOutside = edgeR(wOut), radiusInside = edgeR(wIn);
+  const edgeR = (ee_, w) => { const d = (avg - w) / 2; return d > 0.5 ? (ee_ * ee_) / (8 * d) / 1000 : Infinity; };
+  const radiusOutside = edgeR(eeOut, wOut), radiusInside = edgeR(eeIn, wIn);
   const finiteBoth = isFinite(backRadius) && isFinite(frontRadius);
   const ratio = finiteBoth ? Math.max(backRadius, frontRadius) / Math.min(backRadius, frontRadius) : 1;
   const asymmetric = finiteBoth && ratio > 1.15;   // >15% apart → worth showing per-side
   return { effectiveEdge: ee, sidecutRadius: radius, backRadius, frontRadius, asymmetric,
-           backRun, frontRun, radiusOutside, radiusInside, asymSidecut: asymOn };
+           backRun, frontRun, radiusOutside, radiusInside, asymSidecut: asymOn,
+           effectiveEdgeOutside: eeOut, effectiveEdgeInside: eeIn, asymContact: !!ski.asymContact };
 }
 // Binding-insert geometry for snowboard mode. Coordinates match the plan view: X = width (centered on
 // 0), Y = along the board (tail end = 0, tip end = length). Two packs are placed symmetrically about
@@ -1066,20 +1082,22 @@ function buildInsertsDXF(ski, tf) {
 function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
   extTip = extTip || 0;
   extTail = extTail || 0;
-  const tailC = ski.tailLength;
-  const tipC = ski.length - ski.tipLength;
-  // Extend past each contact point, clamped to the physical ends (with a small epsilon so the
-  // sampled endpoint stays just inside the outline and the inward normal is well-defined).
+  // Per-side contact ranges: each edge runs from its own tail-contact to its own tip-contact (plus the
+  // shared wrap extensions), so the base cut is independently asymmetric on the inside/outside edges.
   const eps = 0.5;
-  const startY = Math.max(eps, tailC - extTail);          // toward the tail
-  const endY = Math.min(ski.length - eps, tipC + extTip); // toward the tip
+  const rangeFor = (con) => ({
+    startY: Math.max(eps, con.tailL - extTail),
+    endY: Math.min(ski.length - eps, (ski.length - con.tipL) + extTip),
+  });
+  const rOut = rangeFor(sideContact(ski, "out"));   // right / +x = outside
+  const rIn = rangeFor(sideContact(ski, "in"));     // left / -x = inside
 
   // True outline points (include tip/tail bezier curves). `right` runs tail-end→tip-end.
   const outline = computeOutline(ski);
 
   // Extract one side's points within [startY, endY], interpolating exact endpoints so the edge
   // starts/ends precisely at the requested stations. `pts` is assumed ordered by increasing skiY.
-  const sliceSide = (pts) => {
+  const sliceSide = (pts, startY, endY) => {
     // Ensure ascending skiY order.
     const asc = pts[0].y <= pts[pts.length - 1].y ? pts : pts.slice().reverse();
     const out = [];
@@ -1111,8 +1129,8 @@ function getContactEdgeLines(ski, edgeInset, extTip, extTail) {
     return out;
   };
 
-  const rightRaw = sliceSide(outline.right);
-  const leftRaw = sliceSide(outline.left);
+  const rightRaw = sliceSide(outline.right, rOut.startY, rOut.endY);
+  const leftRaw = sliceSide(outline.left, rIn.startY, rIn.endY);
 
   const offsetInward = (edge) => {
     const out = [];
@@ -3156,6 +3174,22 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
 
+    // Inside / outside edge labels when asymmetric sidecut is on, so it's obvious which edge is which.
+    if (ski.asymSidecut) {
+      try {
+        const wy = resolveWaistY(ski);
+        const oHW = (ski.waistOutside != null ? ski.waistOutside : ski.waistWidth) / 2;
+        const iHW = (ski.waistInside != null ? ski.waistInside : ski.waistWidth) / 2;
+        ctx.save();
+        ctx.font = "bold 9px 'JetBrains Mono', monospace";
+        ctx.fillStyle = C.heading; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const sO = toMain(oHW + 11, wy), sI = toMain(-(iHW + 11), wy);
+        ctx.fillText("OUTSIDE", sO.x, sO.y);
+        ctx.fillText("INSIDE", sI.x, sI.y);
+        ctx.restore();
+      } catch (e) {}
+    }
+
     // ── Topsheet artwork ──────────────────────────────────────────
     if (topsheet && topsheet.src && topsheetImgRef.current) {
       // Combined on-screen bounding box (both skis in pair view, else just ski A). The art is fit to
@@ -3789,9 +3823,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           : (dragStart.ski.length - dragStart.ski.tipLength - dragStart.ski.tailLength);
         const startWP = dragStart.ski.waistPosition !== undefined ? dragStart.ski.waistPosition : 0.48;
         const lo = full ? 0.10 : 0.30, hi = full ? 0.90 : 0.70;
+        const wp = cp.param || "waistWidth";
         setSki(s => ({
           ...s,
-          waistWidth: clamp(Math.round(dragStart.ski.waistWidth + dSkiX * cp.mult), 50, 320),
+          [wp]: clamp(Math.round(dragStart.ski[wp] + dSkiX * cp.mult), 50, 320),
           waistPosition: span > 0 ? clamp(startWP + dSkiY / span, lo, hi) : startWP,
         }));
         return;
@@ -5693,6 +5728,7 @@ export default function App() {
   // cross-section and every spec. Loads the logo dims first (same as export) so the preview matches 1:1.
   const [previewSvg, setPreviewSvg] = useState(null);
   const [showToolpath, setShowToolpath] = useState(false);
+  const [asymOpen, setAsymOpen] = useState(false);
   const openSpecPreview = useCallback(() => {
     const run = (logoDims) => setPreviewSvg(buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims }));
     if (builderBrand.logoSrc) { const lg = new Image(); lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight }); lg.onerror = () => run(null); lg.src = builderBrand.logoSrc; } else run(null);
@@ -6643,11 +6679,11 @@ export default function App() {
               <>
                 {inputField("Length", "length", lenMin, lenMax)}
                 {inputField(board ? "Nose W" : "Tip W", "tipWidth", 60, wMax)}
-                {inputField("Waist", "waistWidth", waistMin, waistMax)}
+                {!ski.asymSidecut && inputField("Waist", "waistWidth", waistMin, waistMax)}
                 {inputField("Tail W", "tailWidth", 60, wMax)}
-                <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />
-                {inputField(board ? "Nose Len" : "Tip Len", "tipLength", 80, 500)}
-                {inputField("Tail Len", "tailLength", 60, 400)}
+                {!ski.asymSidecut && <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />}
+                {!ski.asymContact && inputField(board ? "Nose Len" : "Tip Len", "tipLength", 80, 500)}
+                {!ski.asymContact && inputField("Tail Len", "tailLength", 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
                 {inputField("Waist Pos", "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
                 <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
@@ -6677,6 +6713,66 @@ export default function App() {
                   {ski.waistFullLength
                     ? "0.5 = geometric center of the ski (fraction of full length)."
                     : "0.5 = midway between the contact points (fraction of running edge)."}
+                </div>
+                {/* ── Asymmetric (advanced) — all left/right asymmetry contained here so symmetric skis are untouched ── */}
+                <div style={{ border: `1px solid ${(ski.asymSidecut || ski.asymContact) ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6 }}>
+                  <button onClick={() => setAsymOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", cursor: "pointer", padding: "8px 10px", color: (ski.asymSidecut || ski.asymContact) ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
+                    <span>ASYMMETRIC{(ski.asymSidecut || ski.asymContact) ? " · ON" : " (advanced)"}</span>
+                    <span style={{ fontSize: 14 }}>{asymOpen ? "\u2212" : "+"}</span>
+                  </button>
+                  {asymOpen && (() => {
+                    const swBtn = (on, onClick) => (
+                      <button onClick={onClick} style={{ width: 30, height: 14, borderRadius: 7, border: "none", cursor: "pointer", position: "relative", background: on ? C.heading : C.inputBorder, flexShrink: 0 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 5, background: "#F0EDE4", position: "absolute", top: 2, left: on ? 18 : 2, transition: "left 0.2s" }} />
+                      </button>
+                    );
+                    const numRow = (param, lab, extra) => (
+                      <div key={param} style={{ marginBottom: 6 }}>
+                        <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, display: "flex", justifyContent: "space-between" }}>
+                          <span>{lab}</span>{extra != null && <span style={{ color: C.heading }}>{extra}</span>}
+                        </div>
+                        <input type="number" value={ski[param]} step={1}
+                          onChange={e => setSki(s => ({ ...s, [param]: parseFloat(e.target.value) || 0 }))}
+                          style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                    );
+                    return (
+                      <div style={{ padding: "0 10px 10px" }}>
+                        {/* Different sidecut radii (same effective edge) */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          {swBtn(ski.asymSidecut, () => setSki(s => s.asymSidecut
+                            ? { ...s, asymSidecut: false, waistWidth: Math.round(((s.waistOutside ?? s.waistWidth) + (s.waistInside ?? s.waistWidth)) / 2) }
+                            : { ...s, asymSidecut: true, waistOutside: s.waistWidth, waistInside: s.waistWidth }))}
+                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Different sidecut radii</span>
+                        </div>
+                        {ski.asymSidecut && [["waistOutside", "Waist \u25B2 OUTSIDE", derived.radiusOutside], ["waistInside", "Waist \u25BC INSIDE", derived.radiusInside]].map(([p, l, r]) => numRow(p, l, "R " + (isFinite(r) ? r.toFixed(1) + " m" : "flat")))}
+                        {/* Different effective edges (contact lengths) */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 6px" }}>
+                          {swBtn(ski.asymContact, () => setSki(s => s.asymContact
+                            ? { ...s, asymContact: false }
+                            : { ...s, asymContact: true, tipLengthOutside: s.tipLength, tipLengthInside: s.tipLength, tailLengthOutside: s.tailLength, tailLengthInside: s.tailLength }))}
+                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Different effective edges</span>
+                        </div>
+                        {ski.asymContact && (
+                          <>
+                            <div style={{ color: C.heading, fontSize: 10, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, display: "flex", justifyContent: "space-between" }}>
+                              <span>▲ OUTSIDE edge</span><span>eff {derived.effectiveEdgeOutside} mm</span>
+                            </div>
+                            {numRow("tipLengthOutside", "Tip Len", null)}
+                            {numRow("tailLengthOutside", "Tail Len", null)}
+                            <div style={{ color: C.heading, fontSize: 10, margin: "8px 0 4px", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, display: "flex", justifyContent: "space-between" }}>
+                              <span>▼ INSIDE edge</span><span>eff {derived.effectiveEdgeInside} mm</span>
+                            </div>
+                            {numRow("tipLengthInside", "Tip Len", null)}
+                            {numRow("tailLengthInside", "Tail Len", null)}
+                          </>
+                        )}
+                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                          ▲ outside = +x edge, ▼ inside = −x edge. Both base-cut modes (full-wrap and contact-wrap) follow each edge independently, so cutouts are asymmetric too.
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             );
