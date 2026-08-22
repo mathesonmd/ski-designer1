@@ -2563,7 +2563,7 @@ function _camCrossingsX(poly, yline) {
 function buildCoreCAM(ski, opt) {
   const o = Object.assign({ units: "mm", toolDia: 12.7, feed: 2500, plunge: 800, spindle: 18000,
     stepdown: 3, stepover: 6, safeZ: 6, stockThick: 13, zZero: "bed", doProfile: true, doPerimeter: true,
-    perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabLen: 8, tabHeight: 2, origin: "center",
+    perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabLen: 8, tabHeight: 2, origin: "corner",
     profPattern: "zigzag", profDir: "+", sidewallStock: 1.5, perimDir: "conventional", spindleCW: true,
     rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
   const inch = o.units === "inch", uL = inch ? 25.4 : 1;
@@ -2577,7 +2577,7 @@ function buildCoreCAM(ski, opt) {
   const L = ski.length, prof = ski.coreProfile;
   const core = applyVCutToCore(ski);
   let halfW = 0; for (const p of core) halfW = Math.max(halfW, Math.abs(p.y));
-  const ox = o.origin === "center" ? L / 2 : 0;
+  let originShiftLen = 0, originShiftWid = 0;   // set after the part bbox is known (below)
   const zref = o.zZero === "bed" ? 0 : o.stockThick;
   const MZ = h => h - zref;
   const isBase = o.heightMode === "base";
@@ -2605,7 +2605,7 @@ function buildCoreCAM(ski, opt) {
   const tk = z => { minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); };
   // Part orientation: which machine axis the ski LENGTH runs along. "y" (default) puts length on the
   // long bed axis (portrait). Emit swaps X/Y accordingly so the preview and the machine always agree.
-  const emitXY = (x, y) => { const p = o.partAxis === "x" ? [x - ox, y] : [y, x - ox]; return [p[0] + (o.offsetX || 0), p[1] + (o.offsetY || 0)]; };
+  const emitXY = (x, y) => { const sx = x + originShiftLen, sy = y + originShiftWid; const p = o.partAxis === "x" ? [sx, sy] : [sy, sx]; return [p[0] + (o.offsetX || 0), p[1] + (o.offsetY || 0)]; };
   const tkC = (mx, my) => { if (mx < minCX) minCX = mx; if (mx > maxCX) maxCX = mx; if (my < minCY) minCY = my; if (my > maxCY) maxCY = my; };
   const g0 = (x, y) => { const [mx, my] = emitXY(x, y); P(`G0 X${f(mx)} Y${f(my)}`); rapids++; };
   const g0z = z => { P(`G0 Z${f(z)}`); tk(z); };
@@ -2622,6 +2622,10 @@ function buildCoreCAM(ski, opt) {
     accXY(fp);
   }
   const stockX = (sx1 - sx0) / uL, stockY = (sy1 - sy0) / uL;           // in output units
+  // Origin shift (internal coords): corner = shift so the whole part is in +X/+Y (min -> 0), so every
+  // emitted coordinate is positive and nothing drives negative past a soft limit. center = centred on 0.
+  if (o.origin === "corner") { originShiftLen = -sx0; originShiftWid = -sy0; }
+  else { originShiftLen = -(sx0 + sx1) / 2; originShiftWid = -(sy0 + sy1) / 2; }
   const dv = n => inch ? (+n.toFixed(3)) : Math.round(n);
   // Required thickness: blanks/sheets for cut ops = stock; mold blank = surface span + a solid base.
   const moldBase = 12;                                                   // mm of base left under the deepest cut
@@ -2750,11 +2754,17 @@ function buildCoreCAM(ski, opt) {
       PB(); PC(`===== ROD ALIGNMENT HOLES (${f(o.slatHoleDia)} ${uu} dia) =====`);
       P(`G0 Z${f(safeZ)}`); toolChange(o.slatHoleToolNum); P(`S${o.spindle} M3`);
       const botZh = -o.cutThrough;
-      for (const poly0 of o.slatPolys) {
-        if (!poly0._holes) continue;
-        for (const hh of poly0._holes) { g0(hh.x, hh.y); g0z(MZ(o.stockThick + 1)); g1z(MZ(botZh)); g0z(safeZ); nHoles++; }
-      }
-      PC(`${nHoles} holes drilled`);
+      // Order the holes as a snake (by stacking band, alternating direction each row) so the drill
+      // doesn't zig-zag/jump back across the sheet between holes.
+      const all = [];
+      for (const poly0 of o.slatPolys) if (poly0._holes) for (const h of poly0._holes) all.push(h);
+      const bands = new Map();
+      for (const h of all) { const k = Math.round(h.y); if (!bands.has(k)) bands.set(k, []); bands.get(k).push(h); }
+      const keys = [...bands.keys()].sort((a, b) => a - b);
+      const ordered = [];
+      keys.forEach((k, i) => { const row = bands.get(k).sort((a, b) => a.x - b.x); if (i % 2) row.reverse(); ordered.push(...row); });
+      for (const hh of ordered) { g0(hh.x, hh.y); g0z(MZ(o.stockThick + 1)); g1z(MZ(botZh)); g0z(safeZ); nHoles++; }
+      PC(`${nHoles} holes drilled (travel-optimised)`);
     }
   }
   if (o.borePts && o.borePts.length) {
@@ -2902,7 +2912,21 @@ function Toolpath3DView({ gcode, machine }) {
       const cgeo = new THREE.BufferGeometry(); cgeo.setAttribute("position", new THREE.Float32BufferAttribute(cpos, 3)); cgeo.setAttribute("color", new THREE.Float32BufferAttribute(ccol, 3));
       const cmat = new THREE.LineBasicMaterial({ vertexColors: true }); scene.add(new THREE.LineSegments(cgeo, cmat)); cleanup.push(() => { cgeo.dispose(); cmat.dispose(); });
       if (rap.length) { const rpos = new Float32Array(rap.length * 6); rap.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); rpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); }); const rgeo = new THREE.BufferGeometry(); rgeo.setAttribute("position", new THREE.Float32BufferAttribute(rpos, 3)); const rmat = new THREE.LineBasicMaterial({ color: 0x5a5148, transparent: true, opacity: 0.35 }); scene.add(new THREE.LineSegments(rgeo, rmat)); cleanup.push(() => { rgeo.dispose(); rmat.dispose(); }); }
-      const grid = new THREE.GridHelper(size * 1.8, 24, 0x3a332c, 0x241f1a); grid.position.y = zmin - cz - 0.5; scene.add(grid); cleanup.push(() => grid.geometry.dispose());
+      const floorY = zmin - cz - 0.5;
+      // Machine bed footprint on the floor (short X x long Y), anchored at the toolpath's corner —
+      // matches the 2D view. Falls back to a tight grid hugging the part when no bed is set.
+      if (machine && machine.short > 0) {
+        const bx = bx0, by = by0, bX = machine.short, bY = machine.long;   // gcode X=width(short), Y=length(long)
+        const corners = [[bx, by], [bx + bX, by], [bx + bX, by + bY], [bx, by + bY], [bx, by]];
+        const pts = corners.map(([mX, mY]) => new THREE.Vector3(mX - cx, floorY, -(mY - cy)));
+        const bgeo = new THREE.BufferGeometry().setFromPoints(pts);
+        const bmat = new THREE.LineBasicMaterial({ color: machine.fits ? 0x6f9d6f : 0xe8552a });
+        scene.add(new THREE.Line(bgeo, bmat)); cleanup.push(() => { bgeo.dispose(); bmat.dispose(); });
+        const grid = new THREE.GridHelper(Math.max(bX, bY), 20, 0x2f2a24, 0x241f1a); grid.position.set((bx + bX / 2) - cx, floorY, -((by + bY / 2) - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
+      } else {
+        const g = Math.max(bx1 - bx0, by1 - by0) * 1.1;
+        const grid = new THREE.GridHelper(g, 16, 0x3a332c, 0x241f1a); grid.position.set((bx0 + bx1) / 2 - cx, floorY, -((by0 + by1) / 2 - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
+      }
       let az = 0.9, pol = 1.0, rad = size * 1.7;
       const el = renderer.domElement;
       const updateCam = () => { camera.position.set(rad * Math.sin(pol) * Math.sin(az), rad * Math.cos(pol), rad * Math.sin(pol) * Math.cos(az)); camera.lookAt(0, 0, 0); };
@@ -2924,7 +2948,7 @@ function Toolpath3DView({ gcode, machine }) {
       setStatus("ok");
     }).catch(() => { if (!disposed) setStatus("error"); });
     return () => { disposed = true; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); cleanup.forEach(fn => { try { fn(); } catch (e) {} }); if (renderer) { try { renderer.dispose(); if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch (e) {} } };
-  }, [gcode]);
+  }, [gcode, machine]);
   return <div ref={mountRef} style={{ width: "100%", height: "100%", cursor: "grab", position: "relative" }}>{status !== "ok" && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? "#e8552a" : "#9b9388", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{status === "error" ? "3D unavailable" : status === "empty" ? "no cuts to show" : "loading 3D\u2026"}</div>}</div>;
 }
 
@@ -5914,17 +5938,17 @@ export default function App() {
 
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
-    const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "center", spindleCW: true,
+    const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true,
       outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 15, slatHoleSpacing: 10, slatHoleToolNum: 5,
-      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 3,
+      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 4,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallStock: 0, sidewallEngage: "conventional" };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
