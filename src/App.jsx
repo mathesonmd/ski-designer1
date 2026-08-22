@@ -5943,12 +5943,12 @@ export default function App() {
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
-      slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleToolNum: 5,
-      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 5,
+      slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
+      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 6,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallStock: 0, sidewallEngage: "conventional" };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -5962,6 +5962,7 @@ export default function App() {
     const slatBase = camOpt.slatBase * uLm, overlap = camOpt.slatOverlap * uLm;
     const sheetY = Math.max(80, (camOpt.slatSheetW || 1200) * uLm), copies = Math.max(1, Math.round(camOpt.slatCopies || 1));
     const holesOn = !!camOpt.slatHoles, holeH = (camOpt.slatHoleH || 15) * uLm, holeSp = Math.max(2, (camOpt.slatHoleSpacing || 10) * uLm), holeMargin = Math.max(holeSp, 20);
+    const holeEndZone = Math.max(holeSp, (camOpt.slatHoleEndZone || 300) * uLm);   // holes only within this of each end; middle skipped
     let bmin = 1e9; for (let x = 0; x <= L; x += 4) bmin = Math.min(bmin, sideProfileHeightAt(ski, x));
     const topY = x => (sideProfileHeightAt(ski, x) - bmin) + slatBase;
     const ribH = (x0, x1) => { let m = 0; for (let i = 0; i <= 60; i++) m = Math.max(m, topY(x0 + (x1 - x0) * i / 60)); return m; };
@@ -5975,7 +5976,7 @@ export default function App() {
     const addHoles = (poly, leftX, len, kind) => {
       if (holesOn) {
         const y = poly[poly.length - 1].y + holeH, hs = [];
-        if (kind === "center") { for (let hx = holeMargin; hx <= len - holeMargin + 1e-6; hx += holeSp) hs.push({ x: leftX + hx, y }); }
+        if (kind === "center") { for (let hx = holeMargin; hx <= len - holeMargin + 1e-6; hx += holeSp) { if (hx <= holeEndZone || hx >= len - holeEndZone) hs.push({ x: leftX + hx, y }); } }
         else if (kind === "tail") hs.push({ x: leftX + Math.max(15, len - 25), y });   // inner edge = right end
         else hs.push({ x: leftX + Math.min(len - 15, 25), y });                        // tip inner edge = left end
         poly._holes = hs;
@@ -7731,8 +7732,12 @@ export default function App() {
                             <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
                           ))}
                         </div>
+                        <div style={{ marginTop: 6 }}>
+                          <div style={camSmall}>End zone {uu} (holes only within this of each end; middle skipped)</div>
+                          <input type="number" value={camOpt.slatHoleEndZone} step={st} onChange={e => setCam("slatHoleEndZone", parseFloat(e.target.value) || 0)} style={camInput} />
+                        </div>
                         <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                          A row of holes every {camOpt.slatHoleSpacing} {uu} on each center slat + one per end piece, all at {camOpt.slatHoleH} {uu} off the flat bottom. Drilled with tool T{camOpt.slatHoleToolNum} (ATC change) so a rod threads through and the ends slide in {camOpt.slatHoleSpacing}-{uu} steps.
+                          A row of holes every {camOpt.slatHoleSpacing} {uu} within {camOpt.slatHoleEndZone} {uu} of each end of the center slats (the middle is skipped - the tip/tail sections never slide there), plus one per end piece, all at {camOpt.slatHoleH} {uu} off the flat bottom. Drilled with T{camOpt.slatHoleToolNum} (ATC change).
                         </div>
                       </>
                     )}
