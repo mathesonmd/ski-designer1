@@ -2569,17 +2569,56 @@ const POST_PROFILES = {
   fanuc: { name: "Fanuc / Haas", comment: "()", lineNum: true, tc: "tm6", end: ["M30"], ext: "nc", pct: true, decimals: null },
 };
 
+// Arc fitting: collapse runs of linear G1 moves that lie on a common circle into G2/G3 arcs.
+function _circleFrom(a, b, c) {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y;
+  const ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+  const uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+  const r = Math.hypot(a.x - ux, a.y - uy);
+  if (!isFinite(r) || r > 1e5 || r < 1e-3) return null;
+  return { x: ux, y: uy, r };
+}
+function _allWithin(pts, i, j, c, tol) { for (let k = i; k <= j; k++) if (Math.abs(Math.hypot(pts[k].x - c.x, pts[k].y - c.y) - c.r) > tol) return false; return true; }
+function arcFitGcode(gcode, tol, dec, lineNum) {
+  const fmt = n => (Math.abs(n) < 1e-9 ? "0" : n.toFixed(dec));
+  const src = gcode.split("\n").map(l => l.replace(/^N\d+\s+/, ""));
+  const out = []; let cx = 0, cy = 0, cz = 0, run = null;
+  const num = (l, a) => { const m = l.match(new RegExp(a + "(-?[0-9.]+)")); return m ? parseFloat(m[1]) : null; };
+  const emitRun = () => {
+    if (!run) return; const pts = run.pts, F = run.f; let first = true;
+    if (pts.length < 4) { for (let k = 1; k < pts.length; k++) { out.push(`G1 X${fmt(pts[k].x)} Y${fmt(pts[k].y)}${first && F != null ? " F" + fmt(F) : ""}`); first = false; } run = null; return; }
+    let i = 0;
+    while (i < pts.length - 1) {
+      let best = -1, bestC = null, bestCW = false, j = i + 2;
+      while (j < pts.length) { const c = _circleFrom(pts[i], pts[(i + j) >> 1], pts[j]); if (c && _allWithin(pts, i, j, c, tol)) { best = j; bestC = c; bestCW = ((pts[i + 1].x - pts[i].x) * (c.y - pts[i].y) - (pts[i + 1].y - pts[i].y) * (c.x - pts[i].x)) < 0; j++; } else break; }
+      if (best > i + 2 && bestC) { const e = pts[best]; out.push(`${bestCW ? "G2" : "G3"} X${fmt(e.x)} Y${fmt(e.y)} I${fmt(bestC.x - pts[i].x)} J${fmt(bestC.y - pts[i].y)}${first && F != null ? " F" + fmt(F) : ""}`); first = false; i = best; }
+      else { out.push(`G1 X${fmt(pts[i + 1].x)} Y${fmt(pts[i + 1].y)}${first && F != null ? " F" + fmt(F) : ""}`); first = false; i++; }
+    }
+    run = null;
+  };
+  for (const l of src) {
+    const X = num(l, "X"), Y = num(l, "Y"), Z = num(l, "Z"), F = num(l, "F");
+    if (/^G1\b/.test(l) && X != null && Y != null && (Z == null || Math.abs(Z - cz) < 1e-6)) { if (!run) run = { f: null, pts: [{ x: cx, y: cy }] }; if (F != null) run.f = F; run.pts.push({ x: X, y: Y }); cx = X; cy = Y; continue; }
+    emitRun(); out.push(l); if (X != null) cx = X; if (Y != null) cy = Y; if (Z != null) cz = Z;
+  }
+  emitRun();
+  if (lineNum) { let n = 0; return out.map(l => (l.trim() === "" || /^[%(;]/.test(l)) ? l : "N" + (n += 10) + " " + l).join("\n"); }
+  return out.join("\n");
+}
+
 function buildCoreCAM(ski, opt) {
   const o = Object.assign({ units: "mm", toolDia: 12.7, feed: 2500, plunge: 800, spindle: 18000,
     stepdown: 3, stepover: 6, safeZ: 6, stockThick: 13, zZero: "bed", doProfile: true, doPerimeter: true,
     perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabLen: 8, tabHeight: 2, origin: "corner",
     profPattern: "zigzag", profDir: "+", sidewallStock: 1.5, perimDir: "conventional", spindleCW: true,
-    rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
+    rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, arcOut: false, dragKnife: false, bladeOffset: 1, dragLeadIn: 12, dragLeadIn: 12, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
   const inch = o.units === "inch", uL = inch ? 25.4 : 1;
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallStock", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallStock", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -2652,7 +2691,7 @@ function buildCoreCAM(ski, opt) {
   PC(`Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
-  toolChange(o.toolNum); P(`S${o.spindle} M3`); P(`G0 Z${f(safeZ)}`);
+  toolChange(o.toolNum); P(o.dragKnife && o.doPerimeter ? "M5" : `S${o.spindle} M3`); if (o.dragKnife && o.doPerimeter) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
     let minTop = 1e9; for (let x = 0; x <= L; x += 5) minTop = Math.min(minTop, topH(x));
@@ -2698,8 +2737,36 @@ function buildCoreCAM(ski, opt) {
       doSurface(R, o.stepover, o.stepdown, 0, null, o.stockThick, "profile");
     }
   }
-  if (o.doPerimeter) {
-    PB(); PC("===== CORE PERIMETER (outline through-cut) =====");
+  if (o.doPerimeter && o.dragKnife) {
+    // Drag knife (e.g. Donek): spindle off, a blade that trails the tool center by `bladeOffset`.
+    // The tool-center path leads the desired cut line by the offset, and at corners it swivels on an
+    // arc of radius=offset centered on the corner so the blade re-aligns instead of tearing.
+    PB(); PC("===== BASE OUTLINE — DRAG KNIFE (spindle OFF) =====");
+    PC(`Blade offset ${disp.bladeOffset} ${uu} · straight plunge · swivel at corners · single pass`);
+    const off = Math.max(0.05, o.bladeOffset || 1);
+    let bp = core.slice();
+    { const dstep = 3, dp = []; for (let i = 0; i < bp.length; i++) { const a = bp[i], b = bp[(i + 1) % bp.length], d = Math.hypot(b.x - a.x, b.y - a.y), nn = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < nn; j++) { const t = j / nn; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } bp = dp; }
+    const n = bp.length, dir = i => { const a = bp[i], b = bp[(i + 1) % n], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1; return { x: dx / L, y: dy / L }; };
+    const tc = []; const d0 = dir(0); tc.push({ x: bp[0].x + off * d0.x, y: bp[0].y + off * d0.y });
+    for (let i = 0; i < n; i++) {
+      const dOut = dir(i), V = bp[(i + 1) % n];
+      tc.push({ x: V.x + off * dOut.x, y: V.y + off * dOut.y });
+      const dNext = dir((i + 1) % n); let a0 = Math.atan2(dOut.y, dOut.x), a1 = Math.atan2(dNext.y, dNext.x), da = a1 - a0;
+      while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      if (Math.abs(da) > 0.09) { const steps = Math.max(1, Math.ceil(Math.abs(da) / (12 * Math.PI / 180))); for (let s = 1; s <= steps; s++) { const a = a0 + da * s / steps; tc.push({ x: V.x + off * Math.cos(a), y: V.y + off * Math.sin(a) }); } }
+    }
+    const cutZ = MZ(-o.cutThrough);
+    // Lead-in: plunge in the waste, offset back along the first cut direction, then cut into the start
+    // point. That first straight move casters the blade into alignment with edge 0 before the real cut.
+    const lead = Math.max(off * 3, o.dragLeadIn || 12);
+    const lx = tc[0].x - lead * d0.x, ly = tc[0].y - lead * d0.y;
+    PC(`lead-in ${disp.dragLeadIn} ${uu} to pre-align the blade before the outline`);
+    g0(lx, ly); g0z(MZ(o.stockThick + 1)); g1z(cutZ);
+    g1(tc[0].x, tc[0].y, cutZ); cutDist += lead;
+    let px = tc[0].x, py = tc[0].y;
+    for (let i = 1; i < tc.length; i++) { g1(tc[i].x, tc[i].y, cutZ); cutDist += Math.hypot(tc[i].x - px, tc[i].y - py); px = tc[i].x; py = tc[i].y; }
+    g0z(safeZ);
+  } else if (o.doPerimeter) {
     let path = core;
     if (o.perimeterSide === "outside") path = offsetPolygonOutward(core, R);
     else if (o.perimeterSide === "inside") path = offsetPolygonInward(core, R);
@@ -2818,7 +2885,9 @@ function buildCoreCAM(ski, opt) {
     }
   }
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
-  return { gcode: G.join("\n"), stats: { lines: G.length, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : "blank", setThick: disp.stockThick } };
+  let _gc = G.join("\n"), _lines = G.length;
+  if (o.arcOut) { const dec = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); _gc = arcFitGcode(_gc, 0.02 / uL, dec, pst.lineNum); _lines = _gc.split("\n").length; }
+  return { gcode: _gc, stats: { lines: _lines, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : "blank", setThick: disp.stockThick } };
 }
 
 // Top-down toolpath preview: parses the generated G-code and draws rapids (dim/dashed) and cutting
@@ -5714,6 +5783,64 @@ const TOPSHEET_PRINTERS = [
   { name: "Shaggy's Copper Country", url: "https://www.skishaggys.com/products/custom-printed-ski-and-snowboard-topsheets", note: "prints on PBT topsheet plastic. 200 dpi, CMYK, 1\" bleed. Use a rich black (C75 M68 Y67 K100), not 100% K." },
 ];
 
+// Feeds & speeds helper: chip-load calculator (material + tool Ø + flutes + RPM -> feed/plunge).
+// Consistent branded header for full-screen sections (CAM, Topsheet) — logo + title + back.
+function BrandBar({ title, subtitle, onClose, C }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 18px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel, flexShrink: 0, boxShadow: "0 1px 0 rgba(0,0,0,0.25)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+        <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", lineHeight: 0, flexShrink: 0 }}>
+          <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: 34, width: "auto", display: "block" }} />
+        </a>
+        <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: C.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>{title}</div>
+          {subtitle && <div style={{ color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</div>}
+        </div>
+      </div>
+      <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 15px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", flexShrink: 0, letterSpacing: 0.5 }}>← Back to Design</button>
+    </div>
+  );
+}
+
+function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
+  const CHIP = { "Softwood": 0.23, "Hardwood": 0.15, "Ply / MDF": 0.18, "Hard plastic": 0.13, "Soft plastic": 0.20, "Aluminum": 0.10, "Foam / core": 0.40 };
+  const RPMR = { "Softwood": 18000, "Hardwood": 16000, "Ply / MDF": 18000, "Hard plastic": 13000, "Soft plastic": 12000, "Aluminum": 11000, "Foam / core": 18000 };
+  const [open, setOpen] = useState(false);
+  const [mat, setMat] = useState("Hardwood");
+  const [flutes, setFlutes] = useState(2);
+  const [rpm, setRpm] = useState(16000);
+  const chip = (CHIP[mat] || 0.15) * Math.min(2.5, Math.max(0.5, (toolDiaMM || 6.35) / 6.35));
+  const feedMM = Math.round(rpm * flutes * chip), plungeMM = Math.round(feedMM * 0.35);
+  const toU = v => uu === "in" ? +(v / 25.4).toFixed(1) : Math.round(v);
+  const feedD = toU(feedMM), plungeD = toU(plungeMM);
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const inp = { background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 7px", color: C.value, fontSize: 12, outline: "none", ...mono };
+  const sm = { color: C.label, fontSize: 10, marginBottom: 2, ...mono };
+  return (
+    <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, marginBottom: 8, overflow: "hidden" }}>
+      <div onClick={() => setOpen(o => !o)} style={{ padding: "7px 9px", cursor: "pointer", display: "flex", justifyContent: "space-between", color: C.label, fontSize: 11.5, ...mono }}>
+        <span>⚙ Feeds &amp; speeds helper</span><span style={{ color: C.heading }}>{open ? "−" : "+"}</span>
+      </div>
+      {open && (
+        <div style={{ padding: 9, borderTop: `1px solid ${C.inputBorder}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr", gap: 6 }}>
+            <div><div style={sm}>Material</div><select value={mat} onChange={e => { setMat(e.target.value); setRpm(RPMR[e.target.value]); }} style={{ ...inp, width: "100%" }}>{Object.keys(CHIP).map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+            <div><div style={sm}>Flutes</div><input type="number" min={1} max={6} value={flutes} onChange={e => setFlutes(Math.max(1, parseInt(e.target.value) || 1))} style={{ ...inp, width: "100%", boxSizing: "border-box" }} /></div>
+            <div><div style={sm}>RPM</div><input type="number" step={500} value={rpm} onChange={e => setRpm(parseInt(e.target.value) || 0)} style={{ ...inp, width: "100%", boxSizing: "border-box" }} /></div>
+          </div>
+          <div style={{ marginTop: 8, padding: 8, background: C.inputBg, borderRadius: 3, fontSize: 11.5, color: C.value, lineHeight: 1.6, ...mono }}>
+            For a {uu === "in" ? +(toolDiaMM / 25.4).toFixed(3) : Math.round(toolDiaMM * 10) / 10} {uu} bit · chip load ≈ {(uu === "in" ? chip / 25.4 : chip).toFixed(uu === "in" ? 4 : 3)} {uu}/tooth<br />
+            → <b style={{ color: C.heading }}>Feed {feedD} {uf}</b> · Plunge {plungeD} {uf} · {rpm} rpm
+          </div>
+          <button onClick={() => onApply(feedD, plungeD, rpm)} style={{ marginTop: 7, width: "100%", background: C.heading, color: C.bgDeep, border: "none", borderRadius: 3, padding: "7px", fontSize: 11.5, fontWeight: 700, cursor: "pointer", ...mono }}>Apply to this op</button>
+          <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, ...mono }}>Starting points, not gospel — verify chip load against your bit maker's data, and slow down if you hear chatter or see burning.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopsheetDesigner({ ski, C, onClose }) {
   const bleed = 25.4, gap = 25;
   const W = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth), L = ski.length;
@@ -5736,6 +5863,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const [box, setBox] = useState({ w: 880, h: 460 });
   const cvRef = useRef(null), wrapRef = useRef(null), dragRef = useRef(null);
   useEffect(() => { const el = wrapRef.current; if (!el) return; const set = () => setBox({ w: Math.max(360, el.clientWidth - 4), h: Math.max(260, el.clientHeight - 4) }); const ro = new ResizeObserver(set); ro.observe(el); set(); return () => ro.disconnect(); }, []);
+  useEffect(() => { const h = e => { const t = (document.activeElement || {}).tagName; if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT") return; if ((e.metaKey || e.ctrlKey) && (e.key === "d" || e.key === "D")) { e.preventDefault(); dup(); } else if ((e.key === "Delete" || e.key === "Backspace") && sel !== "bg" && mode === "select") { e.preventDefault(); del(sel); } }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); });
   const fit = Math.min((box.w - 24) / tL, (box.h - 24) / tW);
   const eff = fit * zoom;
   const ox = (box.w - tL * eff) / 2 + pan.x, oy = (box.h - tW * eff) / 2 + pan.y;
@@ -5826,7 +5954,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
     if (draw) {
       let x0 = draw.x0, y0 = draw.y0, x1 = draw.x1, y1 = draw.y1; const id = "s" + Date.now();
       if (mode === "line") { const len = Math.hypot(x1 - x0, y1 - y0); if (len > 4) { setLayers(ls => [...ls, { id, type: "shape", shape: "line", x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: len, thick: 8, color: "#e8552a", rot: Math.round(Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI), opacity: 1 }]); setSel(id); } }
-      else { if (draw.sq) { const q = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)); x1 = x0 + (x1 < x0 ? -1 : 1) * q; y1 = y0 + (y1 < y0 ? -1 : 1) * q; } const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0); if (w > 4 && h > 4) { setLayers(ls => [...ls, { id, type: "shape", shape: mode, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w, h, color: "#e8552a", fill: true, stroke: 0, strokeColor: "#000", rot: 0, opacity: 1 }]); setSel(id); } }
+      else { if (draw.sq) { const q = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)); x1 = x0 + (x1 < x0 ? -1 : 1) * q; y1 = y0 + (y1 < y0 ? -1 : 1) * q; } const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0); if (w > 4 && h > 4) { const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; if (mode === "rect") { const hw = w / 2, hh = h / 2, pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([px, py]) => ({ x: px, y: py, ix: 0, iy: 0, ox: 0, oy: 0 })); setLayers(ls => [...ls, { id, type: "shape", shape: "path", pts, closed: true, x: cx, y: cy, color: "#e8552a", fill: true, stroke: 0, strokeColor: "#000", rot: 0, opacity: 1 }]); } else { setLayers(ls => [...ls, { id, type: "shape", shape: mode, x: cx, y: cy, w, h, color: "#e8552a", fill: true, stroke: 0, strokeColor: "#000", rot: 0, opacity: 1 }]); } setSel(id); } }
       setDraw(null); setMode("select");
     }
     dragRef.current = null;
@@ -5839,6 +5967,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const upd = (id, patch) => setLayers(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
   const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
+  const dup = () => { const l = layers.find(x => x.id === sel); if (!l || l.type === "bg") return; const id = "d" + Date.now(); const clone = { ...l, id, x: l.x + 25, y: l.y + 25 }; if (l.pts) clone.pts = l.pts.map(pt => ({ ...pt })); setLayers(ls => [...ls, clone]); setSel(id); };
   const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-pair-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
 
   const s = layers.find(l => l.id === sel);
@@ -5853,13 +5982,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>TOPSHEET DESIGNER</span>
-          <span style={{ color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>pair · {(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}" incl. 1" bleed</span>
-        </div>
-        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "7px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>← Back to Design</button>
-      </div>
+      <BrandBar title="Topsheet Designer" subtitle={`pair · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={onClose} C={C} />
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 322, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -5884,6 +6007,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
               </div>
             ))}
           </div>
+          {s && s.type !== "bg" && <button onClick={dup} style={{ ...btn(false), width: "100%", marginBottom: 10 }}>⧉  Duplicate (Ctrl+D)</button>}
           {s && s.type === "bg" && (<>
             <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{[["solid", "Solid"], ["gradient", "Gradient"]].map(([v, t]) => <button key={v} onClick={() => upd("bg", { kind: v })} style={{ ...btn(s.kind === v), flex: 1 }}>{t}</button>)}</div>
             {colorField("Color", s.color, v => upd("bg", { color: v }))}
@@ -6171,6 +6295,26 @@ export default function App() {
   const [showToolpath, setShowToolpath] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
   const [topsheetOpen, setTopsheetOpen] = useState(false);
+  useEffect(() => {
+    if (document.getElementById("bcs-polish")) return;
+    const st = document.createElement("style"); st.id = "bcs-polish";
+    st.textContent = `
+      button { transition: filter .13s ease, transform .05s ease, box-shadow .15s ease; }
+      button:hover:not(:disabled) { filter: brightness(1.1); }
+      button:active:not(:disabled) { transform: translateY(1px); }
+      button:disabled { opacity: .5; cursor: default; }
+      input, select, textarea { transition: border-color .13s ease, box-shadow .13s ease; }
+      input:focus, select:focus, textarea:focus { border-color: ${C.heading} !important; box-shadow: 0 0 0 2px ${C.heading}33; }
+      input[type=range] { accent-color: ${C.heading}; }
+      input[type=checkbox], input[type=radio] { accent-color: ${C.heading}; }
+      a { transition: opacity .13s ease; } a:hover { opacity: .82; }
+      *::-webkit-scrollbar { width: 11px; height: 11px; }
+      *::-webkit-scrollbar-track { background: transparent; }
+      *::-webkit-scrollbar-thumb { background: ${C.panelBorder}; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+      *::-webkit-scrollbar-thumb:hover { background: ${C.heading}99; background-clip: padding-box; }
+    `;
+    document.head.appendChild(st);
+  }, []);
   const [preview3D, setPreview3D] = useState(false);
   const [asymOpen, setAsymOpen] = useState(false);
   const openSpecPreview = useCallback(() => {
@@ -6181,7 +6325,7 @@ export default function App() {
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true,
-      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600,
+      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, dragKnife: false, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
@@ -6195,7 +6339,7 @@ export default function App() {
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Switching units converts every length/feed field so the physical setup is unchanged (13 mm stays 0.512 in).
-  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallStock", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
+  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallStock", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Mold-slat rib profiles (length × height): top edge = camber/rocker base curve, flat bottom. Auto-nests
   // N copies of each section into columns that respect the sheet width, so a whole rack cuts in one program.
   const slatPolys = useMemo(() => {
@@ -6258,9 +6402,9 @@ export default function App() {
   }, [ski.length, camOpt.op, camOpt.boreCenter, camOpt.boreSpaceX, camOpt.boreSpaceY, camOpt.boreCols, camOpt.boreRows, camOpt.units]);
   const camResult = useMemo(() => {
     try {
-      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, postKey: camOpt.postKey, postOverride: camOpt.postOverride, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
+      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
       const opt = camOpt.op === "outline"
-        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen }
+        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, dragKnife: camOpt.dragKnife, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
@@ -6285,6 +6429,25 @@ export default function App() {
     const fits = mx <= mShort && my <= mLong;   // actual toolpath X-extent vs short bed, Y-extent vs long
     return { short: mShort, long: mLong, fits };
   }, [camOpt.showMachine, camOpt.machineX, camOpt.machineY, camOpt.units, camResult]);
+  const openSetupSheet = useCallback(() => {
+    const s = camResult.stats; if (!s) return;
+    const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
+    const opName = { outline: "Outline through-cut", taper: "Surface taper", mold: "Mold surfacing", slat: "Slat molds", bore: "Insert bores", pocket: "Pocket" }[camOpt.op] || camOpt.op;
+    const post = (POST_PROFILES[camOpt.postKey] || {}).name || camOpt.postKey;
+    const tool = `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
+    const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
+    if (camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper")) rows.push(["Rough tool", `T${camOpt.roughToolNum} · ${camOpt.roughToolDia} ${uu} dia — leaves ${camOpt.finishAllowance} ${uu}`]);
+    if (camOpt.op === "slat" && camOpt.slatHoles) rows.push(["Drill tool", `T${camOpt.slatHoleToolNum} · ${camOpt.slatHoleDia} ${uu} dia — rod holes`]);
+    rows.push(["Spindle", `${camOpt.spindle} rpm ${camOpt.spindleCW ? "CW" : "CCW"}`], ["Feed / plunge", `${camOpt[tK("Feed")]} / ${camOpt[tK("Plunge")]} ${uf}`]);
+    const so = camOpt.op === "outline" || camOpt.op === "slat" || camOpt.op === "bore";
+    rows.push([so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`], ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
+    if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin — every move is positive).`, `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">Print / Save PDF</button></body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); } else downloadFile(html, `setup-${camOpt.op}-${ski.length}mm.html`, "text/html");
+  }, [camResult, camOpt, camMachine, ski]);
   const camLabel = { color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 };
   const camSmall = { color: C.labelDim, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" };
   const camInput = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 7px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
@@ -7446,6 +7609,11 @@ export default function App() {
             Overlay artwork on the ski silhouette to preview a finished topsheet. Clipped to the outline. Export a rendered PNG below.
           </div>
 
+          <button onClick={() => setTopsheetOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>◨  Open Topsheet Designer</button>
+          <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 12, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            Full pair-template designer — colors, gradients, uploaded art, text & shapes, with a print-ready export (1" bleed) for a topsheet printer. The quick overlay below is just for previewing on the silhouette.
+          </div>
+
           <input ref={topsheetFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={e => handleTopsheetFile(e.target.files && e.target.files[0])} />
           <button onClick={() => topsheetFileRef.current && topsheetFileRef.current.click()}
@@ -7689,18 +7857,6 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.cam} onToggle={() => toggleSection("cam")} title="CNC G-code (CAM)">
           <button onClick={() => setCamOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>⛶  Open CAM Workspace</button>
-          {camResult.stats && (
-            <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-              {camOpt.op === "outline" ? "① Outline" : camOpt.op === "taper" ? "② Surface taper" : camOpt.op === "mold" ? "③ Mold" : "④ Slats"} · {camResult.stats.stockLbl.toLowerCase()} {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
-            </div>
-          )}
-        </AccordionSection>
-
-        <AccordionSection isOpen={sectionsOpen.topsheet !== false} onToggle={() => toggleSection("topsheet")} title="Topsheet Designer">
-          <button onClick={() => setTopsheetOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>◨  Design Topsheet</button>
-          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-            True-scale pair template with colors, gradients, uploaded art & text. Exports a print-ready file with 1" bleed for Miller Studio, Sandwich Tech, or Shaggy's.
-          </div>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
@@ -7876,13 +8032,7 @@ export default function App() {
 
       {camOpen && (
         <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <span style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>CAM WORKSPACE</span>
-              <span style={{ color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>ski core · mold · slats</span>
-            </div>
-            <button onClick={() => setCamOpen(false)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "7px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>← Back to Design</button>
-          </div>
+          <BrandBar title="CAM Workspace" subtitle="ski core · mold · slats · G-code" onClose={() => setCamOpen(false)} C={C} />
           <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
             <div style={{ width: 400, flexShrink: 0, overflowY: "auto", padding: 16, borderRight: `1px solid ${C.panelBorder}` }}>
           {(() => {
@@ -7925,6 +8075,7 @@ export default function App() {
                     <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
                   ))}
                 </div>
+                <FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />
                 {isOutline ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Outline cut (flat blank)</div>
@@ -7938,8 +8089,22 @@ export default function App() {
                       {[["Cut-thru " + uu, "cutThrough", st], ["Tabs", "tabN", 1], ["Tab ht " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
                     </div>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginTop: 6 }}>
-                      <input type="checkbox" checked={camOpt.rampEntry} onChange={e => setCam("rampEntry", e.target.checked)} /> Ramp entry ({camOpt.rampLen} {uu})
+                      <input type="checkbox" checked={camOpt.rampEntry} onChange={e => setCam("rampEntry", e.target.checked)} disabled={camOpt.dragKnife} /> Ramp entry ({camOpt.rampLen} {uu})
                     </label>
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.dragKnife ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                        <input type="checkbox" checked={camOpt.dragKnife} onChange={e => setCam("dragKnife", e.target.checked)} /> Drag knife (Donek — spindle OFF)
+                      </label>
+                      {camOpt.dragKnife && (<>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                          <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                          <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                        </div>
+                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                          For cutting base material (P-tex) with a drag knife in the collet. Spindle stays off, the tool leads the cut line by the blade offset, and it swivels around corners so the blade re-aligns instead of tearing. It plunges in the waste and cuts a lead-in line first to pre-align the blade, then runs the outline in a single pass — hold the base down with tape or vacuum.
+                        </div>
+                      </>)}
+                    </div>
                   </div>
                 ) : isMold ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
@@ -8080,7 +8245,10 @@ export default function App() {
                     </div>
                   </>
                 )}
-                <button onClick={downloadCAM} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "10px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : "② Taper"} .nc</button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={downloadCAM} style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "10px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : "② Taper"} .nc</button>
+                  <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "10px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
+                </div>
                 <button onClick={() => setShowToolpath(true)} style={{ width: "100%", marginTop: 6, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Preview Toolpaths</button>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
                   Centroid CNC12 / Avid CNC ATC · {camOpt.units === "inch" ? "G20 inch / IPM" : "G21 mm"} · emits T{isOutline ? camOpt.outlineToolNum : isMold ? camOpt.moldToolNum : isSlat ? camOpt.slatToolNum : isBore ? camOpt.boreToolNum : isPocket ? camOpt.pocketToolNum : camOpt.taperToolNum} M6 for the changer. Always air-cut first and confirm your WCS zero.
@@ -8176,6 +8344,9 @@ export default function App() {
                     </div>
                   );
                 })()}
+                <label style={{ marginLeft: 4, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.arcOut ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} title="Fits curved runs of moves into G2/G3 arcs — smaller files, smoother motion. Universally supported on the profiles here.">
+                  <input type="checkbox" checked={camOpt.arcOut} onChange={e => setCam("arcOut", e.target.checked)} /> Arc output (G2/G3) — smaller, smoother
+                </label>
                 {camResult.stats && camMachine && (
                   <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? "#8ab98a" : "#e8552a" }}>
                     {camMachine.fits ? "✓ fits the bed" : "✗ exceeds the bed"} · part {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
