@@ -2670,6 +2670,7 @@ function buildCoreCAM(ski, opt) {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
+    else if (o.doProfile && !isBase) { const ext = Math.max(0, (o.sidewallThick || 0) + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
   }
