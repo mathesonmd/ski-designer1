@@ -74,6 +74,12 @@ const GLASS = {
 const METALS = {
   none:{name:"None",E:0,thick:0},titanal:{name:"Titanal 0.4mm",E:71700,thick:0.4},
   titanalH:{name:"Titanal 0.6mm",E:71700,thick:0.6},
+  // Carbon laminates in the same full-width slot as titanal — for builders simulating carbon instead of
+  // metal. UD carries the most bending load along the length (stiffest); biax ±45 is torsion-biased and
+  // matrix-influenced (softer lengthwise); triax has 0° fibres so it's stiff without being metal-heavy.
+  carbonUD:{name:"Carbon UD",E:135000,thick:0.4},
+  carbonBiax:{name:"Carbon Biax \u00B145",E:24000,thick:0.4},
+  carbonTriax:{name:"Carbon Triax",E:58000,thick:0.55},
 };
 // UD stringer slot: width-limited unidirectional reinforcement over/under the core. Carbon UD is the
 // stiff default; glass UD lets you pair UD glass with a carbon biax/triax fabric above (a common combo).
@@ -2615,13 +2621,13 @@ function buildCoreCAM(ski, opt) {
   const o = Object.assign({ units: "mm", toolDia: 12.7, feed: 2500, plunge: 800, spindle: 18000,
     stepdown: 3, stepover: 6, safeZ: 6, stockThick: 13, zZero: "bed", doProfile: true, doPerimeter: true,
     perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabLen: 8, tabHeight: 2, origin: "corner",
-    profPattern: "zigzag", profDir: "+", sidewallStock: 1.5, perimDir: "conventional", spindleCW: true,
+    profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, perimDir: "conventional", spindleCW: true,
     rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, arcOut: false, dragKnife: false, bladeOffset: 1, dragLeadIn: 12, dragLeadIn: 12, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
   const inch = o.units === "inch", uL = inch ? 25.4 : 1;
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallStock", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -2697,7 +2703,7 @@ function buildCoreCAM(ski, opt) {
   PC(`Z ZERO = ${o.zZero === "bed" ? "BED / TABLE TOP" : "TOP OF STOCK"}   (stock ${disp.stockThick} ${uu})`);
   PC(`Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
   if (o.doProfile) {
-    PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : ", leave " + disp.sidewallStock + " " + uu + " sidewall stock"}`);
+    PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (o.sidewallThick > 0 || o.edgeOverlap > 0 ? ", carve walls +" + disp.sidewallThick + " + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
     if (!isBase) PC(`Sidewall engagement (glued walls): ${o.sidewallEngage === "off" ? "off" : o.sidewallEngage + " (edge lanes)"}`);
   }
   if (o.doPerimeter) PC(`Outline: ${o.perimDir} milling, ${o.rampEntry ? "ramp entry " + disp.rampLen + " " + uu : "straight plunge"}`);
@@ -2714,7 +2720,15 @@ function buildCoreCAM(ski, opt) {
     const doSurface = (toolR, so, sd, zOff, tnum, startTop, label) => {
       let surfPoly = core;
       if (isBase) { const mm2 = Math.max(0, o.moldMargin || 0); if (mm2 > 0) { try { const op2 = offsetPolygonOutward(core, mm2); if (op2 && op2.length >= 3) surfPoly = op2; } catch (e) {} } }
-      else { const inset = toolR + Math.max(0, o.sidewallStock); try { const ip = offsetPolygonInward(core, inset); if (ip && ip.length >= 3) surfPoly = ip; } catch (e) {} }
+      else {
+        // Carve the whole assembled top flush: push the carve PAST the core edge by the glued-on sidewall
+        // thickness plus a tool overlap, so the cutter skims the ABS walls level with the wood. Tool-CENTRE
+        // offset from the core edge = wallThick + overlap - toolR (outward with walls; falls back to inward
+        // toolR to reach the bare core edge when both are 0). topH is length-based (flat across width), so
+        // the walls get cut to the same height as the core edge at each station.
+        const net = (o.sidewallThick || 0) + (o.edgeOverlap || 0) - toolR;
+        try { const pp = net >= 0 ? offsetPolygonOutward(core, net) : offsetPolygonInward(core, -net); if (pp && pp.length >= 3) surfPoly = pp; } catch (e) {}
+      }
       let sHalf = 0; for (const p of surfPoly) sHalf = Math.max(sHalf, Math.abs(p.y));
       const lanes = []; const yL = -sHalf + 0.4, yR = sHalf - 0.4; lanes.push(yL);
       for (let y = -sHalf + so; y < yR - 1e-6; y += so) lanes.push(y);
@@ -4493,10 +4507,10 @@ function CoreView({ ski, setSki, width, height }) {
   // proportion. Beyond the cap, the drawing height stays fixed and the core anchors to the baseline;
   // extra panel height becomes empty space above rather than a stretched curve. MAX_PX_PER_MM is
   // chosen so the 16mm range reads at a believable thickness even in a short/independent panel.
-  const MAX_PX_PER_MM = 9;
+  const MAX_PX_PER_MM = 7;
   const vScale = Math.min(plotH / maxThick, MAX_PX_PER_MM); // px per mm
   const drawH = maxThick * vScale;                          // actual pixel height used by the plot
-  const baseY = padT + plotH;                               // baseline stays at the bottom
+  const baseY = padT + (plotH + drawH) / 2;                 // center the profile band vertically (sits higher in a tall panel)
   const toC2 = useCallback((pos, thick) => ({
     x: padL + pos * plotW,
     y: baseY - thick * vScale,
@@ -4707,9 +4721,9 @@ function FlexView({ ski, flex, width, height }) {
     const maxEI = Math.max(...st.map(s => s.ei)) * 1.15;
     // Cap the drawing height so tall panels don't stretch the curves vertically out of proportion.
     // The baseline stays at the bottom; beyond the cap, extra panel height is empty space on top.
-    const MAX_PLOT_H = 260;
+    const MAX_PLOT_H = 210;
     const drawH = Math.min(plotH, MAX_PLOT_H);
-    const baseYF = padT + plotH;                 // baseline anchored to bottom of the panel
+    const baseYF = padT + (plotH + drawH) / 2;   // center the curve band vertically (sits higher in a tall panel)
     const toC3 = (pos, val, mv) => ({
       x: padL + pos * plotW,
       y: baseYF - (val / mv) * drawH,
@@ -4731,11 +4745,11 @@ function FlexView({ ski, flex, width, height }) {
       const x = padL + pos * plotW;
       ctx.strokeStyle = C.contactLine || "rgba(232,85,42,0.55)";
       ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseYF); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, baseYF - drawH); ctx.lineTo(x, baseYF); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = C.contactLabel || "#f0895c";
       ctx.font = "bold 8px 'JetBrains Mono', monospace";
-      ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
+      ctx.save(); ctx.translate(x - 2, baseYF - drawH + 3); ctx.rotate(Math.PI / 2);
       ctx.textAlign = "left"; ctx.fillText(lbl, 0, 0); ctx.restore();
     });
     // WAIST reference line (boot center) — light bone, matches the core view.
@@ -6421,13 +6435,13 @@ export default function App() {
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 7,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
-      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallStock: 0, sidewallEngage: "conventional" };
+      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional" };
     try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Switching units converts every length/feed field so the physical setup is unchanged (13 mm stays 0.512 in).
-  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "stockL", "stockW", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallStock", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
+  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "stockL", "stockW", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallThick", "edgeOverlap", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Mold-slat rib profiles (length × height): top edge = camber/rocker base curve, flat bottom. Auto-nests
   // N copies of each section into columns that respect the sheet width, so a whole rack cuts in one program.
   const slatPolys = useMemo(() => {
@@ -6503,7 +6517,7 @@ export default function App() {
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallStock: camOpt.sidewallStock, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts]);
@@ -6847,7 +6861,7 @@ export default function App() {
   // The persistent top header takes a fixed slice of height on all screen sizes.
   // On compact, the sidebar becomes a drawer so the canvas also gets full width.
   const canvasW = isCompact ? size.w : (size.w - panelW - 5);
-  const canvasAreaH = Math.max(0, size.h - headerH);
+  const canvasAreaH = Math.max(0, size.h - headerH - 40);   // 40 = the view-switcher bar at the top of the main panel
   let planH = 0, profH = 0, coreH = 0, flexH = 0, layersH = 0, camH = 0;
   // On compact viewports, we simplify the view options down to two: "plan" (the interactive
   // rotated vertical ski) and "analysis" (a compact stack of Profile + Core + Flex). Any legacy
@@ -7685,7 +7699,7 @@ export default function App() {
               </div>
             </>
           )}
-          {selectField("Metal", ski.layup.metal, METALS, v => setLayup("metal", v))}
+          {selectField("Metal / Carbon laminate", ski.layup.metal, METALS, v => setLayup("metal", v))}
           {selectField("UD Stringer", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
           {ski.layup.carbon !== "none" && (
             <div style={{ marginBottom: 7 }}>
@@ -8320,8 +8334,13 @@ export default function App() {
                     <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       Conventional presses each glued wall into the core (won’t peel it); the two edges auto-run opposite ways. Climb can tear it off.
                     </div>
-                    <div style={camSmall}>Sidewall stock {uu} (0 = cut walls flush)</div>
-                    <input type="number" value={camOpt.sidewallStock} step={st} min={0} onChange={e => setCam("sidewallStock", parseFloat(e.target.value) || 0)} style={camInput} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <div><div style={camSmall}>Sidewall thickness {uu}</div><NumberInput value={camOpt.sidewallThick} step={st} min={0} onCommit={v => setCam("sidewallThick", v)} style={camInput} /></div>
+                      <div><div style={camSmall}>Edge overlap {uu}</div><NumberInput value={camOpt.edgeOverlap} step={st} min={0} onCommit={v => setCam("edgeOverlap", v)} style={camInput} /></div>
+                    </div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Sidewall thickness = how far your glued-on walls stick out past the cut core edge (per side). The carve extends out that far so the tool skims the walls level with the core top. Edge overlap pushes the tool a hair further past the outer edge so the corner cuts clean. Both 0 = carve only the bare wood core to its edge.
+                    </div>
                   </div>
                 )}
                 {(isMold || camOpt.op === "taper") && (
