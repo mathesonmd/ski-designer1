@@ -5705,93 +5705,124 @@ function SkiDatabaseModal({ kind = "ski", onClose, onApply, onGhost }) {
 
 // ══════════════ MAIN ══════════════
 // ── Topsheet Designer: true-scale pair template with paint/gradient/image/text layers + print export ──
+// Example print shops (not endorsements) — presented alphabetically. "PBT" is a common printable
+// topsheet plastic; these shops sublimate your artwork onto it.
 const TOPSHEET_PRINTERS = [
-  { name: "Miller Studio (Auburn, WA)", url: "https://www.millerstudio.us", note: "Matheson's printer" },
-  { name: "Sandwich Tech", url: "https://sandwichtechskis.com/printed-pbt-topsheets", note: "PBT · upload RGB (their RIP -> CMYK) · 150dpi · 1\" bleed · up to 180cm / 33cm wide" },
-  { name: "Shaggy's Copper Country", url: "https://www.skishaggys.com/products/custom-printed-ski-and-snowboard-topsheets", note: "PBT · 200dpi · CMYK · 1\" bleed · rich black C75 M68 Y67 K100" },
+  { name: "Miller Studio (Auburn, WA)", url: "https://www.millerstudio.us", note: "sublimated topsheet printing" },
+  { name: "Sandwich Tech", url: "https://sandwichtechskis.com/printed-pbt-topsheets", note: "prints on PBT topsheet plastic. Upload RGB (their printer converts to CMYK). 150 dpi min, 1\" bleed, up to 180 cm long / 33 cm wide." },
+  { name: "Shaggy's Copper Country", url: "https://www.skishaggys.com/products/custom-printed-ski-and-snowboard-topsheets", note: "prints on PBT topsheet plastic. 200 dpi, CMYK, 1\" bleed. Use a rich black (C75 M68 Y67 K100), not 100% K." },
 ];
 
 function TopsheetDesigner({ ski, C, onClose }) {
-  const bleed = 25.4, gap = 25;                                   // 1" bleed, gap between the pair
+  const bleed = 25.4, gap = 25;
   const W = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth), L = ski.length;
-  const tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;         // template mm: length (horizontal) x width (vertical, 2 skis)
+  const tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
   const skiYc = [bleed + W / 2, bleed + W + gap + W / 2];
-  const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0 }]);
+  const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
   const [dpi, setDpi] = useState(150);
   const [guides, setGuides] = useState(true);
   const [crop, setCrop] = useState(true);
   const [busy, setBusy] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [fonts, setFonts] = useState(["Oswald, Impact, sans-serif", "Impact", "Georgia", "Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New", "Trebuchet MS", "Palatino", "Garamond", "Futura", "Bebas Neue"]);
+  const [box, setBox] = useState({ w: 880, h: 460 });
   const cvRef = useRef(null), wrapRef = useRef(null), dragRef = useRef(null);
-  const [dispW, setDispW] = useState(880);
-  useEffect(() => { const el = wrapRef.current; if (!el) return; const set = () => setDispW(Math.max(360, el.clientWidth - 4)); const ro = new ResizeObserver(set); ro.observe(el); set(); return () => ro.disconnect(); }, []);
-  const scale = dispW / tL;
+  useEffect(() => { const el = wrapRef.current; if (!el) return; const set = () => setBox({ w: Math.max(360, el.clientWidth - 4), h: Math.max(260, el.clientHeight - 4) }); const ro = new ResizeObserver(set); ro.observe(el); set(); return () => ro.disconnect(); }, []);
+  const fit = Math.min((box.w - 24) / tL, (box.h - 24) / tW);         // fit both dimensions
+  const eff = fit * zoom;                                              // px per mm on screen
+  const ox = (box.w - tL * eff) / 2 + pan.x, oy = (box.h - tW * eff) / 2 + pan.y;
+  const toMM = (sx, sy) => ({ x: (sx - ox) / eff, y: (sy - oy) / eff });
 
-  const drawLayers = (ctx, ppm) => {
+  const loadSystemFonts = async () => {
+    try { if (window.queryLocalFonts) { const f = await window.queryLocalFonts(); const fams = [...new Set(f.map(x => x.family))].sort(); if (fams.length) setFonts(fams); } else alert("System-font access isn't supported by this browser. Type any installed font name in the Font box instead."); } catch (e) { alert("Font access was blocked. Type any installed font name in the Font box instead."); }
+  };
+
+  // draw layers into ctx already transformed to mm space (setTransform applied by caller)
+  const paint = (ctx, guidesOn, cropOn) => {
     const bg = layers.find(l => l.type === "bg");
     if (bg) {
-      if (bg.kind === "gradient") { const a = (bg.angle || 0) * Math.PI / 180, dx = Math.cos(a) * tL * ppm, dy = Math.sin(a) * tW * ppm; const g = ctx.createLinearGradient(0, 0, dx, dy); g.addColorStop(0, bg.color); g.addColorStop(1, bg.c2); ctx.fillStyle = g; }
+      if (bg.kind === "gradient") { const a = (bg.angle || 0) * Math.PI / 180, cx = (bg.gx != null ? bg.gx : 0.5) * tL, cy = (bg.gy != null ? bg.gy : 0.5) * tW, sp = Math.hypot(tL, tW) / 2; const g = ctx.createLinearGradient(cx - Math.cos(a) * sp, cy - Math.sin(a) * sp, cx + Math.cos(a) * sp, cy + Math.sin(a) * sp); g.addColorStop(0, bg.color); g.addColorStop(1, bg.c2); ctx.fillStyle = g; }
       else ctx.fillStyle = bg.color;
-      ctx.fillRect(0, 0, tL * ppm, tW * ppm);
+      ctx.fillRect(0, 0, tL, tW);
     }
     for (const l of layers) {
-      if (l.type === "img" && l.img) {
-        const w = l.wmm * ppm, h = w * (l.img.height / l.img.width);
-        ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1; ctx.translate(l.x * ppm, l.y * ppm); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.drawImage(l.img, -w / 2, -h / 2, w, h); ctx.restore();
-      } else if (l.type === "text") {
-        ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1; ctx.fillStyle = l.color; ctx.font = `${(l.bold ? "bold " : "")}${l.size * ppm}px ${l.font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.translate(l.x * ppm, l.y * ppm); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.fillText(l.text, 0, 0); ctx.restore();
+      ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1;
+      if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.drawImage(l.img, -w / 2, -h / 2, w, h); }
+      else if (l.type === "text") { ctx.fillStyle = l.color; ctx.font = `${l.bold ? "bold " : ""}${l.size}px ${l.font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.fillText(l.text, 0, 0); }
+      else if (l.type === "shape") {
+        ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180);
+        ctx.fillStyle = l.color; ctx.strokeStyle = l.strokeColor || "#000"; ctx.lineWidth = l.stroke || 0;
+        if (l.shape === "rect") { ctx.beginPath(); ctx.rect(-l.w / 2, -l.h / 2, l.w, l.h); if (l.fill !== false) ctx.fill(); if (l.stroke) ctx.stroke(); }
+        else if (l.shape === "ellipse") { ctx.beginPath(); ctx.ellipse(0, 0, l.w / 2, l.h / 2, 0, 0, Math.PI * 2); if (l.fill !== false) ctx.fill(); if (l.stroke) ctx.stroke(); }
+        else if (l.shape === "line") { ctx.lineWidth = Math.max(1, l.stroke || 3); ctx.beginPath(); ctx.moveTo(-l.w / 2, 0); ctx.lineTo(l.w / 2, 0); ctx.stroke(); }
       }
+      ctx.restore();
     }
+    if (guidesOn) {
+      ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]);
+      for (const yc of skiYc) { ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + p.y, y = yc + p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }
+      ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore();
+    }
+    if (cropOn) { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(0.3, 1.2 / eff); const m = 12; [[0, 0, 1, 1], [tL, 0, -1, 1], [0, tW, 1, -1], [tL, tW, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); }
   };
-  const drawGuides = (ctx, ppm) => {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2; ctx.setLineDash([6, 5]);
-    for (const yc of skiYc) { ctx.beginPath(); outline.forEach((p, i) => { const x = (bleed + p.y) * ppm, y = (yc + p.x) * ppm; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }
-    ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1; ctx.strokeRect(bleed * ppm, bleed * ppm, (tL - 2 * bleed) * ppm, (tW - 2 * bleed) * ppm);
-    ctx.restore();
-  };
-  const drawCrop = (ctx, ppm) => { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(1, ppm * 0.3); const m = 12 * ppm, W2 = tL * ppm, H2 = tW * ppm; const corners = [[0, 0, 1, 1], [W2, 0, -1, 1], [0, H2, 1, -1], [W2, H2, -1, -1]]; corners.forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); };
 
   useEffect(() => {
-    const cv = cvRef.current; if (!cv) return;
-    cv.width = Math.round(tL * scale); cv.height = Math.round(tW * scale);
-    const ctx = cv.getContext("2d"); ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, cv.width, cv.height);
-    drawLayers(ctx, scale);
-    if (guides) drawGuides(ctx, scale);
-    if (crop) drawCrop(ctx, scale);
+    const cv = cvRef.current; if (!cv) return; cv.width = box.w; cv.height = box.h;
+    const ctx = cv.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, box.w, box.h);
+    ctx.setTransform(eff, 0, 0, eff, ox, oy);
+    paint(ctx, guides, crop);
+    // selection outline + gradient handle (screen space)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     const s = layers.find(l => l.id === sel);
-    if (s && (s.type === "img" || s.type === "text")) {
-      let w, h; if (s.type === "img" && s.img) { w = s.wmm * scale; h = w * (s.img.height / s.img.width); } else { const ctx2 = ctx; ctx2.font = `${s.size * scale}px ${s.font}`; w = ctx2.measureText(s.text).width; h = s.size * scale; }
-      ctx.save(); ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(s.x * scale - w / 2 - 4, s.y * scale - h / 2 - 4, w + 8, h + 8); ctx.restore();
-    }
-  }, [layers, sel, guides, crop, scale, outline]);
+    if (s && s.type !== "bg") { const b = layerBox(s); if (b) { ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(ox + (b.x) * eff, oy + (b.y) * eff, b.w * eff, b.h * eff); ctx.setLineDash([]); } }
+    if (s && s.type === "bg" && s.kind === "gradient") { const hx = ox + (s.gx * tL) * eff, hy = oy + (s.gy * tW) * eff; ctx.fillStyle = C.heading; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  }, [layers, sel, guides, crop, eff, ox, oy, box, outline]);
 
-  const hit = (mx, my) => { const pmm = { x: mx / scale, y: my / scale }; for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); if (Math.abs(pmm.x - l.x) < w / 2 && Math.abs(pmm.y - l.y) < h / 2) return l.id; } else if (l.type === "text") { if (Math.abs(pmm.x - l.x) < l.text.length * l.size * 0.32 && Math.abs(pmm.y - l.y) < l.size * 0.7) return l.id; } } return null; };
+  const layerBox = l => {
+    if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
+    if (l.type === "shape") return { x: l.x - l.w / 2, y: l.y - l.h / 2, w: l.w, h: l.h };
+    if (l.type === "text") { const w = l.text.length * l.size * 0.6, h = l.size; return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
+    return null;
+  };
   const ptr = e => { const r = cvRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cvRef.current.width / r.width), y: (e.clientY - r.top) * (cvRef.current.height / r.height) }; };
-  const onDown = e => { const p = ptr(e); const id = hit(p.x, p.y); setSel(id || "bg"); if (id) { const l = layers.find(x => x.id === id); dragRef.current = { id, ox: p.x / scale - l.x, oy: p.y / scale - l.y }; } };
-  const onMove = e => { if (!dragRef.current) return; const p = ptr(e); const d = dragRef.current; setLayers(ls => ls.map(l => l.id === d.id ? { ...l, x: p.x / scale - d.ox, y: p.y / scale - d.oy } : l)); };
+  const onDown = e => {
+    const p = ptr(e), mm = toMM(p.x, p.y);
+    const s0 = layers.find(l => l.id === sel);
+    if (s0 && s0.type === "bg" && s0.kind === "gradient") { const hx = ox + s0.gx * tL * eff, hy = oy + s0.gy * tW * eff; if (Math.hypot(p.x - hx, p.y - hy) < 14) { dragRef.current = { grad: true }; return; } }
+    for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mm.x >= b.x && mm.x <= b.x + b.w && mm.y >= b.y && mm.y <= b.y + b.h) { setSel(l.id); dragRef.current = { id: l.id, ox: mm.x - l.x, oy: mm.y - l.y }; return; } }
+    dragRef.current = { pan: true, sx: p.x - pan.x, sy: p.y - pan.y };
+  };
+  const onMove = e => {
+    const d = dragRef.current; if (!d) return; const p = ptr(e);
+    if (d.pan) setPan({ x: p.x - d.sx, y: p.y - d.sy });
+    else if (d.grad) { const mm = toMM(p.x, p.y); upd("bg", { gx: Math.max(0, Math.min(1, mm.x / tL)), gy: Math.max(0, Math.min(1, mm.y / tW)) }); }
+    else { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => l.id === d.id ? { ...l, x: mm.x - d.ox, y: mm.y - d.oy } : l)); }
+  };
   const onUp = () => { dragRef.current = null; };
+  const onWheel = e => { e.preventDefault(); const p = ptr(e), before = toMM(p.x, p.y); const nz = Math.max(1, Math.min(12, zoom * (1 - e.deltaY * 0.0015))); const neff = fit * nz; const nox = p.x - before.x * neff, noy = p.y - before.y * neff; setZoom(nz); setPan({ x: nox - (box.w - tL * neff) / 2, y: noy - (box.h - tW * neff) / 2 }); };
 
   const addImage = file => { const id = "img" + Date.now(); const img = new Image(); img.onload = () => setLayers(ls => [...ls, { id, type: "img", img, x: tL / 2, y: tW / 2, wmm: Math.min(tL, tW * 1.5) * 0.4, rot: 0, opacity: 1 }]); img.src = URL.createObjectURL(file); setSel(id); };
-  const addText = () => { const id = "t" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: "BLACK CHAPEL", x: tL / 2, y: tW / 2, size: 60, color: "#F0EDE4", font: "Oswald, Impact, sans-serif", bold: true, rot: 0, opacity: 1 }]); setSel(id); };
+  const addText = () => { const id = "t" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: "BLACK CHAPEL", x: tL / 2, y: tW / 2, size: 60, color: "#F0EDE4", font: fonts[0], bold: true, rot: 0, opacity: 1 }]); setSel(id); };
+  const addShape = shape => { const id = "s" + Date.now(); setLayers(ls => [...ls, { id, type: "shape", shape, x: tL / 2, y: tW / 2, w: shape === "line" ? tL * 0.4 : 200, h: shape === "line" ? 0 : 120, color: "#e8552a", fill: true, stroke: shape === "line" ? 6 : 0, strokeColor: "#000", rot: 0, opacity: 1 }]); setSel(id); };
   const upd = (id, patch) => setLayers(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
   const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
-  const move = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); if (i < 1 && dir < 0) return ls; const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
+  const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
 
   const exportImg = async fmt => {
     setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30));
-    const ppm = dpi / 25.4, oc = document.createElement("canvas");
-    oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm);
-    const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height);
-    drawLayers(ctx, ppm); if (crop) drawCrop(ctx, ppm);
+    const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm);
+    const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0);
+    paint(ctx, false, crop);
     oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-pair-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95);
   };
 
   const s = layers.find(l => l.id === sel);
   const inp = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
   const lab = { color: C.label, fontSize: 10, marginBottom: 2, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" };
-  const btn = (on) => ({ padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: on ? 700 : 400 });
+  const btn = on => ({ padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: on ? 700 : 400 });
   const outPx = { w: Math.round(tL / 25.4 * dpi), h: Math.round(tW / 25.4 * dpi) };
 
   return (
@@ -5805,18 +5836,21 @@ function TopsheetDesigner({ ski, C, onClose }) {
       </div>
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 320, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <label style={{ ...btn(false), flex: 1, textAlign: "center" }}>+ Image<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && addImage(e.target.files[0])} /></label>
-            <button onClick={addText} style={{ ...btn(false), flex: 1 }}>+ Text</button>
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            <label style={{ ...btn(false), textAlign: "center" }}>+ Image<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && addImage(e.target.files[0])} /></label>
+            <button onClick={addText} style={btn(false)}>+ Text</button>
+            <button onClick={() => addShape("rect")} style={btn(false)}>+ Rect</button>
+            <button onClick={() => addShape("ellipse")} style={btn(false)}>+ Ellipse</button>
+            <button onClick={() => addShape("line")} style={btn(false)}>+ Line</button>
           </div>
           <div style={{ ...lab, marginTop: 0 }}>LAYERS (drag on canvas to move)</div>
           <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, marginBottom: 10, maxHeight: 150, overflowY: "auto" }}>
             {layers.slice().reverse().map(l => (
               <div key={l.id} onClick={() => setSel(l.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", cursor: "pointer", background: sel === l.id ? C.inputBg : "transparent", borderBottom: `1px solid ${C.inputBorder}`, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: sel === l.id ? C.heading : C.label }}>
-                <span style={{ flex: 1 }}>{l.type === "bg" ? "Background" : l.type === "img" ? "Image" : `"${l.text.slice(0, 12)}"`}</span>
+                <span style={{ flex: 1 }}>{l.type === "bg" ? "Background" : l.type === "img" ? "Image" : l.type === "shape" ? l.shape : `"${l.text.slice(0, 12)}"`}</span>
                 {l.type !== "bg" && <>
-                  <span onClick={e => { e.stopPropagation(); move(l.id, 1); }} style={{ cursor: "pointer" }}>▲</span>
-                  <span onClick={e => { e.stopPropagation(); move(l.id, -1); }} style={{ cursor: "pointer" }}>▼</span>
+                  <span onClick={e => { e.stopPropagation(); moveL(l.id, 1); }} style={{ cursor: "pointer" }}>▲</span>
+                  <span onClick={e => { e.stopPropagation(); moveL(l.id, -1); }} style={{ cursor: "pointer" }}>▼</span>
                   <span onClick={e => { e.stopPropagation(); del(l.id); }} style={{ cursor: "pointer", color: "#e8552a" }}>✕</span>
                 </>}
               </div>
@@ -5825,42 +5859,57 @@ function TopsheetDesigner({ ski, C, onClose }) {
           {s && s.type === "bg" && (<>
             <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{[["solid", "Solid"], ["gradient", "Gradient"]].map(([v, t]) => <button key={v} onClick={() => upd("bg", { kind: v })} style={{ ...btn(s.kind === v), flex: 1 }}>{t}</button>)}</div>
             <div style={lab}>Color</div><input type="color" value={s.color} onChange={e => upd("bg", { color: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} />
-            {s.kind === "gradient" && (<><div style={lab}>Color 2</div><input type="color" value={s.c2} onChange={e => upd("bg", { c2: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} /><div style={lab}>Angle {s.angle}°</div><input type="range" min={0} max={360} value={s.angle} onChange={e => upd("bg", { angle: +e.target.value })} style={{ width: "100%" }} /></>)}
+            {s.kind === "gradient" && (<><div style={lab}>Color 2</div><input type="color" value={s.c2} onChange={e => upd("bg", { c2: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} /><div style={lab}>Angle {s.angle}°</div><input type="range" min={0} max={360} value={s.angle} onChange={e => upd("bg", { angle: +e.target.value })} style={{ width: "100%" }} /><div style={{ color: C.labelDim, fontSize: 10, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Drag the dot on the canvas to move the gradient.</div></>)}
           </>)}
           {s && s.type === "img" && (<>
             <div style={lab}>Size {(s.wmm / 25.4).toFixed(1)}"</div><input type="range" min={20} max={Math.round(tL)} value={s.wmm} onChange={e => upd(s.id, { wmm: +e.target.value })} style={{ width: "100%" }} />
             <div style={lab}>Rotate {s.rot || 0}°</div><input type="range" min={-180} max={180} value={s.rot || 0} onChange={e => upd(s.id, { rot: +e.target.value })} style={{ width: "100%" }} />
             <div style={lab}>Opacity</div><input type="range" min={0} max={1} step={0.05} value={s.opacity != null ? s.opacity : 1} onChange={e => upd(s.id, { opacity: +e.target.value })} style={{ width: "100%" }} />
           </>)}
+          {s && s.type === "shape" && (<>
+            <div style={lab}>Fill</div><input type="color" value={s.color} onChange={e => upd(s.id, { color: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} />
+            {s.shape !== "line" && <label style={{ display: "flex", gap: 5, alignItems: "center", color: C.label, fontSize: 11, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={s.fill !== false} onChange={e => upd(s.id, { fill: e.target.checked })} /> Filled</label>}
+            <div style={lab}>Outline width {s.stroke || 0}mm</div><input type="range" min={0} max={20} value={s.stroke || 0} onChange={e => upd(s.id, { stroke: +e.target.value })} style={{ width: "100%" }} />
+            {(s.stroke > 0) && <><div style={lab}>Outline color</div><input type="color" value={s.strokeColor || "#000000"} onChange={e => upd(s.id, { strokeColor: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} /></>}
+            <div style={lab}>Width {(s.w).toFixed(0)}mm</div><input type="range" min={10} max={Math.round(tL)} value={s.w} onChange={e => upd(s.id, { w: +e.target.value })} style={{ width: "100%" }} />
+            {s.shape !== "line" && <><div style={lab}>Height {(s.h).toFixed(0)}mm</div><input type="range" min={10} max={Math.round(tW)} value={s.h} onChange={e => upd(s.id, { h: +e.target.value })} style={{ width: "100%" }} /></>}
+            <div style={lab}>Rotate {s.rot || 0}°</div><input type="range" min={-180} max={180} value={s.rot || 0} onChange={e => upd(s.id, { rot: +e.target.value })} style={{ width: "100%" }} />
+          </>)}
           {s && s.type === "text" && (<>
             <div style={lab}>Text</div><input value={s.text} onChange={e => upd(s.id, { text: e.target.value })} style={inp} />
-            <div style={lab}>Font</div><select value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={inp}>{["Oswald, Impact, sans-serif", "Georgia, serif", "'Courier New', monospace", "Arial, sans-serif", "'Times New Roman', serif"].map(fn => <option key={fn} value={fn}>{fn.split(",")[0].replace(/'/g, "")}</option>)}</select>
+            <div style={lab}>Font (type any installed name)</div>
+            <input list="ts-fonts" value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={inp} />
+            <datalist id="ts-fonts">{fonts.map(fn => <option key={fn} value={fn} />)}</datalist>
+            <button onClick={loadSystemFonts} style={{ ...btn(false), width: "100%", marginTop: 4 }}>Load system fonts</button>
             <div style={lab}>Size {(s.size).toFixed(0)}mm</div><input type="range" min={10} max={300} value={s.size} onChange={e => upd(s.id, { size: +e.target.value })} style={{ width: "100%" }} />
             <div style={lab}>Color</div><input type="color" value={s.color} onChange={e => upd(s.id, { color: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} />
             <div style={lab}>Rotate {s.rot || 0}°</div><input type="range" min={-180} max={180} value={s.rot || 0} onChange={e => upd(s.id, { rot: +e.target.value })} style={{ width: "100%" }} />
           </>)}
         </div>
-        <div ref={wrapRef} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, overflow: "auto", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, gap: 10 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 5, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={guides} onChange={e => setGuides(e.target.checked)} /> Ski + bleed guides</label>
             <label style={{ display: "flex", alignItems: "center", gap: 5, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={crop} onChange={e => setCrop(e.target.checked)} /> Crop marks</label>
-            <span style={{ marginLeft: "auto", color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>drag guides off before exporting</span>
+            <div style={{ display: "flex", gap: 4, marginLeft: "auto", alignItems: "center" }}>
+              <button onClick={() => setZoom(z => Math.max(1, z / 1.3))} style={btn(false)}>−</button>
+              <span style={{ color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", minWidth: 46, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(z => Math.min(12, z * 1.3))} style={btn(false)}>+</button>
+              <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} style={btn(false)}>Fit</button>
+            </div>
           </div>
-          <div style={{ background: "#0d0b09", borderRadius: 6, border: `1px solid ${C.panelBorder}`, padding: 6, overflow: "auto" }}>
-            <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} style={{ width: dispW, height: tW * scale, display: "block", cursor: "grab", touchAction: "none" }} />
+          <div ref={wrapRef} style={{ flex: 1, minHeight: 260, background: "#0d0b09", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden" }}>
+            <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onWheel={onWheel} style={{ display: "block", cursor: "grab", touchAction: "none" }} />
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div>
-              <div style={lab}>Export DPI</div>
-              <div style={{ display: "flex", gap: 4 }}>{[150, 200, 300].map(d => <button key={d} onClick={() => setDpi(d)} style={btn(dpi === d)}>{d}</button>)}</div>
-            </div>
+            <div><div style={lab}>Export DPI</div><div style={{ display: "flex", gap: 4 }}>{[150, 200, 300].map(d => <button key={d} onClick={() => setDpi(d)} style={btn(dpi === d)}>{d}</button>)}</div></div>
             <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 4 }}>{outPx.w.toLocaleString()} × {outPx.h.toLocaleString()} px</span>
             <button disabled={!!busy} onClick={() => exportImg("png")} style={{ background: C.heading, color: C.bgDeep, border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{busy || "Export PNG (print-ready)"}</button>
             <button disabled={!!busy} onClick={() => exportImg("jpg")} style={{ background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, padding: "9px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>JPG</button>
           </div>
           <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.5 }}>
-            <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>SEND TO A PRINTER</div>
-            <div style={{ color: C.labelDim, marginBottom: 6 }}>This ski: <b style={{ color: C.value }}>{(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}"</b> incl. 1" bleed · export ≥150dpi · RGB is fine for most (sublimation shops convert). Use rich black, not 100%K.</div>
+            <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>PRINT & SEND OUT</div>
+            <div style={{ color: C.labelDim, marginBottom: 6 }}>Your export is <b style={{ color: C.value }}>{(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}"</b> with a built-in 1" bleed all around. Most shops want <b style={{ color: C.value }}>≥150 dpi</b>. It exports as RGB, which sublimation printers convert to CMYK on their end — if a shop requires true CMYK, open the PNG in Photoshop and convert (use a rich black, not 100% K).</div>
+            <div style={{ color: C.labelDim, marginBottom: 6, fontStyle: "italic" }}>A few shops that print custom topsheets (examples, not endorsements):</div>
             {TOPSHEET_PRINTERS.map(p => (
               <div key={p.name} style={{ marginBottom: 4 }}>
                 <a href={p.url} target="_blank" rel="noreferrer" style={{ color: C.heading, textDecoration: "none" }}>{p.name} ↗</a>
