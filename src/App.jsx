@@ -2660,6 +2660,7 @@ function buildCoreCAM(ski, opt) {
   else {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
+    else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
   }
@@ -2672,10 +2673,10 @@ function buildCoreCAM(ski, opt) {
   // Required thickness: blanks/sheets for cut ops = stock; mold blank = surface span + a solid base.
   const moldBase = 12;                                                   // mm of base left under the deepest cut
   const stockT = isBase ? dv((baseSpan + moldBase) / uL) : disp.stockThick;
-  const stockLbl = o.slatPolys ? "SHEET (MDF)" : isBase ? "MOLD BLANK" : "STOCK BLANK";
+  const stockLbl = o.slatPolys ? "SHEET (MDF)" : isBase ? "MOLD BLANK" : o.baseOp ? "BASE SHEET" : "STOCK BLANK";
   const thickNote = isBase
     ? `>= ${stockT} ${uu} thick (${dv(baseSpan / uL)} carve + ${dv(moldBase / uL)} base) - you set ${disp.stockThick}`
-    : o.slatPolys ? `${disp.stockThick} ${uu} thick = rib thickness` : `${disp.stockThick} ${uu} thick`;
+    : o.slatPolys ? `${disp.stockThick} ${uu} thick = rib thickness` : o.baseOp ? `${disp.stockThick} ${uu} base material` : `${disp.stockThick} ${uu} thick`;
   if (pst.pct) { G.push("%"); G.push("O1001 (BCS SKI CORE)"); }
   PC(`Black Chapel Studios - ski core CAM`);
   PC(`${new Date().toISOString().slice(0, 10)}  |  ${inch ? "IMPERIAL inch/IPM" : "METRIC mm"}  |  post: ${pst.name}`);
@@ -2691,7 +2692,7 @@ function buildCoreCAM(ski, opt) {
   PC(`Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
-  toolChange(o.toolNum); P(o.dragKnife && o.doPerimeter ? "M5" : `S${o.spindle} M3`); if (o.dragKnife && o.doPerimeter) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
+  toolChange(o.toolNum); P(o.baseOp ? "M5" : `S${o.spindle} M3`); if (o.baseOp) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
     let minTop = 1e9; for (let x = 0; x <= L; x += 5) minTop = Math.min(minTop, topH(x));
@@ -2737,14 +2738,15 @@ function buildCoreCAM(ski, opt) {
       doSurface(R, o.stepover, o.stepdown, 0, null, o.stockThick, "profile");
     }
   }
-  if (o.doPerimeter && o.dragKnife) {
+  const emitDragKnife = (poly, label) => {
     // Drag knife (e.g. Donek): spindle off, a blade that trails the tool center by `bladeOffset`.
     // The tool-center path leads the desired cut line by the offset, and at corners it swivels on an
     // arc of radius=offset centered on the corner so the blade re-aligns instead of tearing.
-    PB(); PC("===== BASE OUTLINE — DRAG KNIFE (spindle OFF) =====");
-    PC(`Blade offset ${disp.bladeOffset} ${uu} · straight plunge · swivel at corners · single pass`);
+    if (!poly || poly.length < 3) return;
+    PB(); PC(`===== ${label} — DRAG KNIFE (spindle OFF) =====`);
+    PC(`Blade offset ${disp.bladeOffset} ${uu} · lead-in ${disp.dragLeadIn} ${uu} · swivel at corners · single pass`);
     const off = Math.max(0.05, o.bladeOffset || 1);
-    let bp = core.slice();
+    let bp = poly.slice();
     { const dstep = 3, dp = []; for (let i = 0; i < bp.length; i++) { const a = bp[i], b = bp[(i + 1) % bp.length], d = Math.hypot(b.x - a.x, b.y - a.y), nn = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < nn; j++) { const t = j / nn; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } bp = dp; }
     const n = bp.length, dir = i => { const a = bp[i], b = bp[(i + 1) % n], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1; return { x: dx / L, y: dy / L }; };
     const tc = []; const d0 = dir(0); tc.push({ x: bp[0].x + off * d0.x, y: bp[0].y + off * d0.y });
@@ -2760,13 +2762,25 @@ function buildCoreCAM(ski, opt) {
     // point. That first straight move casters the blade into alignment with edge 0 before the real cut.
     const lead = Math.max(off * 3, o.dragLeadIn || 12);
     const lx = tc[0].x - lead * d0.x, ly = tc[0].y - lead * d0.y;
-    PC(`lead-in ${disp.dragLeadIn} ${uu} to pre-align the blade before the outline`);
+    PC(`lead-in pre-aligns the blade before the cut line`);
     g0(lx, ly); g0z(MZ(o.stockThick + 1)); g1z(cutZ);
     g1(tc[0].x, tc[0].y, cutZ); cutDist += lead;
     let px = tc[0].x, py = tc[0].y;
     for (let i = 1; i < tc.length; i++) { g1(tc[i].x, tc[i].y, cutZ); cutDist += Math.hypot(tc[i].x - px, tc[i].y - py); px = tc[i].x; py = tc[i].y; }
     g0z(safeZ);
-  } else if (o.doPerimeter) {
+  };
+  if (o.baseOp) {
+    // Base cut line: full-wrap inset, or contact-wrap sections + full outline at tips/tails.
+    const eInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0, eWrap = ski.edgeWrap || "full";
+    let baseEdge;
+    try {
+      if (eWrap === "contact" && eInset > 0) baseEdge = getContactBaseCutLoop(ski, eInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0).map(p => ({ x: p.y, y: p.x }));
+      else if (eInset > 0) baseEdge = offsetPolygonInward(getFullOutlinePoints(ski), eInset).map(p => ({ x: p.y, y: p.x }));
+      else baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x }));
+    } catch (e) { baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x })); }
+    emitDragKnife(baseEdge, `BASE CUT (${eWrap === "contact" && eInset > 0 ? "contact-wrap + tip/tail outline" : eInset > 0 ? eInset + "mm full-wrap inset" : "full outline"})`);
+  }
+  if (o.doPerimeter) {
     let path = core;
     if (o.perimeterSide === "outside") path = offsetPolygonOutward(core, R);
     else if (o.perimeterSide === "inside") path = offsetPolygonInward(core, R);
@@ -2887,7 +2901,7 @@ function buildCoreCAM(ski, opt) {
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
   let _gc = G.join("\n"), _lines = G.length;
   if (o.arcOut) { const dec = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); _gc = arcFitGcode(_gc, 0.02 / uL, dec, pst.lineNum); _lines = _gc.split("\n").length; }
-  return { gcode: _gc, stats: { lines: _lines, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : "blank", setThick: disp.stockThick } };
+  return { gcode: _gc, stats: { lines: _lines, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : o.baseOp ? "base" : "blank", setThick: disp.stockThick } };
 }
 
 // Top-down toolpath preview: parses the generated G-code and draws rapids (dim/dashed) and cutting
@@ -6325,7 +6339,7 @@ export default function App() {
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true,
-      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, dragKnife: false, bladeOffset: 1, dragLeadIn: 12,
+      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
@@ -6404,13 +6418,15 @@ export default function App() {
     try {
       const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
       const opt = camOpt.op === "outline"
-        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, dragKnife: camOpt.dragKnife, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn }
+        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
         ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
         : camOpt.op === "bore"
         ? { ...b, doProfile: false, doPerimeter: false, borePts, toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge, boreDia: camOpt.boreDia, boreDepth: camOpt.boreDepth, boreHelix: camOpt.boreHelix }
+        : camOpt.op === "base"
+        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallStock: camOpt.sidewallStock, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
@@ -8009,7 +8025,7 @@ export default function App() {
           <div style={{ height: camH, position: "relative", background: "#14100d" }}>
             <ToolpathView gcode={camResult.gcode} width={canvasW} height={camH} />
             <div style={{ position: "absolute", left: 12, top: 10, color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>
-              TOOLPATH · {camOpt.op === "outline" ? "① OUTLINE" : camOpt.op === "mold" ? "③ MOLD" : camOpt.op === "slat" ? "④ SLATS" : camOpt.op === "bore" ? "⑤ BORE" : camOpt.op === "pocket" ? "⑥ POCKET" : "② SURFACE TAPER"}
+              TOOLPATH · {camOpt.op === "outline" ? "① OUTLINE" : camOpt.op === "mold" ? "③ MOLD" : camOpt.op === "slat" ? "④ SLATS" : camOpt.op === "bore" ? "⑤ BORE" : camOpt.op === "pocket" ? "⑥ POCKET" : camOpt.op === "base" ? "⑦ BASE (DRAG KNIFE)" : "② SURFACE TAPER"}
             </div>
             {camResult.stats && (
               <div style={{ position: "absolute", right: 12, top: 10, color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -8038,7 +8054,7 @@ export default function App() {
           {(() => {
             const uu = camOpt.units === "inch" ? "in" : "mm", uf = camOpt.units === "inch" ? "in/min" : "mm/min";
             const st = camOpt.units === "inch" ? 0.01 : 0.5, stf = camOpt.units === "inch" ? 10 : 50;
-            const isOutline = camOpt.op === "outline", isMold = camOpt.op === "mold", isSlat = camOpt.op === "slat", isBore = camOpt.op === "bore", isPocket = camOpt.op === "pocket", tK = k => camOpt.op + k;
+            const isOutline = camOpt.op === "outline", isMold = camOpt.op === "mold", isSlat = camOpt.op === "slat", isBore = camOpt.op === "bore", isPocket = camOpt.op === "pocket", isBaseOp = camOpt.op === "base", tK = k => camOpt.op + k;
             return (
               <>
                 <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
@@ -8061,7 +8077,7 @@ export default function App() {
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>Operation (one file each)</div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={camSeg(camOpt.op === v)}>{l}</button>))}
+                    {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"], ["base", "⑦ Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={camSeg(camOpt.op === v)}>{l}</button>))}
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
@@ -8089,22 +8105,8 @@ export default function App() {
                       {[["Cut-thru " + uu, "cutThrough", st], ["Tabs", "tabN", 1], ["Tab ht " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
                     </div>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginTop: 6 }}>
-                      <input type="checkbox" checked={camOpt.rampEntry} onChange={e => setCam("rampEntry", e.target.checked)} disabled={camOpt.dragKnife} /> Ramp entry ({camOpt.rampLen} {uu})
+                      <input type="checkbox" checked={camOpt.rampEntry} onChange={e => setCam("rampEntry", e.target.checked)} /> Ramp entry ({camOpt.rampLen} {uu})
                     </label>
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.dragKnife ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
-                        <input type="checkbox" checked={camOpt.dragKnife} onChange={e => setCam("dragKnife", e.target.checked)} /> Drag knife (Donek — spindle OFF)
-                      </label>
-                      {camOpt.dragKnife && (<>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-                          <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                          <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                        </div>
-                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                          For cutting base material (P-tex) with a drag knife in the collet. Spindle stays off, the tool leads the cut line by the blade offset, and it swivels around corners so the blade re-aligns instead of tearing. It plunges in the waste and cuts a lead-in line first to pre-align the blade, then runs the outline in a single pass — hold the base down with tape or vacuum.
-                        </div>
-                      </>)}
-                    </div>
                   </div>
                 ) : isMold ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
@@ -8183,6 +8185,22 @@ export default function App() {
                       Clears a {camOpt.pocketL}\u00D7{camOpt.pocketW} {uu} rectangle {camOpt.pocketDepth} {uu} deep at {(camOpt.pocketCenterX * 100).toFixed(0)}% of length (raster + finish pass). For inlays, weight-relief pockets, or recesses.
                     </div>
                   </div>
+                ) : isBaseOp ? (
+                  <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                    <div style={{ ...camLabel, color: C.heading }}>Base cut — drag knife (spindle OFF)</div>
+                    <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Cuts the <b style={{ color: C.value }}>base cut line</b> from your design{ski.edgeInset > 0 ? (ski.edgeWrap === "contact" ? ` — contact-wrap: sections along each edge's contacts (${ski.edgeInset}mm inset) with the full outline at the tips and tails.` : ` — full-wrap: the whole outline inset ${ski.edgeInset}mm.`) : " — full outline (no edge inset set)."} Set the inset & wrap mode back in the Dimensions → base/edge controls.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      <div><div style={camSmall}>Cut-thru {uu}</div><input type="number" value={camOpt.cutThrough} step={st} min={0} onChange={e => setCam("cutThrough", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      <div><div style={camSmall}>Knife tool #</div><input type="number" value={camOpt.baseToolNum} step={1} min={1} onChange={e => setCam("baseToolNum", parseInt(e.target.value) || 1)} style={camInput} /></div>
+                    </div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Chuck the Donek, set the blade offset stamped on your blade, and cut-thru to your base thickness plus a hair. Spindle stays off; it plunges in the waste, cuts a lead-in to pre-align the blade, then follows the base line with corner swivels. Tape or vacuum the base down.
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Surface taper (3D carve, assembled)</div>
@@ -8241,12 +8259,12 @@ export default function App() {
                       </div>
                     </div>
                     <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "8px 10px", marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.6 }}>
-                      {isOutline ? "OUTLINE" : isMold ? "MOLD" : isSlat ? "SLATS" : isBore ? "BORE" : isPocket ? "POCKET" : "TAPER"} · Z {camResult.stats.minZ}…{camResult.stats.maxZ} {camResult.stats.unit} · est <b style={{ color: C.heading }}>{camResult.stats.estMin} min</b> · {camResult.stats.lines.toLocaleString()} lines
+                      {isOutline ? "OUTLINE" : isMold ? "MOLD" : isSlat ? "SLATS" : isBore ? "BORE" : isPocket ? "POCKET" : isBaseOp ? "BASE" : "TAPER"} · Z {camResult.stats.minZ}…{camResult.stats.maxZ} {camResult.stats.unit} · est <b style={{ color: C.heading }}>{camResult.stats.estMin} min</b> · {camResult.stats.lines.toLocaleString()} lines
                     </div>
                   </>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={downloadCAM} style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "10px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : "② Taper"} .nc</button>
+                  <button onClick={downloadCAM} style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "10px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : isBaseOp ? "⑦ Base" : "② Taper"} .nc</button>
                   <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "10px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
                 </div>
                 <button onClick={() => setShowToolpath(true)} style={{ width: "100%", marginTop: 6, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Preview Toolpaths</button>
