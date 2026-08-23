@@ -2908,8 +2908,7 @@ function buildCoreCAM(ski, opt) {
 // moves coloured by depth (deep = torch red, shallow = brass), so paths can be checked before cutting.
 // Shared canvas renderer: parses G-code and draws rapids (dim dashed) + cuts coloured by depth. When a
 // machine work area is supplied, the bed rectangle and origin are drawn too, so fit is obvious.
-function drawToolpathCanvas(cv, gcode, machine, view) {
-  const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
+function parseToolpath(gcode) {
   let x = 0, y = 0, z = 0, have = false; const segs = []; let zMin = 1e9, zMax = -1e9, bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
   for (const raw of (gcode || "").split("\n")) {
     const line = raw.trim(); if (!line || line[0] === ";") continue;
@@ -2919,8 +2918,14 @@ function drawToolpathCanvas(cv, gcode, machine, view) {
     if ((mx || my) && have) { segs.push({ x0: x, y0: y, x1: nx, y1: ny, z: nz, cut: g1 }); if (g1) { zMin = Math.min(zMin, nz); zMax = Math.max(zMax, nz); bx0 = Math.min(bx0, x, nx); by0 = Math.min(by0, y, ny); bx1 = Math.max(bx1, x, nx); by1 = Math.max(by1, y, ny); } }
     x = nx; y = ny; z = nz; have = have || !!(mx || my);
   }
+  return { segs, zMin, zMax, bx0, by0, bx1, by1 };
+}
+function drawToolpathCanvas(cv, data, machine, view) {
+  const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
+  const parsed = typeof data === "string" ? parseToolpath(data) : data;
+  const { segs, zMin, zMax, bx0, by0, bx1, by1 } = parsed || { segs: [] };
   ctx.fillStyle = "#14100d"; ctx.fillRect(0, 0, W, H);
-  if (!segs.length) return;
+  if (!segs || !segs.length) return null;
   // Draw the ACTUAL emitted G-code (X horizontal, Y vertical) so the preview always matches the machine.
   // The bed is machine X (short) wide x machine Y (long) tall, anchored at the toolpath's corner.
   const hasBed = !!(machine && machine.short > 0 && isFinite(bx0));
@@ -2959,26 +2964,29 @@ function drawToolpathCanvas(cv, gcode, machine, view) {
 
 // Live right-side toolpath view — redraws whenever the G-code or size changes. Zoom (wheel/buttons) + pan (drag).
 function ToolpathView({ gcode, width, height, machine }) {
-  const ref = useRef(null), tf = useRef(null), drag = useRef(null);
+  const ref = useRef(null), tf = useRef(null), drag = useRef(null), raf = useRef(0);
+  const parsed = useMemo(() => parseToolpath(gcode), [gcode]);   // parse ONCE per G-code, not per pan/zoom frame
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  useEffect(() => { const cv = ref.current; if (!cv) return; cv.width = Math.max(1, Math.floor(width)); cv.height = Math.max(1, Math.floor(height)); tf.current = drawToolpathCanvas(cv, gcode, machine, { zoom, panX: pan.x, panY: pan.y }); }, [gcode, width, height, machine, zoom, pan]);
+  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }); }, [parsed, width, height, machine, zoom, pan]);
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const ptr = e => { const cv = ref.current, r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height), sc: cv.width / r.width }; };
   const onWheel = e => { e.preventDefault(); const t = tf.current; if (!t) return; const p = ptr(e); const wx = (p.x - t.ox) / t.s, wy = (t.H - p.y - t.oy) / t.s; const nz = Math.max(1, Math.min(24, zoom * (1 - e.deltaY * 0.0015))); const ns = t.sBase * nz; setZoom(nz); setPan({ x: (p.x - wx * ns) - ((ref.current.width - t.bw * ns) / 2 - t.mnx * ns), y: (t.H - p.y - wy * ns) - ((t.H - t.bh * ns) / 2 - t.mny * ns) }); };
   const onDown = e => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, sc: ptr(e).sc }; };
-  const onMove = e => { if (!drag.current) return; const d = drag.current; setPan({ x: d.px + (e.clientX - d.x) * d.sc, y: d.py + (e.clientY - d.y) * d.sc }); };
+  const onMove = e => { if (!drag.current) return; const d = drag.current, cx = e.clientX, cy = e.clientY; if (raf.current) return; raf.current = requestAnimationFrame(() => { raf.current = 0; setPan({ x: d.px + (cx - d.x) * d.sc, y: d.py - (cy - d.y) * d.sc }); }); };
   const onUp = () => { drag.current = null; };
+  const reset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
   const btn = { minWidth: 26, height: 24, background: "rgba(20,16,13,0.88)", border: "1px solid rgba(155,147,136,0.32)", color: "#c8935a", borderRadius: 3, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1, padding: "0 7px" };
   return (
     <div style={{ position: "relative", width, height, overflow: "hidden" }}>
-      <canvas ref={ref} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} style={{ width, height, display: "block", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }} />
+      <canvas ref={ref} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onDoubleClick={reset} style={{ width, height, display: "block", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }} />
       <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
         <button onClick={() => setZoom(z => Math.max(1, z / 1.4))} style={btn}>−</button>
         <span style={{ ...btn, cursor: "default", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#9b9388" }}>{Math.round(zoom * 100)}%</span>
         <button onClick={() => setZoom(z => Math.min(24, z * 1.4))} style={btn}>+</button>
-        <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} style={btn}>Fit</button>
+        <button onClick={reset} style={{ ...btn, fontWeight: 700 }}>Reset view</button>
       </div>
-      <div style={{ position: "absolute", bottom: 6, left: 10, fontSize: 9.5, color: "rgba(155,147,136,0.6)", fontFamily: "'JetBrains Mono', monospace", pointerEvents: "none" }}>scroll to zoom · drag to pan</div>
+      <div style={{ position: "absolute", bottom: 6, left: 10, fontSize: 9.5, color: "rgba(155,147,136,0.6)", fontFamily: "'JetBrains Mono', monospace", pointerEvents: "none" }}>scroll to zoom · drag to pan · double-click to reset</div>
     </div>
   );
 }
@@ -6365,11 +6373,11 @@ export default function App() {
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
-      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 6,
+      machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 7,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallStock: 0, sidewallEngage: "conventional" };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
