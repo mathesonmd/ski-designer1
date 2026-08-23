@@ -2908,7 +2908,7 @@ function buildCoreCAM(ski, opt) {
 // moves coloured by depth (deep = torch red, shallow = brass), so paths can be checked before cutting.
 // Shared canvas renderer: parses G-code and draws rapids (dim dashed) + cuts coloured by depth. When a
 // machine work area is supplied, the bed rectangle and origin are drawn too, so fit is obvious.
-function drawToolpathCanvas(cv, gcode, machine) {
+function drawToolpathCanvas(cv, gcode, machine, view) {
   const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
   let x = 0, y = 0, z = 0, have = false; const segs = []; let zMin = 1e9, zMax = -1e9, bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
   for (const raw of (gcode || "").split("\n")) {
