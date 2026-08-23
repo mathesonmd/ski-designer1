@@ -6137,6 +6137,21 @@ function TopsheetDesigner({ ski, C, onClose }) {
   );
 }
 
+// Number input that holds the exact text you type (so decimals like "6.3" and cleared fields don't get
+// clobbered by the controlled numeric value on re-render). Commits a parsed number live as you type, and
+// finalizes on blur. External value changes only overwrite the box when it isn't focused.
+function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }) {
+  const [txt, setTxt] = useState(value == null ? "" : String(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setTxt(value == null ? "" : String(value)); }, [value]);
+  return (
+    <input type="number" value={txt} min={min} max={max} step={step} style={style}
+      onFocus={e => { focused.current = true; if (onFocus) onFocus(e); }}
+      onChange={e => { setTxt(e.target.value); const v = parseFloat(e.target.value); if (!isNaN(v)) onCommit(v); }}
+      onBlur={e => { focused.current = false; const v = parseFloat(e.target.value); const fin = isNaN(v) ? 0 : v; onCommit(fin); setTxt(String(fin)); if (onBlur) onBlur(e); }} />
+  );
+}
+
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
   // Per-mode in-memory stash: when you toggle away from a mode, its design is parked here so toggling
@@ -6876,10 +6891,10 @@ export default function App() {
   const inputField = (label, param, min, max, step) => (
     <div style={{ marginBottom: 7 }}>
       <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
-      <input
-        type="number" value={ski[param]} min={min} max={max} step={step || 1}
-        onChange={e => setSki(s => {
-          const next = { ...s, [param]: parseFloat(e.target.value) || 0 };
+      <NumberInput
+        value={ski[param]} min={min} max={max} step={step || 1}
+        onCommit={v => setSki(s => {
+          const next = { ...s, [param]: v };
           // Contact positions depend on length / tipLength / tailLength — keep the contact-pinned
           // core nodes sitting on the contacts when any of those change.
           if (param === "length" || param === "tipLength" || param === "tailLength") {
@@ -8153,14 +8168,14 @@ export default function App() {
                   <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock blank ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                     {[["Length", "stockL"], ["Width", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
-                      <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
                     ))}
                   </div>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", marginTop: 7 }}>
                     <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
                   </label>
                   {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
-                  {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><input type="number" value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} onChange={e => setCam("slatSheetW", parseFloat(e.target.value) || 0)} style={camInput} /></div>}
+                  {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><NumberInput value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} min={0} onCommit={v => setCam("slatSheetW", v)} style={camInput} /></div>}
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
