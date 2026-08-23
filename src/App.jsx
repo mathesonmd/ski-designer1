@@ -4553,6 +4553,9 @@ function CoreView({ ski, setSki, width, height }) {
     // begins and ends. Past these, the core is a thin flat tab / filler. These track the ski dims.
     const tailContactPos = ski.tailLength / ski.length;
     const tipContactPos = (ski.length - ski.tipLength) / ski.length;
+    const _wYmm = resolveWaistY(ski);
+    const waistPos = tailContactPos + (tipContactPos - tailContactPos) * ((_wYmm - ski.tailLength) / ((ski.length - ski.tipLength) - ski.tailLength));
+    const waistDistMM = (pos) => (pos - waistPos) * ski.length;   // signed mm from the waist (+ toward tip, - toward tail)
     [["TAIL CONTACT", tailContactPos], ["TIP CONTACT", tipContactPos]].forEach(([lbl, pos]) => {
       const x = padL + pos * plotW;
       ctx.strokeStyle = C.contactLine || "rgba(232,85,42,0.55)";
@@ -4567,9 +4570,6 @@ function CoreView({ ski, setSki, width, height }) {
     // WAIST reference line (boot center) — light bone, so you can align the thickest part of the
     // core to it. Sits between the contacts at the resolved waist position.
     {
-      const wY = resolveWaistY(ski);
-      const tailCmm = ski.tailLength, tipCmm = ski.length - ski.tipLength;
-      const waistPos = tailContactPos + (tipContactPos - tailContactPos) * ((wY - tailCmm) / (tipCmm - tailCmm));
       const x = padL + waistPos * plotW;
       ctx.strokeStyle = C.waistLine || "rgba(237,230,216,0.65)";
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
@@ -4577,7 +4577,7 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.fillStyle = C.waistLabel || "#f3ecdd";
       ctx.font = "bold 8px 'JetBrains Mono', monospace";
       ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "left"; ctx.fillText("WAIST", 0, 0); ctx.restore();
+      ctx.textAlign = "left"; ctx.fillText("WAIST 0", 0, 0); ctx.restore();
     }
 
     // Smooth profile
@@ -4646,6 +4646,11 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.font = "8px 'JetBrains Mono', monospace";
       ctx.textAlign = "center";
       ctx.fillText(`${cp[cpObj.idx].thick.toFixed(1)}`, cpObj.cx, cpObj.cy - 10);
+      // distance from the waist (boot center) so you can see where the underfoot thick zone sits
+      const dmm = waistDistMM(cp[cpObj.idx].pos);
+      ctx.fillStyle = (isH || isD) ? C.waistLabel || "#f3ecdd" : C.labelDim;
+      ctx.font = `${(isH || isD) ? "bold " : ""}7px 'JetBrains Mono', monospace`;
+      ctx.fillText(`${dmm >= 0 ? "+" : ""}${Math.round(dmm)}`, cpObj.cx, cpObj.cy + 15);
     });
 
     ctx.fillStyle = C.dimText;
@@ -4691,6 +4696,29 @@ function CoreView({ ski, setSki, width, height }) {
     }
   }, [dragging, dragStart, cps, fromC2, findCP3, setSki]);
   const handleUp = useCallback(() => { setDragging(null); setDragStart(null); }, []);
+  // Double-click the line to drop a new adjustment point there; double-click an interior point to remove it.
+  const handleDouble = useCallback(e => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const id = findCP3(mx, my);
+    if (id) {
+      const hit = cps.find(c => c.id === id); if (!hit) return;
+      const node = cp[hit.idx];
+      if (node.contact || node.end) return;            // never remove pinned contact / end nodes
+      const newCore = cp.filter((_, i) => i !== hit.idx);
+      if (newCore.length >= 3) setSki(s => ({ ...s, coreProfile: newCore }));
+      return;
+    }
+    const click = fromC2(mx, my);
+    if (click.pos <= 0.02 || click.pos >= 0.98) return;
+    const curveThick = getCoreThickAt(cp, click.pos);
+    if (Math.abs(my - toC2(click.pos, curveThick).y) > 22) return;   // only when near the profile line
+    const newCore = JSON.parse(JSON.stringify(cp));
+    let ins = newCore.findIndex(n => n.pos > click.pos);
+    if (ins < 1) ins = newCore.length - 1;
+    newCore.splice(ins, 0, { pos: click.pos, thick: clamp(curveThick, 0.5, 15) });
+    setSki(s => ({ ...s, coreProfile: newCore }));
+  }, [cp, cps, findCP3, fromC2, toC2, setSki]);
 
   return (
     <canvas ref={canvasRef}
@@ -4699,6 +4727,7 @@ function CoreView({ ski, setSki, width, height }) {
       onPointerMove={handleMove}
       onPointerUp={handleUp}
       onPointerCancel={handleUp}
+      onDoubleClick={handleDouble}
       onPointerLeave={() => { setHovered(null); }} />
   );
 }
