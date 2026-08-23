@@ -221,6 +221,7 @@ const DEFAULT_SKI={
   // contact point, two equal sides converge to an apex pointing toward the tip/tail end. The
   // triangular region beyond the V is fill material. Each end is independent (on/off + extension mm
   // past the contact toward the end).
+  coreEndExt:50,    // mm the core extends past each contact point when no V-cut (0 = ends at contact)
   vcutTip:false, vcutTipExt:120,
   vcutTail:false, vcutTailExt:120,
   // Export orientation for all CNC files: "vertical" (portrait, length up the page) or
@@ -1668,8 +1669,9 @@ function exportCoreSTL(ski) {
     return { o: hw(x), n: 0 };
   }
 
-  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : 0;
-  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : L;
+  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : Math.max(0, tailContactX - endExt);
+  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : Math.min(L, tipContactX + endExt);
   const NS = 360, xset = new Set();
   for (let i = 0; i <= NS; i++) xset.add(xLo + (xHi - xLo) * i / NS);
   [tipContactX, tipContactX + tipExt, tailContactX, tailContactX - tailExt].forEach(e => { if (e >= xLo - 1e-6 && e <= xHi + 1e-6) xset.add(e); });
@@ -1987,8 +1989,9 @@ function applyVCutToCore(ski) {
   const hwAt = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
 
   // Sample the core rails only within the (possibly clipped) X range.
-  const xStart = vTail ? tailContactX : 0;
-  const xEnd = vTip ? tipContactX : L;
+  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  const xStart = vTail ? tailContactX : Math.max(0, tailContactX - endExt);
+  const xEnd = vTip ? tipContactX : Math.min(L, tipContactX + endExt);
   const N = 200;
   const rightRail = [], leftRail = [];
   for (let i = 0; i <= N; i++) {
@@ -7625,6 +7628,10 @@ export default function App() {
               the Core / Combined DXF and the Core STL.
             </InfoBubble>
           </div>
+          {inputField("Core end ext past contact (mm)", "coreEndExt", 0, 300, 5)}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            With no V-cut, the core ends this far past each contact point (0 = ends exactly at the contact). Most core blanks run ~50mm past — this keeps the core from reaching into the tips/tails. A V-cut below overrides this on that end.
+          </div>
           {toggleBtn("Tip V-cut", "vcutTip")}
           {ski.vcutTip && inputField("Tip ext (mm) \u2014 + out / \u2212 in", "vcutTipExt", -Math.round((ski.length - ski.tipLength - ski.tailLength) / 2 * 0.9), Math.max(20, ski.tipLength))}
           {toggleBtn("Tail V-cut", "vcutTail")}
@@ -8032,6 +8039,10 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flexShrink: 0, display: "flex", gap: 4, padding: "7px 10px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel, alignItems: "center", overflowX: "auto" }}>
+          <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, marginRight: 4, flexShrink: 0 }}>VIEW</span>
+          {isCompact ? (<>{viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}</>) : (<>{viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("Layup", "layers")}{viewBtn("Path", "cam")}{viewBtn("All", "all")}</>)}
+        </div>
         {effectiveActiveView === "analysis" && (
           <div style={{
             height: analysisNoticeH, flexShrink: 0,
@@ -8137,8 +8148,22 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                <div style={{ marginBottom: 10, padding: 9, border: `1px solid ${C.heading}`, borderRadius: 5, background: C.inputBg }}>
+                  <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS — set these first</div>
+                  <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock blank ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                    {[["Length", "stockL"], ["Width", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
+                      <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                    ))}
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", marginTop: 7 }}>
+                    <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
+                  </label>
+                  {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><input type="number" value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} onChange={e => setCam("slatSheetW", parseFloat(e.target.value) || 0)} style={camInput} /></div>}
+                </div>
                 <div style={{ marginBottom: 8 }}>
-                  <div style={camLabel}>Operation (one file each)</div>
+                  <div style={camLabel}>② Operation (one file each)</div>
                   <div style={{ display: "flex", gap: 4 }}>
                     {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"], ["base", "⑦ Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={camSeg(camOpt.op === v)}>{l}</button>))}
                   </div>
@@ -8349,21 +8374,7 @@ export default function App() {
                   </div>
                   );
                 })}
-                <div style={{ width: 1, height: 34, background: C.panelBorder, alignSelf: "center" }} />
-                {[["Stock L", "stockL"], ["Stock W", "stockW"], ["Stock T", "stockThick"]].map(([lab, key]) => (
-                  <div key={key}>
-                    <div style={{ color: camStock ? (camStock.fits ? C.label : "#e8552a") : C.label, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>{lab} ({camOpt.units === "inch" ? "in" : "mm"})</div>
-                    <input type="number" value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={{ width: 78, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none" }} />
-                  </div>
-                ))}
-                {camStock ? (
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: camStock.fits ? "#8ab98a" : "#e8552a", alignSelf: "center" }}>{camStock.fits ? "✓ fits your stock" : `✗ over by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</span>
-                ) : camResult.stats ? (
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: C.labelDim, alignSelf: "center" }}>needs ≥ {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}</span>
-                ) : null}
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", alignSelf: "center" }} title="Center the profile on the stock so the cut follows the lengthwise centerline / foam stringer, even when you zero at the corner.">
-                  <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center in stock
-                </label>
+                {camStock && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: camStock.fits ? "#8ab98a" : "#e8552a", alignSelf: "center" }}>{camStock.fits ? "✓ fits stock" : `✗ over by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</span>}
                 <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
                   <input type="checkbox" checked={camOpt.showMachine} onChange={e => setCam("showMachine", e.target.checked)} /> Show bed
                 </label>
