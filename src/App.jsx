@@ -2681,7 +2681,10 @@ function buildCoreCAM(ski, opt) {
   else { originShiftLen = -(sx0 + sx1) / 2; originShiftWid = -(sy0 + sy1) / 2; }
   // Center the part within the stock (so the cut follows the stock's lengthwise centerline / stringer),
   // while still zeroing at the corner: shift the whole part in by half the leftover stock on each axis.
-  if (o.centerInStock && o.stockL > 0 && o.stockW > 0 && o.origin === "corner") {
+  // Centering is ONLY for the outline cut, where the profile is cut from a wider raw blank and wants to
+  // land on the stringer. Taper/mold/base run on the finished blank zeroed at its own corner — centering
+  // there would silently shift the whole toolpath off the zero (a blank-wrecker), so it's blocked.
+  if (o.centerInStock && o.stockL > 0 && o.stockW > 0 && o.origin === "corner" && o.doPerimeter && !o.baseOp) {
     const partMX = o.partAxis === "y" ? (sy1 - sy0) : (sx1 - sx0);   // part extent along machine X
     const partMY = o.partAxis === "y" ? (sx1 - sx0) : (sy1 - sy0);   // along machine Y
     const stockMX = o.partAxis === "y" ? o.stockW : o.stockL;         // stock extent along machine X (mm)
@@ -6009,7 +6012,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
       }
       ctx.restore();
     }
-    if (guidesOn) { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]); for (const yc of skiYc) { ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + p.y, y = yc + p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); } ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore(); }
+    if (guidesOn) { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]); skiYc.forEach((yc, si) => { const sgn = si === 0 ? 1 : -1; ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + p.y, y = yc + sgn * p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }); ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore(); }
     if (cropOn) { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(0.3, 1.2 / eff); const m = 12; [[0, 0, 1, 1], [tL, 0, -1, 1], [0, tW, 1, -1], [tL, tW, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); }
   };
 
@@ -8226,18 +8229,44 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ marginBottom: 10, padding: 9, border: `1px solid ${C.heading}`, borderRadius: 5, background: C.inputBg }}>
-                  <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS — set these first</div>
-                  <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock blank ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                    {[["Length", "stockL"], ["Width", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
-                      <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
-                    ))}
-                  </div>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", marginTop: 7 }}>
-                    <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
-                  </label>
-                  {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
-                  {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><NumberInput value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} min={0} onCommit={v => setCam("slatSheetW", v)} style={camInput} /></div>}
+                  {(camOpt.op === "taper" || isMold) ? (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR ASSEMBLED CORE — measure after gluing walls</div>
+                    <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.55, fontFamily: "'JetBrains Mono', monospace" }}>
+                      This cut runs on the <b style={{ color: C.value }}>finished blank</b> — core with sidewalls glued on, NOT the raw stock. 1) Glue &amp; cure the walls. 2) Measure the <b style={{ color: C.value }}>widest point (at the tip)</b>, walls included → Width. 3) Measure overall <b style={{ color: C.value }}>length</b> → Length.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "stockL"], ["Width @ tip", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 8, padding: 7, border: `1px solid ${C.heading}`, borderRadius: 4, color: C.value, fontSize: 10.5, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      <b style={{ color: C.heading }}>On the machine:</b> the core has sidecut, so it isn't a rectangle. Line it up down the <b>centerline of the bed</b>, then zero X / Y / Z at the <b>bottom-left corner of its rectangular envelope</b> (the bounding box around the widest points — not the tapered edge itself). Do <b>not</b> set a work offset. This cut never centers — it's zeroed right at the corner.
+                    </div>
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your measured core" : `✗ toolpath exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>) : isOutline ? (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR RAW CORE BLANK</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>The blank you cut the profile FROM ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "stockL"], ["Width", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", marginTop: 7 }}>
+                      <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
+                    </label>
+                    <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>Only the outline cut centers — zero at the blank's bottom-left corner.</div>
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>) : (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "stockL"], ["Width", "stockW"], ["Thick", "stockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><NumberInput value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} min={0} onCommit={v => setCam("slatSheetW", v)} style={camInput} /></div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>)}
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
