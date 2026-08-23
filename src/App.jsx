@@ -2560,18 +2560,28 @@ function _camCrossingsX(poly, yline) {
   }
   xs.sort((p, q) => p - q); return xs;
 }
+// Post-processor dialects. `decimals: null` = auto (4 for inch, 3 for mm). Overridable via postOverride.
+const POST_PROFILES = {
+  centroid: { name: "Centroid CNC12 / Avid", comment: ";", lineNum: false, tc: "tm6", end: ["M30"], ext: "nc", pct: false, decimals: null },
+  grbl: { name: "GRBL / Shapeoko / X-Carve", comment: ";", lineNum: false, tc: "manual", end: ["M5", "M30"], ext: "nc", pct: false, decimals: null },
+  mach: { name: "Mach3 / Mach4", comment: ";", lineNum: false, tc: "tm6", end: ["M30"], ext: "tap", pct: false, decimals: null },
+  linuxcnc: { name: "LinuxCNC", comment: ";", lineNum: false, tc: "tm6", end: ["M2"], ext: "ngc", pct: false, decimals: null },
+  fanuc: { name: "Fanuc / Haas", comment: "()", lineNum: true, tc: "tm6", end: ["M30"], ext: "nc", pct: true, decimals: null },
+};
+
 function buildCoreCAM(ski, opt) {
   const o = Object.assign({ units: "mm", toolDia: 12.7, feed: 2500, plunge: 800, spindle: 18000,
     stepdown: 3, stepover: 6, safeZ: 6, stockThick: 13, zZero: "bed", doProfile: true, doPerimeter: true,
     perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabLen: 8, tabHeight: 2, origin: "corner",
     profPattern: "zigzag", profDir: "+", sidewallStock: 1.5, perimDir: "conventional", spindleCW: true,
-    rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
+    rampEntry: true, rampLen: 12, sidewallEngage: "conventional", toolNum: 1, heightMode: "thickness", moldMargin: 15, slatHoleDia: 6.6, slatHoleToolNum: 5, boreDia: 7, boreDepth: 9, boreHelix: true, postKey: "centroid", postOverride: null, partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6 }, opt || {});
   const inch = o.units === "inch", uL = inch ? 25.4 : 1;
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallStock", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
-  const f = n => { const v = n / uL; return inch ? v.toFixed(4) : (Math.round(v * 1000) / 1000).toString(); };
+  for (const k of ["toolDia", "stockThick", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallStock", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
+  const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
   const lerp = (a, b, t) => a + (b - a) * t;
   const L = ski.length, prof = ski.coreProfile;
@@ -2588,13 +2598,6 @@ function buildCoreCAM(ski, opt) {
   const topH = isBase ? (x => { const b = sideProfileHeightAt(ski, x); return o.moldInvert ? (o.stockThick - (b - baseMin)) : (o.stockThick - (baseMax - b)); }) : (x => getCoreThickAt(prof, Math.min(1, Math.max(0, x / L))));
   const safeZ = MZ(o.stockThick + o.safeZ), R = o.toolDia / 2;
   const G = [];
-  // ── Post-processor: dialect that makes the file valid on the target controller ──
-  const PROF = { centroid: { name: "Centroid CNC12 / Avid", comment: ";", lineNum: false, tc: "tm6", end: ["M30"], ext: "nc", pct: false },
-    grbl: { name: "GRBL / Shapeoko / X-Carve", comment: ";", lineNum: false, tc: "manual", end: ["M5", "M30"], ext: "nc", pct: false },
-    mach: { name: "Mach3 / Mach4", comment: ";", lineNum: false, tc: "tm6", end: ["M30"], ext: "tap", pct: false },
-    linuxcnc: { name: "LinuxCNC", comment: ";", lineNum: false, tc: "tm6", end: ["M2"], ext: "ngc", pct: false },
-    fanuc: { name: "Fanuc / Haas", comment: "()", lineNum: true, tc: "tm6", end: ["M30"], ext: "nc", pct: true } };
-  const pst = Object.assign({}, PROF[o.postKey] || PROF.centroid, o.postOverride || {});
   let lineNo = 10;
   const P = s => { if (s === "") { G.push(""); return; } if (pst.lineNum) { G.push("N" + lineNo + " " + s); lineNo += 10; } else G.push(s); };
   const PC = t => G.push(pst.comment === "()" ? "(" + String(t).replace(/[()]/g, "") + ")" : "; " + t);
@@ -2652,45 +2655,47 @@ function buildCoreCAM(ski, opt) {
   toolChange(o.toolNum); P(`S${o.spindle} M3`); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
-    // Keep the surfacing cutter away from the finished wall by (tool radius + sidewall stock), so a big
-    // cutter never grazes the sidewall. The perimeter op cuts the true wall separately, in a safe direction.
-    let surfPoly = core;
-    if (isBase) { const mm2 = Math.max(0, o.moldMargin || 0); if (mm2 > 0) { try { const op2 = offsetPolygonOutward(core, mm2); if (op2 && op2.length >= 3) surfPoly = op2; } catch (e) {} } }
-    else { const inset = R + Math.max(0, o.sidewallStock); try { const ip = offsetPolygonInward(core, inset); if (ip && ip.length >= 3) surfPoly = ip; } catch (e) {} }
-    let sHalf = 0; for (const p of surfPoly) sHalf = Math.max(sHalf, Math.abs(p.y));
     let minTop = 1e9; for (let x = 0; x <= L; x += 5) minTop = Math.min(minTop, topH(x));
-    const passes = Math.max(1, Math.ceil((o.stockThick - minTop) / o.stepdown));
-    const lanes = []; const yL = -sHalf + 0.4, yR = sHalf - 0.4; lanes.push(yL);
-    for (let y = -sHalf + o.stepover; y < yR - 1e-6; y += o.stepover) lanes.push(y);
-    lanes.push(yR);
-    for (let k = 1; k <= passes; k++) {
-      const floor = o.stockThick - k * o.stepdown;
-      PC(`-- profile pass ${k}/${passes} (floor ${f(Math.max(floor, minTop))} above bed) --`);
-      lanes.forEach((y, li) => {
-        const xs = _camCrossingsX(surfPoly, y); if (xs.length < 2) return;
-        for (let s = 0; s + 1 < xs.length; s += 2) {
-          const xa = xs[s], xb = xs[s + 1]; if (xb - xa < 3) continue;
-          // Cut direction. For an assembled core with glued-on sidewalls, the two outermost lanes graze
-          // the walls: run each in the direction that engages its wall conventionally (pressing it into
-          // the core) so a grazing cut can't peel it. The two edges therefore travel opposite ways.
-          const isLeft = li === 0, isRight = li === lanes.length - 1;
-          let wantPlus;
-          if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) {
-            let base = isLeft;                                  // conventional: left edge -> +X, right edge -> -X
-            if (o.sidewallEngage === "climb") base = !base;
-            if (!o.spindleCW) base = !base;
-            wantPlus = base;
-          } else {
-            wantPlus = o.profPattern === "oneway" ? (o.profDir === "+") : ((o.profDir === "+") !== (li % 2 === 1));
+    // One surfacing set: lanes spaced by `so`, stepping down by `sd` from `startTop` to `minTop+zOff`,
+    // each lane cutting to max(topH(x)+zOff, floor). zOff>0 leaves finish stock; tnum triggers a tool change.
+    const doSurface = (toolR, so, sd, zOff, tnum, startTop, label) => {
+      let surfPoly = core;
+      if (isBase) { const mm2 = Math.max(0, o.moldMargin || 0); if (mm2 > 0) { try { const op2 = offsetPolygonOutward(core, mm2); if (op2 && op2.length >= 3) surfPoly = op2; } catch (e) {} } }
+      else { const inset = toolR + Math.max(0, o.sidewallStock); try { const ip = offsetPolygonInward(core, inset); if (ip && ip.length >= 3) surfPoly = ip; } catch (e) {} }
+      let sHalf = 0; for (const p of surfPoly) sHalf = Math.max(sHalf, Math.abs(p.y));
+      const lanes = []; const yL = -sHalf + 0.4, yR = sHalf - 0.4; lanes.push(yL);
+      for (let y = -sHalf + so; y < yR - 1e-6; y += so) lanes.push(y);
+      lanes.push(yR);
+      const passes = Math.max(1, Math.ceil((startTop - (minTop + zOff)) / sd));
+      if (tnum != null) { P(`G0 Z${f(safeZ)}`); toolChange(tnum); P(`S${o.spindle} M3`); }
+      for (let k = 1; k <= passes; k++) {
+        const floor = startTop - k * sd;
+        PC(`-- ${label} pass ${k}/${passes} --`);
+        lanes.forEach((y, li) => {
+          const xs = _camCrossingsX(surfPoly, y); if (xs.length < 2) return;
+          for (let s = 0; s + 1 < xs.length; s += 2) {
+            const xa = xs[s], xb = xs[s + 1]; if (xb - xa < 3) continue;
+            const isLeft = li === 0, isRight = li === lanes.length - 1;
+            let wantPlus;
+            if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) { let base = isLeft; if (o.sidewallEngage === "climb") base = !base; if (!o.spindleCW) base = !base; wantPlus = base; }
+            else { wantPlus = o.profPattern === "oneway" ? (o.profDir === "+") : ((o.profDir === "+") !== (li % 2 === 1)); }
+            const x0 = wantPlus ? xa : xb, x1 = wantPlus ? xb : xa, step = (x1 >= x0 ? 1 : -1) * 3;
+            const zAt = x => MZ(Math.max(topH(x) + zOff, floor));
+            g0(x0, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(x0));
+            let px = x0;
+            for (let x = x0; step > 0 ? x <= x1 : x >= x1; x += step) { g1(x, y, zAt(x)); cutDist += Math.abs(x - px); px = x; }
+            g1(x1, y, zAt(x1)); g0z(safeZ);
           }
-          const x0 = wantPlus ? xa : xb, x1 = wantPlus ? xb : xa, step = (x1 >= x0 ? 1 : -1) * 3;
-          const zAt = x => MZ(Math.max(topH(x), floor));
-          g0(x0, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(x0));
-          let px = x0;
-          for (let x = x0; step > 0 ? x <= x1 : x >= x1; x += step) { g1(x, y, zAt(x)); cutDist += Math.abs(x - px); px = x; }
-          g1(x1, y, zAt(x1)); g0z(safeZ);
-        }
-      });
+        });
+      }
+    };
+    if (o.roughing) {
+      const allow = Math.max(0.2, o.finishAllowance || 1), rR = (o.roughToolDia || o.toolDia) / 2;
+      PC(`Roughing (leave ${f(allow)} ${uu}) then finishing skim`);
+      doSurface(rR, Math.max(1, o.roughStepover || o.toolDia), Math.max(0.5, o.roughStepdown || o.stepdown), allow, o.roughToolNum != null ? o.roughToolNum : o.toolNum, o.stockThick, "rough");
+      doSurface(R, o.stepover, allow + 1, 0, o.toolNum, minTop + allow + 0.5, "finish");
+    } else {
+      doSurface(R, o.stepover, o.stepdown, 0, null, o.stockThick, "profile");
     }
   }
   if (o.doPerimeter) {
@@ -5699,6 +5704,176 @@ function SkiDatabaseModal({ kind = "ski", onClose, onApply, onGhost }) {
 }
 
 // ══════════════ MAIN ══════════════
+// ── Topsheet Designer: true-scale pair template with paint/gradient/image/text layers + print export ──
+const TOPSHEET_PRINTERS = [
+  { name: "Miller Studio (Auburn, WA)", url: "https://www.millerstudio.us", note: "Matheson's printer" },
+  { name: "Sandwich Tech", url: "https://sandwichtechskis.com/printed-pbt-topsheets", note: "PBT · upload RGB (their RIP -> CMYK) · 150dpi · 1\" bleed · up to 180cm / 33cm wide" },
+  { name: "Shaggy's Copper Country", url: "https://www.skishaggys.com/products/custom-printed-ski-and-snowboard-topsheets", note: "PBT · 200dpi · CMYK · 1\" bleed · rich black C75 M68 Y67 K100" },
+];
+
+function TopsheetDesigner({ ski, C, onClose }) {
+  const bleed = 25.4, gap = 25;                                   // 1" bleed, gap between the pair
+  const W = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth), L = ski.length;
+  const tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;         // template mm: length (horizontal) x width (vertical, 2 skis)
+  const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
+  const skiYc = [bleed + W / 2, bleed + W + gap + W / 2];
+  const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0 }]);
+  const [sel, setSel] = useState("bg");
+  const [dpi, setDpi] = useState(150);
+  const [guides, setGuides] = useState(true);
+  const [crop, setCrop] = useState(true);
+  const [busy, setBusy] = useState("");
+  const cvRef = useRef(null), wrapRef = useRef(null), dragRef = useRef(null);
+  const [dispW, setDispW] = useState(880);
+  useEffect(() => { const el = wrapRef.current; if (!el) return; const set = () => setDispW(Math.max(360, el.clientWidth - 4)); const ro = new ResizeObserver(set); ro.observe(el); set(); return () => ro.disconnect(); }, []);
+  const scale = dispW / tL;
+
+  const drawLayers = (ctx, ppm) => {
+    const bg = layers.find(l => l.type === "bg");
+    if (bg) {
+      if (bg.kind === "gradient") { const a = (bg.angle || 0) * Math.PI / 180, dx = Math.cos(a) * tL * ppm, dy = Math.sin(a) * tW * ppm; const g = ctx.createLinearGradient(0, 0, dx, dy); g.addColorStop(0, bg.color); g.addColorStop(1, bg.c2); ctx.fillStyle = g; }
+      else ctx.fillStyle = bg.color;
+      ctx.fillRect(0, 0, tL * ppm, tW * ppm);
+    }
+    for (const l of layers) {
+      if (l.type === "img" && l.img) {
+        const w = l.wmm * ppm, h = w * (l.img.height / l.img.width);
+        ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1; ctx.translate(l.x * ppm, l.y * ppm); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.drawImage(l.img, -w / 2, -h / 2, w, h); ctx.restore();
+      } else if (l.type === "text") {
+        ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1; ctx.fillStyle = l.color; ctx.font = `${(l.bold ? "bold " : "")}${l.size * ppm}px ${l.font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.translate(l.x * ppm, l.y * ppm); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.fillText(l.text, 0, 0); ctx.restore();
+      }
+    }
+  };
+  const drawGuides = (ctx, ppm) => {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2; ctx.setLineDash([6, 5]);
+    for (const yc of skiYc) { ctx.beginPath(); outline.forEach((p, i) => { const x = (bleed + p.y) * ppm, y = (yc + p.x) * ppm; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1; ctx.strokeRect(bleed * ppm, bleed * ppm, (tL - 2 * bleed) * ppm, (tW - 2 * bleed) * ppm);
+    ctx.restore();
+  };
+  const drawCrop = (ctx, ppm) => { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(1, ppm * 0.3); const m = 12 * ppm, W2 = tL * ppm, H2 = tW * ppm; const corners = [[0, 0, 1, 1], [W2, 0, -1, 1], [0, H2, 1, -1], [W2, H2, -1, -1]]; corners.forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); };
+
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    cv.width = Math.round(tL * scale); cv.height = Math.round(tW * scale);
+    const ctx = cv.getContext("2d"); ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, cv.width, cv.height);
+    drawLayers(ctx, scale);
+    if (guides) drawGuides(ctx, scale);
+    if (crop) drawCrop(ctx, scale);
+    const s = layers.find(l => l.id === sel);
+    if (s && (s.type === "img" || s.type === "text")) {
+      let w, h; if (s.type === "img" && s.img) { w = s.wmm * scale; h = w * (s.img.height / s.img.width); } else { const ctx2 = ctx; ctx2.font = `${s.size * scale}px ${s.font}`; w = ctx2.measureText(s.text).width; h = s.size * scale; }
+      ctx.save(); ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(s.x * scale - w / 2 - 4, s.y * scale - h / 2 - 4, w + 8, h + 8); ctx.restore();
+    }
+  }, [layers, sel, guides, crop, scale, outline]);
+
+  const hit = (mx, my) => { const pmm = { x: mx / scale, y: my / scale }; for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); if (Math.abs(pmm.x - l.x) < w / 2 && Math.abs(pmm.y - l.y) < h / 2) return l.id; } else if (l.type === "text") { if (Math.abs(pmm.x - l.x) < l.text.length * l.size * 0.32 && Math.abs(pmm.y - l.y) < l.size * 0.7) return l.id; } } return null; };
+  const ptr = e => { const r = cvRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cvRef.current.width / r.width), y: (e.clientY - r.top) * (cvRef.current.height / r.height) }; };
+  const onDown = e => { const p = ptr(e); const id = hit(p.x, p.y); setSel(id || "bg"); if (id) { const l = layers.find(x => x.id === id); dragRef.current = { id, ox: p.x / scale - l.x, oy: p.y / scale - l.y }; } };
+  const onMove = e => { if (!dragRef.current) return; const p = ptr(e); const d = dragRef.current; setLayers(ls => ls.map(l => l.id === d.id ? { ...l, x: p.x / scale - d.ox, y: p.y / scale - d.oy } : l)); };
+  const onUp = () => { dragRef.current = null; };
+
+  const addImage = file => { const id = "img" + Date.now(); const img = new Image(); img.onload = () => setLayers(ls => [...ls, { id, type: "img", img, x: tL / 2, y: tW / 2, wmm: Math.min(tL, tW * 1.5) * 0.4, rot: 0, opacity: 1 }]); img.src = URL.createObjectURL(file); setSel(id); };
+  const addText = () => { const id = "t" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: "BLACK CHAPEL", x: tL / 2, y: tW / 2, size: 60, color: "#F0EDE4", font: "Oswald, Impact, sans-serif", bold: true, rot: 0, opacity: 1 }]); setSel(id); };
+  const upd = (id, patch) => setLayers(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
+  const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
+  const move = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); if (i < 1 && dir < 0) return ls; const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
+
+  const exportImg = async fmt => {
+    setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30));
+    const ppm = dpi / 25.4, oc = document.createElement("canvas");
+    oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm);
+    const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height);
+    drawLayers(ctx, ppm); if (crop) drawCrop(ctx, ppm);
+    oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-pair-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95);
+  };
+
+  const s = layers.find(l => l.id === sel);
+  const inp = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
+  const lab = { color: C.label, fontSize: 10, marginBottom: 2, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" };
+  const btn = (on) => ({ padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: on ? 700 : 400 });
+  const outPx = { w: Math.round(tL / 25.4 * dpi), h: Math.round(tW / 25.4 * dpi) };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ color: C.heading, fontSize: 13, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>TOPSHEET DESIGNER</span>
+          <span style={{ color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>pair · {(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}" incl. 1" bleed</span>
+        </div>
+        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "7px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>← Back to Design</button>
+      </div>
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{ width: 320, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <label style={{ ...btn(false), flex: 1, textAlign: "center" }}>+ Image<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && addImage(e.target.files[0])} /></label>
+            <button onClick={addText} style={{ ...btn(false), flex: 1 }}>+ Text</button>
+          </div>
+          <div style={{ ...lab, marginTop: 0 }}>LAYERS (drag on canvas to move)</div>
+          <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, marginBottom: 10, maxHeight: 150, overflowY: "auto" }}>
+            {layers.slice().reverse().map(l => (
+              <div key={l.id} onClick={() => setSel(l.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", cursor: "pointer", background: sel === l.id ? C.inputBg : "transparent", borderBottom: `1px solid ${C.inputBorder}`, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: sel === l.id ? C.heading : C.label }}>
+                <span style={{ flex: 1 }}>{l.type === "bg" ? "Background" : l.type === "img" ? "Image" : `"${l.text.slice(0, 12)}"`}</span>
+                {l.type !== "bg" && <>
+                  <span onClick={e => { e.stopPropagation(); move(l.id, 1); }} style={{ cursor: "pointer" }}>▲</span>
+                  <span onClick={e => { e.stopPropagation(); move(l.id, -1); }} style={{ cursor: "pointer" }}>▼</span>
+                  <span onClick={e => { e.stopPropagation(); del(l.id); }} style={{ cursor: "pointer", color: "#e8552a" }}>✕</span>
+                </>}
+              </div>
+            ))}
+          </div>
+          {s && s.type === "bg" && (<>
+            <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{[["solid", "Solid"], ["gradient", "Gradient"]].map(([v, t]) => <button key={v} onClick={() => upd("bg", { kind: v })} style={{ ...btn(s.kind === v), flex: 1 }}>{t}</button>)}</div>
+            <div style={lab}>Color</div><input type="color" value={s.color} onChange={e => upd("bg", { color: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} />
+            {s.kind === "gradient" && (<><div style={lab}>Color 2</div><input type="color" value={s.c2} onChange={e => upd("bg", { c2: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} /><div style={lab}>Angle {s.angle}°</div><input type="range" min={0} max={360} value={s.angle} onChange={e => upd("bg", { angle: +e.target.value })} style={{ width: "100%" }} /></>)}
+          </>)}
+          {s && s.type === "img" && (<>
+            <div style={lab}>Size {(s.wmm / 25.4).toFixed(1)}"</div><input type="range" min={20} max={Math.round(tL)} value={s.wmm} onChange={e => upd(s.id, { wmm: +e.target.value })} style={{ width: "100%" }} />
+            <div style={lab}>Rotate {s.rot || 0}°</div><input type="range" min={-180} max={180} value={s.rot || 0} onChange={e => upd(s.id, { rot: +e.target.value })} style={{ width: "100%" }} />
+            <div style={lab}>Opacity</div><input type="range" min={0} max={1} step={0.05} value={s.opacity != null ? s.opacity : 1} onChange={e => upd(s.id, { opacity: +e.target.value })} style={{ width: "100%" }} />
+          </>)}
+          {s && s.type === "text" && (<>
+            <div style={lab}>Text</div><input value={s.text} onChange={e => upd(s.id, { text: e.target.value })} style={inp} />
+            <div style={lab}>Font</div><select value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={inp}>{["Oswald, Impact, sans-serif", "Georgia, serif", "'Courier New', monospace", "Arial, sans-serif", "'Times New Roman', serif"].map(fn => <option key={fn} value={fn}>{fn.split(",")[0].replace(/'/g, "")}</option>)}</select>
+            <div style={lab}>Size {(s.size).toFixed(0)}mm</div><input type="range" min={10} max={300} value={s.size} onChange={e => upd(s.id, { size: +e.target.value })} style={{ width: "100%" }} />
+            <div style={lab}>Color</div><input type="color" value={s.color} onChange={e => upd(s.id, { color: e.target.value })} style={{ ...inp, height: 34, padding: 2 }} />
+            <div style={lab}>Rotate {s.rot || 0}°</div><input type="range" min={-180} max={180} value={s.rot || 0} onChange={e => upd(s.id, { rot: +e.target.value })} style={{ width: "100%" }} />
+          </>)}
+        </div>
+        <div ref={wrapRef} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, overflow: "auto", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={guides} onChange={e => setGuides(e.target.checked)} /> Ski + bleed guides</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={crop} onChange={e => setCrop(e.target.checked)} /> Crop marks</label>
+            <span style={{ marginLeft: "auto", color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>drag guides off before exporting</span>
+          </div>
+          <div style={{ background: "#0d0b09", borderRadius: 6, border: `1px solid ${C.panelBorder}`, padding: 6, overflow: "auto" }}>
+            <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} style={{ width: dispW, height: tW * scale, display: "block", cursor: "grab", touchAction: "none" }} />
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div>
+              <div style={lab}>Export DPI</div>
+              <div style={{ display: "flex", gap: 4 }}>{[150, 200, 300].map(d => <button key={d} onClick={() => setDpi(d)} style={btn(dpi === d)}>{d}</button>)}</div>
+            </div>
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 4 }}>{outPx.w.toLocaleString()} × {outPx.h.toLocaleString()} px</span>
+            <button disabled={!!busy} onClick={() => exportImg("png")} style={{ background: C.heading, color: C.bgDeep, border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{busy || "Export PNG (print-ready)"}</button>
+            <button disabled={!!busy} onClick={() => exportImg("jpg")} style={{ background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, padding: "9px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>JPG</button>
+          </div>
+          <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.5 }}>
+            <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>SEND TO A PRINTER</div>
+            <div style={{ color: C.labelDim, marginBottom: 6 }}>This ski: <b style={{ color: C.value }}>{(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}"</b> incl. 1" bleed · export ≥150dpi · RGB is fine for most (sublimation shops convert). Use rich black, not 100%K.</div>
+            {TOPSHEET_PRINTERS.map(p => (
+              <div key={p.name} style={{ marginBottom: 4 }}>
+                <a href={p.url} target="_blank" rel="noreferrer" style={{ color: C.heading, textDecoration: "none" }}>{p.name} ↗</a>
+                <span style={{ color: C.labelDim }}> — {p.note}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
   // Per-mode in-memory stash: when you toggle away from a mode, its design is parked here so toggling
@@ -5929,6 +6104,7 @@ export default function App() {
   const [previewSvg, setPreviewSvg] = useState(null);
   const [showToolpath, setShowToolpath] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
+  const [topsheetOpen, setTopsheetOpen] = useState(false);
   const [preview3D, setPreview3D] = useState(false);
   const [asymOpen, setAsymOpen] = useState(false);
   const openSpecPreview = useCallback(() => {
@@ -5945,7 +6121,7 @@ export default function App() {
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 6,
-      boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", partAxis: "y", offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
+      boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallStock: 0, sidewallEngage: "conventional" };
     try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; const inch = m.units === "inch"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.camV = d.camV; } return m; } } catch (e) {}
@@ -5953,7 +6129,7 @@ export default function App() {
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Switching units converts every length/feed field so the physical setup is unchanged (13 mm stays 0.512 in).
-  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallStock", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
+  const setCamUnits = u => setCamOpt(o => { if (o.units === u) return o; const fac = u === "inch" ? 1 / 25.4 : 25.4; const n = { ...o, units: u }; for (const k of ["stockThick", "safeZ", "stepdown", "outlineToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "outlineFeed", "taperFeed", "moldFeed", "slatFeed", "outlinePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "cutThrough", "tabHeight", "rampLen", "stepover", "sidewallStock", "moldMargin", "slatBase", "slatOverlap", "slatSheetW", "slatHoleDia", "slatHoleH", "slatHoleSpacing", "boreToolDia", "boreFeed", "borePlunge", "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "offsetX", "offsetY", "pocketToolDia", "pocketFeed", "pocketPlunge", "pocketL", "pocketW", "pocketDepth", "pocketCenterY", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance"]) if (typeof n[k] === "number") n[k] = +(n[k] * fac).toFixed(u === "inch" ? 4 : 2); try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
   // Mold-slat rib profiles (length × height): top edge = camber/rocker base curve, flat bottom. Auto-nests
   // N copies of each section into columns that respect the sheet width, so a whole rack cuts in one program.
   const slatPolys = useMemo(() => {
@@ -6016,18 +6192,18 @@ export default function App() {
   }, [ski.length, camOpt.op, camOpt.boreCenter, camOpt.boreSpaceX, camOpt.boreSpaceY, camOpt.boreCols, camOpt.boreRows, camOpt.units]);
   const camResult = useMemo(() => {
     try {
-      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, postKey: camOpt.postKey, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
+      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, postKey: camOpt.postKey, postOverride: camOpt.postOverride, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
       const opt = camOpt.op === "outline"
         ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen }
         : camOpt.op === "mold"
-        ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off" }
+        ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
         ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
         : camOpt.op === "bore"
         ? { ...b, doProfile: false, doPerimeter: false, borePts, toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge, boreDia: camOpt.boreDia, boreDepth: camOpt.boreDepth, boreHelix: camOpt.boreHelix }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallStock: camOpt.sidewallStock, sidewallEngage: camOpt.sidewallEngage };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallStock: camOpt.sidewallStock, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts]);
@@ -7454,6 +7630,13 @@ export default function App() {
           )}
         </AccordionSection>
 
+        <AccordionSection isOpen={sectionsOpen.topsheet !== false} onToggle={() => toggleSection("topsheet")} title="Topsheet Designer">
+          <button onClick={() => setTopsheetOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>◨  Design Topsheet</button>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            True-scale pair template with colors, gradients, uploaded art & text. Exports a print-ready file with 1" bleed for Miller Studio, Sandwich Tech, or Shaggy's.
+          </div>
+        </AccordionSection>
+
         <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 10, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             A one-page spec sheet for customers or your bench: dimensions, sidecut, flex, layup, and core mass. Add your own name and logo to white-label it.
@@ -7789,6 +7972,25 @@ export default function App() {
                     <input type="number" value={camOpt.sidewallStock} step={st} min={0} onChange={e => setCam("sidewallStock", parseFloat(e.target.value) || 0)} style={camInput} />
                   </div>
                 )}
+                {(isMold || camOpt.op === "taper") && (
+                  <div style={{ border: `1px solid ${camOpt.roughing ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.roughing ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
+                      <input type="checkbox" checked={camOpt.roughing} onChange={e => setCam("roughing", e.target.checked)} /> Rough + finish (2 passes)
+                    </label>
+                    {camOpt.roughing && (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 6 }}>
+                          {[["Rough tool #", "roughToolNum", 1], ["Rough \u00D8 " + uu, "roughToolDia", st], ["Leave " + uu, "finishAllowance", st], ["Rough stepover " + uu, "roughStepover", st], ["Rough stepdown " + uu, "roughStepdown", st]].map(([lab, key, step]) => (
+                            <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                          ))}
+                        </div>
+                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                          Hogs out the bulk with the big {camOpt.roughToolDia} {uu} bit (T{camOpt.roughToolNum}), leaving {camOpt.finishAllowance} {uu}, then a single finishing skim with the fine bit (T{camOpt.moldToolNum || camOpt.taperToolNum}). Cuts a huge mold in a fraction of the time.
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
                     <input type="checkbox" checked={camOpt.spindleCW} onChange={e => setCam("spindleCW", e.target.checked)} /> Spindle CW
@@ -7861,7 +8063,7 @@ export default function App() {
                 </div>
                 <div style={{ marginLeft: 4 }}>
                   <div style={{ color: C.label, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>Post-processor (controller)</div>
-                  <select value={camOpt.postKey} onChange={e => setCam("postKey", e.target.value)} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none" }}>
+                  <select value={camOpt.postKey} onChange={e => setCamOpt(o => { const n = { ...o, postKey: e.target.value, postOverride: null }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (er) {} return n; })} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none" }}>
                     <option value="centroid">Centroid CNC12 / Avid</option>
                     <option value="grbl">GRBL / Shapeoko / X-Carve</option>
                     <option value="mach">Mach3 / Mach4</option>
@@ -7869,6 +8071,45 @@ export default function App() {
                     <option value="fanuc">Fanuc / Haas (generic)</option>
                   </select>
                 </div>
+                {(() => {
+                  const prof = POST_PROFILES[camOpt.postKey] || POST_PROFILES.centroid;
+                  const ov = camOpt.postOverride || {};
+                  const eff = k => ov[k] != null ? ov[k] : prof[k];
+                  const setOv = (k, v) => setCam("postOverride", { ...ov, [k]: v });
+                  const changed = Object.keys(ov).some(k => JSON.stringify(ov[k]) !== JSON.stringify(prof[k]));
+                  const sel = { background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 7px", color: C.value, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
+                  const lab = { color: C.label, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" };
+                  return (
+                    <div style={{ marginLeft: 4, display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                      <div>
+                        <div style={lab}>Tool change</div>
+                        <select value={eff("tc")} onChange={e => setOv("tc", e.target.value)} style={sel}>
+                          <option value="tm6">T# then M6</option>
+                          <option value="m6t">M6 then T#</option>
+                          <option value="manual">Manual pause (M0)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div style={lab}>Comments</div>
+                        <select value={eff("comment")} onChange={e => setOv("comment", e.target.value)} style={sel}>
+                          <option value=";">; semicolon</option>
+                          <option value="()">( ) parens</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div style={lab}>Decimals</div>
+                        <select value={eff("decimals") == null ? "auto" : String(eff("decimals"))} onChange={e => setOv("decimals", e.target.value === "auto" ? null : parseInt(e.target.value))} style={sel}>
+                          <option value="auto">auto</option>
+                          <option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                        </select>
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", color: C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 5 }}>
+                        <input type="checkbox" checked={!!eff("lineNum")} onChange={e => setOv("lineNum", e.target.checked)} /> Line numbers
+                      </label>
+                      {changed && <button onClick={() => setCam("postOverride", null)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, padding: "5px 8px", fontSize: 10.5, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace", marginBottom: 1 }}>reset to {prof.name.split(" ")[0]}</button>}
+                    </div>
+                  );
+                })()}
                 {camResult.stats && camMachine && (
                   <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? "#8ab98a" : "#e8552a" }}>
                     {camMachine.fits ? "✓ fits the bed" : "✗ exceeds the bed"} · part {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
@@ -7888,6 +8129,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {topsheetOpen && <TopsheetDesigner ski={ski} C={C} onClose={() => setTopsheetOpen(false)} />}
       {showToolpath && <ToolpathPreviewModal gcode={camResult.gcode} stats={camResult.stats} onClose={() => setShowToolpath(false)} />}
 
       {previewSvg && (
