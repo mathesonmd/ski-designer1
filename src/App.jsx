@@ -2928,8 +2928,9 @@ function drawToolpathCanvas(cv, gcode, machine) {
   let mnx = bx0, mxx = bx1, mny = by0, mxy = by1;
   if (hasBed) { mxx = Math.max(mxx, bedX1); mxy = Math.max(mxy, bedY1); }
   const bw = (mxx - mnx) || 1, bh = (mxy - mny) || 1, pad = 26;
-  const s = Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh);
-  const ox = (W - bw * s) / 2 - mnx * s, oy = (H - bh * s) / 2 - mny * s;
+  const sBase = Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh);
+  const zoom = (view && view.zoom) || 1, s = sBase * zoom;
+  const ox = (W - bw * s) / 2 - mnx * s + (view ? view.panX || 0 : 0), oy = (H - bh * s) / 2 - mny * s + (view ? view.panY || 0 : 0);
   const MXc = (gx, gy) => ox + gx * s;
   const MYc = (gx, gy) => H - (oy + gy * s);
   if (hasBed) {
@@ -2953,13 +2954,33 @@ function drawToolpathCanvas(cv, gcode, machine) {
     for (const g of arr) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
     ctx.stroke();
   });
+  return { sBase, s, ox, oy, mnx, mny, bw, bh, H };
 }
 
-// Live right-side toolpath view — redraws whenever the G-code or size changes.
+// Live right-side toolpath view — redraws whenever the G-code or size changes. Zoom (wheel/buttons) + pan (drag).
 function ToolpathView({ gcode, width, height, machine }) {
-  const ref = useRef(null);
-  useEffect(() => { const cv = ref.current; if (!cv) return; cv.width = Math.max(1, Math.floor(width)); cv.height = Math.max(1, Math.floor(height)); drawToolpathCanvas(cv, gcode, machine); }, [gcode, width, height, machine]);
-  return <canvas ref={ref} style={{ width, height, display: "block" }} />;
+  const ref = useRef(null), tf = useRef(null), drag = useRef(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  useEffect(() => { const cv = ref.current; if (!cv) return; cv.width = Math.max(1, Math.floor(width)); cv.height = Math.max(1, Math.floor(height)); tf.current = drawToolpathCanvas(cv, gcode, machine, { zoom, panX: pan.x, panY: pan.y }); }, [gcode, width, height, machine, zoom, pan]);
+  const ptr = e => { const cv = ref.current, r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height), sc: cv.width / r.width }; };
+  const onWheel = e => { e.preventDefault(); const t = tf.current; if (!t) return; const p = ptr(e); const wx = (p.x - t.ox) / t.s, wy = (t.H - p.y - t.oy) / t.s; const nz = Math.max(1, Math.min(24, zoom * (1 - e.deltaY * 0.0015))); const ns = t.sBase * nz; setZoom(nz); setPan({ x: (p.x - wx * ns) - ((ref.current.width - t.bw * ns) / 2 - t.mnx * ns), y: (t.H - p.y - wy * ns) - ((t.H - t.bh * ns) / 2 - t.mny * ns) }); };
+  const onDown = e => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, sc: ptr(e).sc }; };
+  const onMove = e => { if (!drag.current) return; const d = drag.current; setPan({ x: d.px + (e.clientX - d.x) * d.sc, y: d.py + (e.clientY - d.y) * d.sc }); };
+  const onUp = () => { drag.current = null; };
+  const btn = { minWidth: 26, height: 24, background: "rgba(20,16,13,0.88)", border: "1px solid rgba(155,147,136,0.32)", color: "#c8935a", borderRadius: 3, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1, padding: "0 7px" };
+  return (
+    <div style={{ position: "relative", width, height, overflow: "hidden" }}>
+      <canvas ref={ref} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} style={{ width, height, display: "block", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }} />
+      <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+        <button onClick={() => setZoom(z => Math.max(1, z / 1.4))} style={btn}>−</button>
+        <span style={{ ...btn, cursor: "default", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#9b9388" }}>{Math.round(zoom * 100)}%</span>
+        <button onClick={() => setZoom(z => Math.min(24, z * 1.4))} style={btn}>+</button>
+        <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} style={btn}>Fit</button>
+      </div>
+      <div style={{ position: "absolute", bottom: 6, left: 10, fontSize: 9.5, color: "rgba(155,147,136,0.6)", fontFamily: "'JetBrains Mono', monospace", pointerEvents: "none" }}>scroll to zoom · drag to pan</div>
+    </div>
+  );
 }
 
 // GPU 3D toolpath view (Three.js): cut moves coloured by depth, rapids dim, orbit/zoom, ground grid.
