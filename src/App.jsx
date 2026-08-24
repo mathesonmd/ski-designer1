@@ -211,7 +211,7 @@ const DEFAULT_SKI={
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   asymSidecut:false,waistOutside:98,waistInside:98,
   asymContact:false,tipLengthOutside:240,tipLengthInside:240,tailLengthOutside:170,tailLengthInside:170,
-  tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,camberZones:1,
+  tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,camberZones:1,camberSmooth:0.35,
   waistPosition:0.48,
   // How waistPosition is interpreted: false (default) = fraction of the contact-to-contact span
   // (0.5 = midway between the contacts); true = fraction of the FULL tip-to-tail length (0.5 =
@@ -897,9 +897,14 @@ function sideProfileHeightAt(ski, xmm) {
   const tt = span > 0 ? (xmm - tailTakeoff) / span : 0.5;
   const zones = Math.max(1, Math.round(ski.camberZones || 1));
   if (zones <= 1) return ski.camberHeight * 4 * tt * (1 - tt);
-  // Multi-zone camber (triple camber and beyond): N humps across the running length, the base touching
-  // down between each so you get N distinct camber sections. Feeds the mold, slats, STL, and side view.
-  return ski.camberHeight * Math.abs(Math.sin(tt * zones * Math.PI));
+  // Multi-zone camber (triple camber and beyond): N rounded humps across the running length. A raised
+  // cosine keeps the valleys between humps smooth instead of pinching to a sharp point, and the smoothness
+  // control lifts those valleys into small rockers (the way Never Summer's CRC sits camber zones between
+  // little rocker zones). 0 = valleys touch the base, 1 = valleys fill in toward one continuous camber.
+  const raw = 0.5 - 0.5 * Math.cos(tt * zones * 2 * Math.PI);   // N humps, rounded valleys, 0 at both ends
+  const s = Math.max(0, Math.min(1, ski.camberSmooth != null ? ski.camberSmooth : 0.35));
+  const endEnv = Math.sin(tt * Math.PI);   // 0 at the takeoffs so the tip/tail rocker blend stays clean
+  return ski.camberHeight * (raw + s * endEnv * (1 - raw));
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
@@ -7677,11 +7682,12 @@ export default function App() {
           {inputField("Tail Rise", "tailHeight", 5, 60)}
           {inputField("Camber", "camberHeight", 0, 10, 0.5)}
           {inputField("Camber zones", "camberZones", 1, 5, 1)}
-          {ski.camberZones > 1 && (
+          {ski.camberZones > 1 && (<>
+            {inputField("Zone smoothness", "camberSmooth", 0, 1, 0.05)}
             <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-              {ski.camberZones} camber humps across the running length (triple camber at 3), base touching between each. The press mold and slats follow it automatically.
+              {ski.camberZones} camber humps across the running length (triple camber at 3), with small rockers between. Smoothness lifts the dips between zones: 0 sits them on the base, 1 blends toward one continuous camber. The mold and slats follow it automatically.
             </div>
-          )}
+          </>)}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
