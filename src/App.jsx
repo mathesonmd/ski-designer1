@@ -1119,9 +1119,9 @@ function printTiledPlan(ski, paper, opts) {
     + `.pg{width:${pw}mm;height:${ph}mm;page-break-after:always;position:relative;overflow:hidden}.pg svg{display:block}`
     + `.lbl{position:absolute;bottom:1.5mm;left:2mm;font-size:8pt;color:#444;font-family:monospace}`
     + `.cover{padding:16mm;page-break-after:always}.cover h1{font-size:20px;letter-spacing:1px;margin:0 0 10px}.cover p{font-size:13px;line-height:1.5;max-width:640px}`
-    + `.np{margin:12mm 16mm;padding:9px 18px;font-size:14px;cursor:pointer}`
+    + `.np{position:sticky;top:0;z-index:5;display:block;width:100%;padding:12px;font-size:15px;font-weight:700;cursor:pointer;border:none;background:#e8552a;color:#fff;font-family:inherit}`
     + `@media screen{.pg,.cover{border:1px solid #ccc;margin:10px auto;background:#fff}}@media print{.np{display:none}}`
-    + `</style></head><body>${cover}${pages}<button class="np" onclick="window.print()">Print / Save PDF</button></body></html>`;
+    + `</style></head><body><button class="np" onclick="window.print()">Print / Save PDF</button>${cover}${pages}</body></html>`;
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
 }
