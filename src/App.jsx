@@ -1062,6 +1062,57 @@ function exportInserts(ski, fmt) {
     downloadFile(s, `bcs-inserts-${ski.length}mm.svg`, "image/svg+xml");
   }
 }
+// Tiled 1:1 print of the ski plan across A4 or Letter pages, for builders with no CNC or large-format
+// printer: print at actual size, trim to the seam lines, tape into one full-size template, cut a jig. Uses
+// the browser print dialog (Save as PDF), so no external library. A 100 mm square lets you verify the scale.
+function printTiledPlan(ski, paper, opts) {
+  opts = opts || {};
+  let outline = [];
+  try { outline = getFullOutlinePoints(ski); } catch (e) { return; }
+  if (!outline.length) return;
+  const maxHalf = Math.max(...outline.map(p => Math.abs(p.x))) || 1;
+  const margin = 12;
+  const H = 2 * maxHalf + 2 * margin, W = ski.length + 2 * margin;
+  const toP = p => ({ x: p.y + margin, y: p.x + H / 2 });   // ski lies horizontal, centered
+  const pathOf = pts => pts.map((p, i) => { const s = toP(p); return (i ? "L" : "M") + s.x.toFixed(2) + "," + s.y.toFixed(2); }).join("") + "Z";
+  const pathD = pathOf(outline);
+  let coreD = "";
+  if (opts.core !== false) { try { coreD = pathOf(applyVCutToCore(ski)); } catch (e) {} }
+  const c0 = toP({ x: 0, y: 0 }), c1 = toP({ x: 0, y: ski.length });
+  const pg = paper === "letter" ? { w: 279.4, h: 215.9 } : { w: 297, h: 210 };
+  const pm = 5, pw = pg.w - 2 * pm, ph = pg.h - 2 * pm, ov = 10;
+  const stepX = pw - ov, stepY = ph - ov;
+  const cols = Math.max(1, Math.ceil((W - ov) / stepX)), rows = Math.max(1, Math.ceil((H - ov) / stepY));
+  const reg = (x, y) => `<path d="M${x - 3},${y} h6 M${x},${y - 3} v6" stroke="#e8552a" stroke-width="0.25"/>`;
+  let pages = "", n = 0;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    n++;
+    const vx = c * stepX, vy = r * stepY;
+    const crosses = reg(vx + 2, vy + 2) + reg(vx + pw - 2, vy + 2) + reg(vx + 2, vy + ph - 2) + reg(vx + pw - 2, vy + ph - 2);
+    const seams = (c < cols - 1 ? `<line x1="${vx + stepX}" y1="${vy}" x2="${vx + stepX}" y2="${vy + ph}" stroke="#bbb" stroke-width="0.2" stroke-dasharray="2,2"/>` : "")
+      + (r < rows - 1 ? `<line x1="${vx}" y1="${vy + stepY}" x2="${vx + pw}" y2="${vy + stepY}" stroke="#bbb" stroke-width="0.2" stroke-dasharray="2,2"/>` : "");
+    pages += `<div class="pg"><svg width="${pw}mm" height="${ph}mm" viewBox="${vx} ${vy} ${pw} ${ph}">`
+      + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
+      + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
+      + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
+      + seams + crosses + `</svg><div class="lbl">${(ski.designName || "Ski")} · R${r + 1}C${c + 1} · ${n}/${rows * cols}</div></div>`;
+  }
+  const cover = `<div class="cover"><h1>${(ski.designName || "Ski")} — 1:1 template</h1>`
+    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together, matching the orange corner crosses. The blue dashed line is the centerline (mirror here to build one half). The green dashed line is the core outline.</p>`
+    + `<p>Scale check: the square below must measure exactly 100 mm on each side. If it doesn't, turn off any scaling in your print dialog and reprint.</p>`
+    + `<svg width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#000" stroke-width="0.4"/><text x="50" y="52" font-size="7" text-anchor="middle" font-family="monospace">100 mm</text></svg></div>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${(ski.designName || "Ski")} 1:1</title><style>`
+    + `@page{size:${paper === "letter" ? "letter" : "A4"} landscape;margin:${pm}mm;}`
+    + `*{box-sizing:border-box}body{margin:0;font-family:-apple-system,Segoe UI,Roboto,monospace;color:#111}`
+    + `.pg{width:${pw}mm;height:${ph}mm;page-break-after:always;position:relative;overflow:hidden}.pg svg{display:block}`
+    + `.lbl{position:absolute;bottom:1.5mm;left:2mm;font-size:8pt;color:#444;font-family:monospace}`
+    + `.cover{padding:16mm;page-break-after:always}.cover h1{font-size:20px;letter-spacing:1px;margin:0 0 10px}.cover p{font-size:13px;line-height:1.5;max-width:640px}`
+    + `.np{margin:12mm 16mm;padding:9px 18px;font-size:14px;cursor:pointer}`
+    + `@media screen{.pg,.cover{border:1px solid #ccc;margin:10px auto;background:#fff}}@media print{.np{display:none}}`
+    + `</style></head><body>${cover}${pages}<button class="np" onclick="window.print()">Print / Save PDF</button></body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
 // ── Export orientation ──
 // Canonical geometry is authored in (a, t): a = along-length (0..L, tail→tip), t = lateral offset
 // (width for plan views; thickness/height for profile views). orientPt projects a canonical point
@@ -7672,7 +7723,7 @@ export default function App() {
                     <div style={{ marginTop: 8 }}>{inputField("Bumps (count)", "serrationCount", 2, 24, 1)}</div>
                     {inputField("Bump depth (mm)", "serrationDepth", 0.5, 6, 0.5)}
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      A wave on the sidecut between the contacts for extra grip (magnetraction-style), tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.
+                      A wave on the sidecut between the contacts for extra grip, tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.
                     </div>
                   </>)}
                 </div>
@@ -7910,7 +7961,7 @@ export default function App() {
 
         <AccordionSection isOpen={sectionsOpen.inserts !== false} onToggle={() => toggleSection("inserts")} title="Metal Inserts (flex)">
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-            Shaped titanal or carbon reinforcement on the plan view. A tapered strip stiffens underfoot and softens the tips (Rustler); a frame holds torsion while cutting weight (Mantra). Add as many as you want, each with its own shape, material, and layer. They render on the shape, export as cut files, and add to the weight. Stiffness effect along the length is coming next.
+            Shaped metal or carbon reinforcement placed on the plan view. Add as many as you want, each with its own shape, material, and layer. They export as cut files and add to the weight.
           </div>
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             {[["+ Tapered strip", "strip"], ["+ Frame", "frame"]].map(([lab, ty]) => (
@@ -8153,6 +8204,17 @@ export default function App() {
 
         {groupHeader(SIDEBAR_GROUPS[4])}
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
+          <div style={{ marginBottom: 11, paddingBottom: 11, borderBottom: `1px solid ${C.inputBorder}` }}>
+            <div style={{ color: C.heading, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>1:1 TILED PRINT (no CNC needed)</div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+              Print the full-size plan across A4 or Letter pages, tape them together, and cut a jig by hand. Includes the outline, centerline, core outline, and a 100 mm scale-check square.
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["Print A4", "a4"], ["Print Letter", "letter"]].map(([lab, pp]) => (
+                <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
+              ))}
+            </div>
+          </div>
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
