@@ -6204,7 +6204,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
-  "outlineToolDia", "baseToolDia", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
+  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
@@ -6482,7 +6482,7 @@ export default function App() {
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true, stockL: 0, stockW: 0, centerInStock: true,
-      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, bladeOffset: 1, dragLeadIn: 12,
+      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
@@ -6569,7 +6569,7 @@ export default function App() {
         : camOpt.op === "bore"
         ? { ...b, doProfile: false, doPerimeter: false, borePts, toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge, boreDia: camOpt.boreDia, boreDepth: camOpt.boreDepth, boreHelix: camOpt.boreHelix }
         : camOpt.op === "base"
-        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn }
+        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
@@ -6589,12 +6589,13 @@ export default function App() {
     return { short: mShort, long: mLong, fits };
   }, [camOpt.showMachine, camOpt.machineX, camOpt.machineY, camOpt.units, camResult]);
   const camStock = useMemo(() => {
-    const L = camOpt.stockL || 0, W = camOpt.stockW || 0;                 // user's real stock, display units
+    const isB = camOpt.op === "base";
+    const L = (isB ? camOpt.baseStockL : camOpt.stockL) || 0, W = (isB ? camOpt.baseStockW : camOpt.stockW) || 0;   // base op uses its own material size
     if (!L || !W || !camResult || !camResult.stats) return null;
     const xExt = camOpt.partAxis === "y" ? W : L, yExt = camOpt.partAxis === "y" ? L : W;   // along machine X / Y
     const s = camResult.stats, mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
     return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2) };
-  }, [camOpt.stockL, camOpt.stockW, camOpt.partAxis, camOpt.units, camResult]);
+  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camResult]);
   const openSetupSheet = useCallback(() => {
     const s = camResult.stats; if (!s) return;
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
@@ -8216,7 +8217,7 @@ export default function App() {
             return (
               <>
                 <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
-                  You cut two files here. First the outline, from a flat blank. Glue on your sidewalls and let them cure, then cut the taper on the assembled core. Pick an operation below, generate its file, then switch and do the other.
+                  This makes the G-code for every part of a ski. A core is two files: cut the outline from a flat blank, then glue on the sidewalls, let them cure, and cut the taper on the assembled core. The base is cut from P-tex with a drag knife, and molds and slats are cut from MDF. Pick an operation below, enter its material size, and generate the file. Work through them one at a time.
                 </div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6, justifyContent: "flex-end" }}>
                   <button onClick={() => setAllCamSec(true)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Expand all</button>
@@ -8267,6 +8268,18 @@ export default function App() {
                     </label>
                     <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>Only the outline cut centers — zero at the blank's bottom-left corner.</div>
                     {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>) : isBaseOp ? (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR BASE MATERIAL (P-tex sheet)</div>
+                    <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      This is the base sheet you cut with the drag knife, NOT the core blank. It's thin and usually oversized. Enter the sheet you're laying on the bed.{camResult.stats ? ` Min needed ${camResult.stats.stockX}×${camResult.stats.stockY} ${camResult.stats.unit}.` : ""}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "baseStockL"], ["Width", "baseStockW"], ["Thick", "baseStockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? (key === "baseStockThick" ? 0.01 : 0.5) : (key === "baseStockThick" ? 0.5 : 10)} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, fontFamily: "'JetBrains Mono', monospace" }}>Zero at the bottom-left corner of the base sheet. Tape or vacuum it down flat.</div>
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your base sheet" : `✗ exceeds sheet by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS</div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
