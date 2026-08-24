@@ -211,7 +211,7 @@ const DEFAULT_SKI={
   length:1800,tipWidth:132,waistWidth:98,tailWidth:120,
   asymSidecut:false,waistOutside:98,waistInside:98,
   asymContact:false,tipLengthOutside:240,tipLengthInside:240,tailLengthOutside:170,tailLengthInside:170,
-  tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,
+  tipLength:240,tailLength:170,tipHeight:45,tailHeight:30,camberHeight:3,camberZones:1,
   waistPosition:0.48,
   // How waistPosition is interpreted: false (default) = fraction of the contact-to-contact span
   // (0.5 = midway between the contacts); true = fraction of the FULL tip-to-tail length (0.5 =
@@ -228,6 +228,7 @@ const DEFAULT_SKI={
   // triangular region beyond the V is fill material. Each end is independent (on/off + extension mm
   // past the contact toward the end).
   coreEndExt:50,    // mm the core extends past each contact point when no V-cut (0 = ends at contact)
+  serratedEdge:false, serrationCount:7, serrationDepth:2,   // wavy / magnetraction-style edge between contacts
   vcutTip:false, vcutTipExt:120,
   vcutTail:false, vcutTailExt:120,
   // Export orientation for all CNC files: "vertical" (portrait, length up the page) or
@@ -630,7 +631,7 @@ function computeOutline(ski) {
   const tipContactY = L - TL, tailContactY = TAIL;
   const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
   const waistY = resolveWaistY(ski);
-  const nSamplesSidecut = 60, nSamplesShape = 60;
+  const nSamplesSidecut = ski.serratedEdge ? 200 : 60, nSamplesShape = 60;
 
   const tipR = sampleShape(ski.tipNodesR, nSamplesShape);
   const tipL = ski.tipSymmetric ? tipR : sampleShape(ski.tipNodesL, nSamplesShape);
@@ -648,23 +649,27 @@ function computeOutline(ski) {
         y: (1 - pt.y) * tailCY,
       });
     }
+    // Serrated (wavy / magnetraction-style) edge: a wave laid over the sidecut between the contacts,
+    // tapered to zero at each contact so it blends into the running edge. Both edges wave in phase, so the
+    // ski widens at the bumps and adds contact points. Off = smooth sidecut.
+    const serr = (y) => {
+      if (!ski.serratedEdge || !(ski.serrationCount > 0) || !(ski.serrationDepth > 0) || y <= tailCY || y >= tipCY) return 0;
+      const ph = (y - tailCY) / (tipCY - tailCY);
+      return Math.sin(ph * Math.PI) * ski.serrationDepth * Math.sin(ph * ski.serrationCount * 2 * Math.PI);
+    };
     // Sidecut: tail-contact (width=TAW) → waist (width=WW)
     const tailRunLen = waistY - tailCY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
       const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
-      side.push({
-        x: sign * (tw2 + b * (ww2 - tw2)),
-        y: tailCY + t * tailRunLen,
-      });
+      const y = tailCY + t * tailRunLen;
+      side.push({ x: sign * (tw2 + b * (ww2 - tw2) + serr(y)), y });
     }
     // Sidecut: waist → tip-contact (width=TW)
     const tipRunLen = tipCY - waistY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
       const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
-      side.push({
-        x: sign * (ww2 + b * (tipw2 - ww2)),
-        y: waistY + t * tipRunLen,
-      });
+      const y = waistY + t * tipRunLen;
+      side.push({ x: sign * (ww2 + b * (tipw2 - ww2) + serr(y)), y });
     }
     // Tip curve: pt.y=0 is tip-contact (skiY=tipCY), pt.y=1 is nose-end (skiY=L)
     const tipSpan = L - tipCY;
@@ -890,7 +895,11 @@ function sideProfileHeightAt(ski, xmm) {
   }
   const span = tipTakeoff - tailTakeoff;
   const tt = span > 0 ? (xmm - tailTakeoff) / span : 0.5;
-  return ski.camberHeight * 4 * tt * (1 - tt);
+  const zones = Math.max(1, Math.round(ski.camberZones || 1));
+  if (zones <= 1) return ski.camberHeight * 4 * tt * (1 - tt);
+  // Multi-zone camber (triple camber and beyond): N humps across the running length, the base touching
+  // down between each so you get N distinct camber sections. Feeds the mold, slats, STL, and side view.
+  return ski.camberHeight * Math.abs(Math.sin(tt * zones * Math.PI));
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
@@ -7554,6 +7563,18 @@ export default function App() {
                     ? "0.5 = geometric center of the ski (fraction of full length)."
                     : "0.5 = midway between the contact points (fraction of running edge)."}
                 </div>
+                <div style={{ border: `1px solid ${ski.serratedEdge ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6, padding: "8px 10px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: ski.serratedEdge ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
+                    <input type="checkbox" checked={!!ski.serratedEdge} onChange={e => setSki(s => ({ ...s, serratedEdge: e.target.checked }))} /> SERRATED EDGE (wavy){ski.serratedEdge ? " · ON" : ""}
+                  </label>
+                  {ski.serratedEdge && (<>
+                    <div style={{ marginTop: 8 }}>{inputField("Bumps (count)", "serrationCount", 2, 24, 1)}</div>
+                    {inputField("Bump depth (mm)", "serrationDepth", 0.5, 6, 0.5)}
+                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      A wave on the sidecut between the contacts for extra grip (magnetraction-style), tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.
+                    </div>
+                  </>)}
+                </div>
                 {/* ── Asymmetric (advanced) — all left/right asymmetry contained here so symmetric skis are untouched ── */}
                 <div style={{ border: `1px solid ${(ski.asymSidecut || ski.asymContact) ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6 }}>
                   <button onClick={() => setAsymOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", cursor: "pointer", padding: "8px 10px", color: (ski.asymSidecut || ski.asymContact) ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
@@ -7655,6 +7676,12 @@ export default function App() {
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
           {inputField("Camber", "camberHeight", 0, 10, 0.5)}
+          {inputField("Camber zones", "camberZones", 1, 5, 1)}
+          {ski.camberZones > 1 && (
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              {ski.camberZones} camber humps across the running length (triple camber at 3), base touching between each. The press mold and slats follow it automatically.
+            </div>
+          )}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
