@@ -1077,7 +1077,18 @@ function printTiledPlan(ski, paper, opts) {
   const pathOf = pts => pts.map((p, i) => { const s = toP(p); return (i ? "L" : "M") + s.x.toFixed(2) + "," + s.y.toFixed(2); }).join("") + "Z";
   const pathD = pathOf(outline);
   let coreD = "";
-  if (opts.core !== false) { try { coreD = pathOf(applyVCutToCore(ski)); } catch (e) {} }
+  // applyVCutToCore returns {x:length, y:lateral} — the opposite of getFullOutlinePoints — so swap it back.
+  if (opts.core !== false) { try { coreD = pathOf(applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }))); } catch (e) {} }
+  let baseD = "";
+  // Base cut line (reflects the edge wrap and inset), in the same {x:lateral, y:length} frame as the outline.
+  try {
+    const eInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0, eWrap = ski.edgeWrap || "full";
+    let be;
+    if (eWrap === "contact" && eInset > 0) be = getContactBaseCutLoop(ski, eInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0);
+    else if (eInset > 0) be = offsetPolygonInward(getFullOutlinePoints(ski), eInset);
+    else be = getFullOutlinePoints(ski);
+    if (be && be.length >= 3) baseD = pathOf(be);
+  } catch (e) {}
   const c0 = toP({ x: 0, y: 0 }), c1 = toP({ x: 0, y: ski.length });
   const pg = paper === "letter" ? { w: 279.4, h: 215.9 } : { w: 297, h: 210 };
   const pm = 5, pw = pg.w - 2 * pm, ph = pg.h - 2 * pm, ov = 10;
@@ -1093,12 +1104,13 @@ function printTiledPlan(ski, paper, opts) {
       + (r < rows - 1 ? `<line x1="${vx}" y1="${vy + stepY}" x2="${vx + pw}" y2="${vy + stepY}" stroke="#bbb" stroke-width="0.2" stroke-dasharray="2,2"/>` : "");
     pages += `<div class="pg"><svg width="${pw}mm" height="${ph}mm" viewBox="${vx} ${vy} ${pw} ${ph}">`
       + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
+      + (baseD ? `<path d="${baseD}" fill="none" stroke="#c88a3a" stroke-width="0.3" stroke-dasharray="2,2"/>` : "")
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
       + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
       + seams + crosses + `</svg><div class="lbl">${(ski.designName || "Ski")} · R${r + 1}C${c + 1} · ${n}/${rows * cols}</div></div>`;
   }
   const cover = `<div class="cover"><h1>${(ski.designName || "Ski")} — 1:1 template</h1>`
-    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together, matching the orange corner crosses. The blue dashed line is the centerline (mirror here to build one half). The green dashed line is the core outline.</p>`
+    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together, matching the orange corner crosses. Blue dashed is the centerline (mirror here for a half). Amber dashed is the base cut line (follows the edge wrap and inset). Green dashed is the core outline.</p>`
     + `<p>Scale check: the square below must measure exactly 100 mm on each side. If it doesn't, turn off any scaling in your print dialog and reprint.</p>`
     + `<svg width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#000" stroke-width="0.4"/><text x="50" y="52" font-size="7" text-anchor="middle" font-family="monospace">100 mm</text></svg></div>`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${(ski.designName || "Ski")} 1:1</title><style>`
