@@ -229,6 +229,7 @@ const DEFAULT_SKI={
   // past the contact toward the end).
   coreEndExt:50,    // mm the core extends past each contact point when no V-cut (0 = ends at contact)
   serratedEdge:false, serrationCount:7, serrationDepth:2,   // wavy / magnetraction-style edge between contacts
+  inserts:[],   // shaped metal/carbon reinforcement (Mantra frame / Rustler strip)
   vcutTip:false, vcutTipExt:120,
   vcutTail:false, vcutTailExt:120,
   // Export orientation for all CNC files: "vertical" (portrait, length up the page) or
@@ -559,11 +560,24 @@ function computeBOM(ski) {
   const maxW = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth);
   // Epoxy: ~ wet-out for all fiber layers at ~250 g/m^2 per layer-side, in kg.
   const epoxyKg = (glassM2 + carbonM2) * 0.25 + areaM2 * 0.15;
+  // Shaped metal/carbon inserts: plan-view area × sheet thickness × density, added to the weight.
+  let insertMassKg = 0, insertAreaM2 = 0;
+  for (const ins of (ski.inserts || [])) {
+    try {
+      const pl = insertPolys(ski, ins);
+      let a = Math.abs(_polyArea(pl.outer));
+      if (pl.inner) a -= Math.abs(_polyArea(pl.inner));   // mm^2 (frame is hollow)
+      const thick = (METALS[ins.material] && METALS[ins.material].thick) || 0.5;
+      const dens = (ins.material || "").startsWith("carbon") ? 1.6e-3 : 2.8e-3;   // g/mm^3
+      insertMassKg += (a * thick * dens) / 1000;
+      insertAreaM2 += a / 1e6;
+    } catch (e) {}
+  }
   return {
     areaM2, perimM: perimMM / 1000, coreVolL, coreMassKg, maxThick, density,
     blank: { L: ski.length, W: Math.ceil(maxW + 10), T: Math.ceil(maxThick + 2) },
     edgeLenM, edgeWrap, glassLayers, glassM2, metalM2, carbonLayers, carbonM2,
-    baseM2: areaM2, topsheetM2: areaM2, inserts, epoxyKg,
+    baseM2: areaM2, topsheetM2: areaM2, inserts, epoxyKg, insertMassKg, insertAreaM2,
   };
 }
 
@@ -624,6 +638,36 @@ function sideContact(ski, side) {
   const tipL = side === "out" ? ski.tipLengthOutside : ski.tipLengthInside;
   const tailL = side === "out" ? ski.tailLengthOutside : ski.tailLengthInside;
   return { tipL: tipL != null ? tipL : ski.tipLength, tailL: tailL != null ? tailL : ski.tailLength };
+}
+
+// Shaped metal/carbon inserts (Mantra frame, Rustler tapered strip): reinforcement shapes placed on the
+// plan view. Each insert is symmetric about the centerline, defined parametrically now (extent + widths at
+// tail/waist/tip, plus a border width for frames) and rendered/exported/weighed as a polygon. Returns the
+// outer loop and, for frames, an inner cutout loop. Ski coords: x = lateral, y = length (0 tail → L tip).
+function insertPolys(ski, ins) {
+  const L = ski.length;
+  const y0 = (ins.posStart != null ? ins.posStart : 0.32) * L;
+  const y1 = (ins.posEnd != null ? ins.posEnd : 0.68) * L;
+  const wT = ins.wTail != null ? ins.wTail : 36, wW = ins.wWaist != null ? ins.wWaist : 56, wTp = ins.wTip != null ? ins.wTip : 36;
+  const halfAt = (f) => {   // f 0..1 across the span → half-width (tail → waist → tip, smoothstep)
+    let w;
+    if (f <= 0.5) { const t = f / 0.5, b = t * t * (3 - 2 * t); w = wT + b * (wW - wT); }
+    else { const t = (f - 0.5) / 0.5, b = t * t * (3 - 2 * t); w = wW + b * (wTp - wW); }
+    return Math.max(0, w) / 2;
+  };
+  const N = 48, loop = (ya, yb, hwFn) => {
+    const p = [];
+    for (let i = 0; i <= N; i++) { const f = i / N, y = ya + f * (yb - ya); p.push({ x: hwFn(f), y }); }
+    for (let i = N; i >= 0; i--) { const f = i / N, y = ya + f * (yb - ya); p.push({ x: -hwFn(f), y }); }
+    return p;
+  };
+  const outer = loop(y0, y1, halfAt);
+  if (ins.type !== "frame") return { outer, inner: null };
+  const bw = ins.borderW != null ? ins.borderW : 12;
+  const iy0 = y0 + bw, iy1 = y1 - bw;
+  if (iy1 - iy0 < 4) return { outer, inner: null };   // too small to hollow
+  const inner = loop(iy0, iy1, (f) => Math.max(0, halfAt(iy1 > iy0 ? ((iy0 + f * (iy1 - iy0)) - y0) / (y1 - y0) : f) - bw));
+  return { outer, inner };
 }
 
 function computeOutline(ski) {
@@ -984,6 +1028,39 @@ function dxfText(layer, x, y, h, str, align) {
 }
 function dxfCircle(layer, x, y, r) {
   return `0\nCIRCLE\n8\n${layer}\n10\n${x.toFixed(3)}\n20\n${y.toFixed(3)}\n30\n0\n40\n${r.toFixed(3)}\n`;
+}
+// Shaped-insert cut export (DXF or SVG). Each insert is nested side by side along X with a gap, frame
+// cutouts included as their own closed loop on the same layer. Titanal/carbon cut on a waterjet or router.
+function exportInserts(ski, fmt) {
+  const list = ski.inserts || [];
+  const loops = [];
+  let cursorX = 0; const gap = 20;
+  list.forEach((ins, idx) => {
+    let polys; try { polys = insertPolys(ski, ins); } catch (e) { return; }
+    if (!polys || !polys.outer) return;
+    const all = polys.inner ? polys.outer.concat(polys.inner) : polys.outer;
+    const minx = Math.min(...all.map(p => p.x)), maxx = Math.max(...all.map(p => p.x));
+    const miny = Math.min(...all.map(p => p.y));
+    const offx = cursorX - minx, offy = -miny;
+    const layer = `insert${idx + 1}_${ins.type}_${ins.material}`;
+    loops.push({ layer, pts: polys.outer.map(p => ({ x: p.x + offx, y: p.y + offy })) });
+    if (polys.inner) loops.push({ layer, pts: polys.inner.map(p => ({ x: p.x + offx, y: p.y + offy })) });
+    cursorX += (maxx - minx) + gap;
+  });
+  if (!loops.length) return;
+  if (fmt === "dxf") {
+    let d = dxfStart();
+    for (const l of loops) d += dxfLwpolyline(l.layer, l.pts, true);
+    d += dxfEnd();
+    downloadFile(d, `bcs-inserts-${ski.length}mm.dxf`, "application/dxf");
+  } else {
+    const pts = loops.flatMap(l => l.pts);
+    const w = Math.max(...pts.map(p => p.x)) + 2, h = Math.max(...pts.map(p => p.y)) + 2;
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}">`;
+    for (const l of loops) s += `<polygon points="${l.pts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ")}" fill="none" stroke="#000" stroke-width="0.3"/>`;
+    s += "</svg>";
+    downloadFile(s, `bcs-inserts-${ski.length}mm.svg`, "image/svg+xml");
+  }
 }
 // ── Export orientation ──
 // Canonical geometry is authored in (a, t): a = along-length (0..L, tail→tip), t = lateral offset
@@ -3567,6 +3644,25 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
+
+    // Shaped metal/carbon inserts drawn on top of the shape (Rustler strip / Mantra frame).
+    if (Array.isArray(ski.inserts) && ski.inserts.length) {
+      ctx.save();
+      for (const ins of ski.inserts) {
+        let polys; try { polys = insertPolys(ski, ins); } catch (e) { continue; }
+        if (!polys || !polys.outer) continue;
+        const isCarbon = (ins.material || "").startsWith("carbon");
+        ctx.beginPath();
+        polys.outer.forEach((p, i) => { const s = toMain(p.x, p.y); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+        ctx.closePath();
+        if (polys.inner) { polys.inner.forEach((p, i) => { const s = toMain(p.x, p.y); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); ctx.closePath(); }
+        ctx.fillStyle = isCarbon ? "rgba(38,38,44,0.5)" : "rgba(150,152,160,0.45)";
+        ctx.fill("evenodd");
+        ctx.strokeStyle = isCarbon ? "rgba(18,18,22,0.9)" : "rgba(118,120,130,0.95)";
+        ctx.lineWidth = 1.2; ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // Inside / outside edge labels when either asymmetry mode is on (outside = -x edge, inside = +x edge).
     if (ski.asymSidecut || ski.asymContact) {
@@ -7812,6 +7908,58 @@ export default function App() {
           </div>
         </AccordionSection>
 
+        <AccordionSection isOpen={sectionsOpen.inserts !== false} onToggle={() => toggleSection("inserts")} title="Metal Inserts (flex)">
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            Shaped titanal or carbon reinforcement on the plan view. A tapered strip stiffens underfoot and softens the tips (Rustler); a frame holds torsion while cutting weight (Mantra). Add as many as you want, each with its own shape, material, and layer. They render on the shape, export as cut files, and add to the weight. Stiffness effect along the length is coming next.
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            {[["+ Tapered strip", "strip"], ["+ Frame", "frame"]].map(([lab, ty]) => (
+              <button key={ty} onClick={() => setSki(s => ({ ...s, inserts: [...(s.inserts || []), { id: "ins" + Date.now() + Math.floor(Math.random() * 1000), type: ty, material: "titanal", layer: "above", posStart: 0.3, posEnd: 0.7, wTail: 36, wWaist: ty === "frame" ? 90 : 56, wTip: 36, borderW: 12 }] }))}
+                style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
+            ))}
+          </div>
+          {(ski.inserts || []).length === 0 && <div style={{ color: C.labelDim, fontSize: 10.5, fontStyle: "italic", fontFamily: "'JetBrains Mono', monospace" }}>No inserts yet.</div>}
+          {(ski.inserts || []).length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <button onClick={() => exportInserts(ski, "dxf")} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Cut file DXF</button>
+              <button onClick={() => exportInserts(ski, "svg")} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Cut file SVG</button>
+            </div>
+          )}
+          {(ski.inserts || []).map((ins, idx) => {
+            const up = (patch) => setSki(s => ({ ...s, inserts: s.inserts.map(i => i.id === ins.id ? { ...i, ...patch } : i) }));
+            const inp = { flex: 1, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 7px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
+            const numRow = (lab, key, min, max, step) => (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ color: C.label, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", width: 84 }}>{lab}</span>
+                <NumberInput value={ins[key]} min={min} max={max} step={step} onCommit={v => up({ [key]: v })} style={inp} />
+              </div>
+            );
+            return (
+              <div key={ins.id} style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 9, marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>{ins.type === "frame" ? "FRAME" : "TAPERED STRIP"} {idx + 1}</span>
+                  <button onClick={() => setSki(s => ({ ...s, inserts: s.inserts.filter(i => i.id !== ins.id) }))} style={{ background: "transparent", border: "none", color: C.labelDim, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <select value={ins.material} onChange={e => up({ material: e.target.value })} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    {Object.keys(METALS).filter(k => k !== "none").map(k => <option key={k} value={k}>{METALS[k].name}</option>)}
+                  </select>
+                  <select value={ins.layer} onChange={e => up({ layer: e.target.value })} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                    <option value="above">Above core</option>
+                    <option value="below">Below core</option>
+                  </select>
+                </div>
+                {numRow("Start 0-1", "posStart", 0, 1, 0.01)}
+                {numRow("End 0-1", "posEnd", 0, 1, 0.01)}
+                {numRow("W tail", "wTail", 0, 300, 1)}
+                {numRow("W waist", "wWaist", 0, 300, 1)}
+                {numRow("W tip", "wTip", 0, 300, 1)}
+                {ins.type === "frame" && numRow("Border", "borderW", 2, 60, 1)}
+              </div>
+            );
+          })}
+        </AccordionSection>
+
         {groupHeader(SIDEBAR_GROUPS[2])}
         <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
           title="Topsheet Art"
@@ -7996,6 +8144,7 @@ export default function App() {
                   {stat("Core mass", `~${bom.coreMassKg.toFixed(2)} kg`, C.heading)}
                   {stat("Core blank", `${bom.blank.L}\u00D7${bom.blank.W}\u00D7${bom.blank.T} mm`)}
                   {stat("Planform", `${(bom.areaM2 * 1e4).toFixed(0)} cm\u00B2`)}
+                  {bom.insertMassKg > 0 && stat("Inserts", `~${bom.insertMassKg.toFixed(2)} kg`, C.heading)}
                 </div>
               </>
             );
