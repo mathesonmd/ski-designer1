@@ -8203,18 +8203,18 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[4])}
-        <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
-          <div style={{ marginBottom: 11, paddingBottom: 11, borderBottom: `1px solid ${C.inputBorder}` }}>
-            <div style={{ color: C.heading, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>1:1 TILED PRINT (no CNC needed)</div>
-            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
-              Print the full-size plan across A4 or Letter pages, tape them together, and cut a jig by hand. Includes the outline, centerline, core outline, and a 100 mm scale-check square.
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {[["Print A4", "a4"], ["Print Letter", "letter"]].map(([lab, pp]) => (
-                <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
-              ))}
-            </div>
+        <AccordionSection isOpen={sectionsOpen.printExport !== false} onToggle={() => toggleSection("printExport")} title="Print / Templates">
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+            Full-size plan tiled across A4 or Letter pages. Print at actual size, tape the sheets together, and cut a jig or template by hand. Includes the outline, centerline, core outline, and a 100 mm scale-check square so you can confirm the print scale.
           </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["Print A4", "a4"], ["Print Letter", "letter"]].map(([lab, pp]) => (
+              <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
+            ))}
+          </div>
+        </AccordionSection>
+
+        <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
