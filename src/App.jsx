@@ -5967,15 +5967,15 @@ function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
 }
 
 function TopsheetDesigner({ ski, C, onClose }) {
-  const bleed = 25.4, gap = 25;
+  const bleed = 10, gap = 12.7;   // print bleed (sheet edge to trim box) and the gap between the two skis
   const L = ski.length;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
   // Band half-width from the ACTUAL outline extent (both edges), so an asymmetric tip that reaches further
   // on one side than the nominal width still sits inside the band and the bleed. Falls back to nominal.
   const latMax = outline.length ? Math.max(...outline.map(p => Math.abs(p.x))) : Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth) / 2;
-  const edgeMargin = 12.7;   // extra 1/2" of band beyond the widest point so an asymmetric tip clears the edge
-  const W = 2 * (latMax + edgeMargin), tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
-  const skiYc = [bleed + W / 2, bleed + W + gap + W / 2];
+  const margin = 12.7;   // 1/2" safe margin between each ski and the trim box, all the way around
+  const W = 2 * latMax, tL = L + 2 * (bleed + margin), tW = 2 * W + gap + 2 * (bleed + margin);
+  const skiYc = [bleed + margin + W / 2, bleed + margin + W + gap + W / 2];
   const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
   const [dpi, setDpi] = useState(150);
@@ -6021,7 +6021,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
       }
       ctx.restore();
     }
-    if (guidesOn) { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]); skiYc.forEach((yc, si) => { const sgn = si === 0 ? 1 : -1; ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + p.y, y = yc + sgn * p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }); ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore(); }
+    if (guidesOn) { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]); skiYc.forEach((yc, si) => { const sgn = si === 0 ? 1 : -1; ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + margin + p.y, y = yc + sgn * p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }); ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore(); }
     if (cropOn) { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(0.3, 1.2 / eff); const m = 12; [[0, 0, 1, 1], [tL, 0, -1, 1], [0, tW, 1, -1], [tL, tW, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); }
   };
 
