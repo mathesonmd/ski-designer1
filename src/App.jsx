@@ -8208,7 +8208,7 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
           <BrandBar title="CAM Workspace" subtitle="ski core · mold · slats · G-code" onClose={() => setCamOpen(false)} C={C} />
           <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-            <div style={{ width: 400, flexShrink: 0, overflowY: "auto", padding: 16, borderRight: `1px solid ${C.panelBorder}` }}>
+            <div style={{ width: 400, flexShrink: 0, overflowY: "auto", padding: 16, borderRight: `1px solid ${C.panelBorder}`, "--sb-bar-h": "0px" }}>
           {(() => {
             const uu = camOpt.units === "inch" ? "in" : "mm", uf = camOpt.units === "inch" ? "in/min" : "mm/min";
             const st = camOpt.units === "inch" ? 0.01 : 0.5, stf = camOpt.units === "inch" ? 10 : 50;
@@ -8216,8 +8216,13 @@ export default function App() {
             return (
               <>
                 <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
-                  Two files for the two setups: <b style={{ color: C.heading }}>① Outline</b> the flat blank, glue &amp; cure sidewalls, then <b style={{ color: C.heading }}>② Surface taper</b> the assembled core. Generate one, then switch and generate the other.
+                  You cut two files here. First the outline, from a flat blank. Glue on your sidewalls and let them cure, then cut the taper on the assembled core. Pick an operation below, generate its file, then switch and do the other.
                 </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6, justifyContent: "flex-end" }}>
+                  <button onClick={() => setAllCamSec(true)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Expand all</button>
+                  <button onClick={() => setAllCamSec(false)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Collapse all</button>
+                </div>
+                <AccordionSection isOpen={camSec.setup} onToggle={() => toggleCamSec("setup")} title="Setup">
                 <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                   <div style={{ flex: 1 }}>
                     <div style={camLabel}>Units</div>
@@ -8232,6 +8237,8 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                </AccordionSection>
+                <AccordionSection isOpen={camSec.materials} onToggle={() => toggleCamSec("materials")} title="① Materials">
                 <div style={{ marginBottom: 10, padding: 9, border: `1px solid ${C.heading}`, borderRadius: 5, background: C.inputBg }}>
                   {(camOpt.op === "taper" || isMold) ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR ASSEMBLED CORE — measure after gluing walls</div>
@@ -8272,6 +8279,8 @@ export default function App() {
                     {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>)}
                 </div>
+                </AccordionSection>
+                <AccordionSection isOpen={camSec.operation} onToggle={() => toggleCamSec("operation")} title="② Operation">
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
                   <div style={{ display: "flex", gap: 4 }}>
@@ -8443,6 +8452,8 @@ export default function App() {
                     )}
                   </div>
                 )}
+                </AccordionSection>
+                <AccordionSection isOpen={camSec.output} onToggle={() => toggleCamSec("output")} title="③ Output & generate">
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
                     <input type="checkbox" checked={camOpt.spindleCW} onChange={e => setCam("spindleCW", e.target.checked)} /> Spindle CW
@@ -8474,6 +8485,7 @@ export default function App() {
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
                   Centroid CNC12 / Avid CNC ATC · {camOpt.units === "inch" ? "G20 inch / IPM" : "G21 mm"} · emits T{isOutline ? camOpt.outlineToolNum : isMold ? camOpt.moldToolNum : isSlat ? camOpt.slatToolNum : isBore ? camOpt.boreToolNum : isPocket ? camOpt.pocketToolNum : camOpt.taperToolNum} M6 for the changer. Always air-cut first and confirm your WCS zero.
                 </div>
+                </AccordionSection>
               </>
             );
           })()}
