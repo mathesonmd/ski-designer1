@@ -2634,6 +2634,19 @@ function buildCoreCAM(ski, opt) {
   const lerp = (a, b, t) => a + (b - a) * t;
   const L = ski.length, prof = ski.coreProfile;
   const core = applyVCutToCore(ski);
+  // Base-cut line (drag knife) — computed up front so the origin shift and footprint account for its FULL
+  // length. It runs to the tips/tails, unlike the coreEndExt-truncated core; using the core here would push
+  // the base toolpath below the origin (negative coords).
+  let baseEdge = null, baseLbl = "";
+  if (o.baseOp) {
+    const eInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0, eWrap = ski.edgeWrap || "full";
+    try {
+      if (eWrap === "contact" && eInset > 0) baseEdge = getContactBaseCutLoop(ski, eInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0).map(p => ({ x: p.y, y: p.x }));
+      else if (eInset > 0) baseEdge = offsetPolygonInward(getFullOutlinePoints(ski), eInset).map(p => ({ x: p.y, y: p.x }));
+      else baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x }));
+    } catch (e) { baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x })); }
+    baseLbl = `BASE CUT (${eWrap === "contact" && eInset > 0 ? "contact-wrap + tip/tail outline" : eInset > 0 ? eInset + "mm full-wrap inset" : "full outline"})`;
+  }
   let halfW = 0; for (const p of core) halfW = Math.max(halfW, Math.abs(p.y));
   let originShiftLen = 0, originShiftWid = 0, cOffX = 0, cOffY = 0;   // set after the part bbox is known (below)
   const zref = o.zZero === "bed" ? 0 : o.stockThick;
@@ -2669,7 +2682,7 @@ function buildCoreCAM(ski, opt) {
   else {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
-    else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
+    else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(baseEdge || core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.doProfile && !isBase) { const ext = Math.max(0, (o.sidewallThick || 0) + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
@@ -2801,15 +2814,7 @@ function buildCoreCAM(ski, opt) {
     g0z(safeZ);
   };
   if (o.baseOp) {
-    // Base cut line: full-wrap inset, or contact-wrap sections + full outline at tips/tails.
-    const eInset = ski.edgeInset !== undefined ? ski.edgeInset : 2.0, eWrap = ski.edgeWrap || "full";
-    let baseEdge;
-    try {
-      if (eWrap === "contact" && eInset > 0) baseEdge = getContactBaseCutLoop(ski, eInset, ski.edgeExtTip || 0, ski.edgeExtTail || 0).map(p => ({ x: p.y, y: p.x }));
-      else if (eInset > 0) baseEdge = offsetPolygonInward(getFullOutlinePoints(ski), eInset).map(p => ({ x: p.y, y: p.x }));
-      else baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x }));
-    } catch (e) { baseEdge = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x })); }
-    emitDragKnife(baseEdge, `BASE CUT (${eWrap === "contact" && eInset > 0 ? "contact-wrap + tip/tail outline" : eInset > 0 ? eInset + "mm full-wrap inset" : "full outline"})`);
+    emitDragKnife(baseEdge, baseLbl);
   }
   if (o.doPerimeter) {
     let path = core;
@@ -5963,9 +5968,12 @@ function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
 
 function TopsheetDesigner({ ski, C, onClose }) {
   const bleed = 25.4, gap = 25;
-  const W = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth), L = ski.length;
-  const tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
+  const L = ski.length;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
+  // Band half-width from the ACTUAL outline extent (both edges), so an asymmetric tip that reaches further
+  // on one side than the nominal width still sits inside the band and the bleed. Falls back to nominal.
+  const latMax = outline.length ? Math.max(...outline.map(p => Math.abs(p.x))) : Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth) / 2;
+  const W = 2 * latMax, tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
   const skiYc = [bleed + W / 2, bleed + W + gap + W / 2];
   const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
