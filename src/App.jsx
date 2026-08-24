@@ -6447,6 +6447,10 @@ export default function App() {
   const [previewSvg, setPreviewSvg] = useState(null);
   const [showToolpath, setShowToolpath] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
+  const [camMachineOpen, setCamMachineOpen] = useState(false);   // machine/post panel collapsed by default once set
+  const [camSec, setCamSec] = useState({ setup: true, materials: true, operation: true, tools: false, output: true });
+  const toggleCamSec = k => setCamSec(s => ({ ...s, [k]: !s[k] }));
+  const setAllCamSec = v => setCamSec({ setup: v, materials: v, operation: v, tools: v, output: v });
   const [topsheetOpen, setTopsheetOpen] = useState(false);
   useEffect(() => {
     if (document.getElementById("bcs-polish")) return;
@@ -8475,7 +8479,25 @@ export default function App() {
           })()}
             </div>
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12, padding: 16, overflow: "auto" }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <button onClick={() => setCamMachineOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "6px 10px", color: C.heading, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>{camMachineOpen ? "▾" : "▸"} Machine &amp; post</button>
+                {!camMachineOpen && <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>{(POST_PROFILES[camOpt.postKey] || POST_PROFILES.centroid).name.split(" ")[0]} · bed {camOpt.units === "inch" ? (camOpt.machineX / 25.4).toFixed(0) + "×" + (camOpt.machineY / 25.4).toFixed(0) + "in" : Math.round(camOpt.machineX) + "×" + Math.round(camOpt.machineY) + "mm"}{camOpt.arcOut ? " · arcs" : ""}</span>}
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[[false, "2D"], [true, "3D"]].map(([v, l]) => (
+                    <button key={l} onClick={() => setPreview3D(v)} style={{ padding: "6px 12px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: preview3D === v ? C.heading : C.inputBg, color: preview3D === v ? C.bgDeep : C.label, border: `1px solid ${preview3D === v ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: preview3D === v ? 700 : 400 }}>{l}</button>
+                  ))}
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <input type="checkbox" checked={camOpt.showMachine} onChange={e => setCam("showMachine", e.target.checked)} /> Show bed
+                </label>
+                {camResult.stats && camMachine && (
+                  <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? "#8ab98a" : "#e8552a" }}>
+                    {camMachine.fits ? "✓ fits the bed" : "✗ exceeds the bed"} · part {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
+                  </span>
+                )}
+              </div>
+              {camMachineOpen && (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", padding: 11, background: C.inputBg, borderRadius: 6, border: `1px solid ${C.inputBorder}` }}>
                 {[["Bed X · short", "machineX"], ["Bed Y · long", "machineY"]].map(([lab, key]) => {
                   const inch = camOpt.units === "inch", shown = inch ? camOpt[key] / 25.4 : camOpt[key];
                   return (
@@ -8486,14 +8508,6 @@ export default function App() {
                   );
                 })}
                 {camStock && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: camStock.fits ? "#8ab98a" : "#e8552a", alignSelf: "center" }}>{camStock.fits ? "✓ fits stock" : `✗ over by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</span>}
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-                  <input type="checkbox" checked={camOpt.showMachine} onChange={e => setCam("showMachine", e.target.checked)} /> Show bed
-                </label>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {[[false, "2D"], [true, "3D"]].map(([v, l]) => (
-                    <button key={l} onClick={() => setPreview3D(v)} style={{ padding: "6px 12px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: preview3D === v ? C.heading : C.inputBg, color: preview3D === v ? C.bgDeep : C.label, border: `1px solid ${preview3D === v ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: preview3D === v ? 700 : 400 }}>{l}</button>
-                  ))}
-                </div>
                 <div style={{ marginLeft: 4 }}>
                   <div style={{ color: C.label, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>Work offset ({camOpt.units === "inch" ? "in" : "mm"}) - clamp clearance</div>
                   <div style={{ display: "flex", gap: 4 }}>
@@ -8565,12 +8579,8 @@ export default function App() {
                 <label style={{ marginLeft: 4, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.arcOut ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} title="Fits curved runs of moves into G2/G3 arcs — smaller files, smoother motion. Universally supported on the profiles here.">
                   <input type="checkbox" checked={camOpt.arcOut} onChange={e => setCam("arcOut", e.target.checked)} /> Arc output (G2/G3) — smaller, smoother
                 </label>
-                {camResult.stats && camMachine && (
-                  <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? "#8ab98a" : "#e8552a" }}>
-                    {camMachine.fits ? "✓ fits the bed" : "✗ exceeds the bed"} · part {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
-                  </span>
-                )}
               </div>
+              )}
               <div style={{ flex: 1, minHeight: 320, background: "#14100d", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {preview3D
                   ? <Toolpath3DView gcode={camResult.gcode} machine={camMachine} />
