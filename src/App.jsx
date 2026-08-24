@@ -5973,7 +5973,8 @@ function TopsheetDesigner({ ski, C, onClose }) {
   // Band half-width from the ACTUAL outline extent (both edges), so an asymmetric tip that reaches further
   // on one side than the nominal width still sits inside the band and the bleed. Falls back to nominal.
   const latMax = outline.length ? Math.max(...outline.map(p => Math.abs(p.x))) : Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth) / 2;
-  const W = 2 * latMax, tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
+  const edgeMargin = 12.7;   // extra 1/2" of band beyond the widest point so an asymmetric tip clears the edge
+  const W = 2 * (latMax + edgeMargin), tL = L + 2 * bleed, tW = 2 * W + gap + 2 * bleed;
   const skiYc = [bleed + W / 2, bleed + W + gap + W / 2];
   const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
