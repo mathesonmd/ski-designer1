@@ -1100,9 +1100,22 @@ function printTiledPlan(ski, paper, opts) {
     n++;
     const vx = c * stepX, vy = r * stepY;
     const crosses = reg(vx + 2, vy + 2) + reg(vx + pw - 2, vy + 2) + reg(vx + 2, vy + ph - 2) + reg(vx + pw - 2, vy + ph - 2);
+    // Alignment grid, aligned to the global origin so the lines match across the sheet overlap. Labeled on
+    // the top and left edges (mm from tail / centerline) so you can pair sheets by number as well as by eye.
+    const gs = 50; let grid = "", glab = "";
+    for (let gx = Math.ceil(vx / gs) * gs; gx <= vx + pw; gx += gs) {
+      grid += `<line x1="${gx}" y1="${vy}" x2="${gx}" y2="${vy + ph}" stroke="#e3e3e3" stroke-width="0.15"/>`;
+      glab += `<text x="${gx + 0.6}" y="${vy + 3}" font-size="2.2" fill="#bbb" font-family="monospace">${gx}</text>`;
+    }
+    for (let gy = Math.ceil(vy / gs) * gs; gy <= vy + ph; gy += gs) {
+      grid += `<line x1="${vx}" y1="${gy}" x2="${vx + pw}" y2="${gy}" stroke="#e3e3e3" stroke-width="0.15"/>`;
+      glab += `<text x="${vx + 0.6}" y="${gy - 0.6}" font-size="2.2" fill="#bbb" font-family="monospace">${(gy - H / 2).toFixed(0)}</text>`;
+    }
+    const border = `<rect x="${vx + 0.15}" y="${vy + 0.15}" width="${pw - 0.3}" height="${ph - 0.3}" fill="none" stroke="#999" stroke-width="0.25"/>`;
     const seams = (c < cols - 1 ? `<line x1="${vx + stepX}" y1="${vy}" x2="${vx + stepX}" y2="${vy + ph}" stroke="#bbb" stroke-width="0.2" stroke-dasharray="2,2"/>` : "")
       + (r < rows - 1 ? `<line x1="${vx}" y1="${vy + stepY}" x2="${vx + pw}" y2="${vy + stepY}" stroke="#bbb" stroke-width="0.2" stroke-dasharray="2,2"/>` : "");
     pages += `<div class="pg"><svg width="${pw}mm" height="${ph}mm" viewBox="${vx} ${vy} ${pw} ${ph}">`
+      + grid + glab + border
       + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
       + (baseD ? `<path d="${baseD}" fill="none" stroke="#c88a3a" stroke-width="0.3" stroke-dasharray="2,2"/>` : "")
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
@@ -1110,7 +1123,7 @@ function printTiledPlan(ski, paper, opts) {
       + seams + crosses + `</svg><div class="lbl">${(ski.designName || "Ski")} · R${r + 1}C${c + 1} · ${n}/${rows * cols}</div></div>`;
   }
   const cover = `<div class="cover"><h1>${(ski.designName || "Ski")} — 1:1 template</h1>`
-    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together, matching the orange corner crosses. Blue dashed is the centerline (mirror here for a half). Amber dashed is the base cut line (follows the edge wrap and inset). Green dashed is the core outline.</p>`
+    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together. To align, overlap adjacent sheets so the light grey grid lines meet, and match the orange corner crosses. The grid is 50 mm and labeled along the top (mm from tail) and left (mm from centerline). Blue dashed is the centerline (mirror here for a half). Amber dashed is the base cut line (follows the edge wrap and inset). Green dashed is the core outline.</p>`
     + `<p>Scale check: the square below must measure exactly 100 mm on each side. If it doesn't, turn off any scaling in your print dialog and reprint.</p>`
     + `<svg width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#000" stroke-width="0.4"/><text x="50" y="52" font-size="7" text-anchor="middle" font-family="monospace">100 mm</text></svg></div>`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${(ski.designName || "Ski")} 1:1</title><style>`
