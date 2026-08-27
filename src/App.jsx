@@ -1170,6 +1170,34 @@ function printTiledPlan(ski, paper, opts) {
       + `<text x="${(margin + 2).toFixed(2)}" y="${(profBase - profBand - 1).toFixed(2)}" font-size="3" fill="#3a78d8" font-family="monospace">SIDE PROFILE (core thickness) \u00B7 max ${maxThick.toFixed(1)}mm</text>`;
   }
   const c0 = toP({ x: 0, y: 0 }), c1 = toP({ x: 0, y: ski.length });
+  // Reference marks (shared global frame): contact lines through both views, top-view widths at tail/waist/
+  // tip contact, and profile thickness every 50 mm — so a builder can trim the core to the contacts and
+  // read the taper depths straight off the sheet.
+  let marks = "";
+  {
+    const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
+    const wpf = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
+    const waistLen = tailC + (tipC - tailC) * wpf;
+    const botY = profPts.length ? profBase : (planCy + maxHalf);
+    for (const [lab, len] of [["TAIL CONTACT", tailC], ["TIP CONTACT", tipC]]) {
+      const x = len + margin;
+      marks += `<line x1="${x.toFixed(2)}" y1="${margin.toFixed(2)}" x2="${x.toFixed(2)}" y2="${botY.toFixed(2)}" stroke="#e8552a" stroke-width="0.3" stroke-dasharray="3,2"/>`;
+      marks += `<text x="${(x + 1).toFixed(2)}" y="${(margin + 3.4).toFixed(2)}" font-size="3" fill="#e8552a" font-family="monospace">${lab}</text>`;
+    }
+    for (const [len, w] of [[tailC, ski.tailWidth], [waistLen, ski.waistWidth], [tipC, ski.tipWidth]]) {
+      const x = len + margin;
+      marks += `<line x1="${x.toFixed(2)}" y1="${(planCy - w / 2).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(planCy + w / 2).toFixed(2)}" stroke="#3a78d8" stroke-width="0.3"/>`;
+      marks += `<text x="${x.toFixed(2)}" y="${(planCy - maxHalf - 1.5).toFixed(2)}" font-size="3.2" fill="#222" font-family="monospace" text-anchor="middle">${w.toFixed(0)}mm</text>`;
+    }
+    if (profPts.length) {
+      for (let len = 0; len <= ski.length + 0.1; len += 50) {
+        let t = 0; try { t = getCoreThickAt(ski.coreProfile, Math.min(1, len / ski.length)); } catch (e) {}
+        const x = len + margin;
+        marks += `<line x1="${x.toFixed(2)}" y1="${profBase.toFixed(2)}" x2="${x.toFixed(2)}" y2="${(profBase - t).toFixed(2)}" stroke="#bbb" stroke-width="0.2"/>`;
+        marks += `<text x="${x.toFixed(2)}" y="${(profBase + 3.4).toFixed(2)}" font-size="2.7" fill="#555" font-family="monospace" text-anchor="middle">${t.toFixed(1)}</text>`;
+      }
+    }
+  }
   const pg = paper === "letter" ? { w: 279.4, h: 215.9 } : { w: 297, h: 210 };
   const pm = 5, pw = pg.w - 2 * pm, ph = pg.h - 2 * pm, ov = 10;
   const stepX = pw - ov, stepY = ph - ov;
@@ -1201,10 +1229,11 @@ function printTiledPlan(ski, paper, opts) {
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
       + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
       + (profD ? profExtra + `<path d="${profD}" fill="none" stroke="#000" stroke-width="0.4"/>` : "")
+      + marks
       + seams + crosses + `</svg><div class="lbl">${(ski.designName || "Ski")} · R${r + 1}C${c + 1} · ${n}/${rows * cols}</div></div>`;
   }
   const cover = `<div class="cover"><h1>${(ski.designName || "Ski")} — 1:1 template</h1>`
-    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together. To align, overlap adjacent sheets so the light grey grid lines meet, and match the orange corner crosses. The grid is 50 mm and labeled along the top (mm from tail) and left (mm from centerline). Blue dashed is the centerline (mirror here for a half). Amber dashed is the base cut line (follows the edge wrap and inset). Green dashed is the core outline. The strip below the plan is the side profile: the core thickness taper, drawn at the same length scale. Trace its top curve onto the edge of your core blank and cut it (a bandsaw works) to get the thickness taper.</p>`
+    + `<p>${rows * cols} pages, ${cols} across by ${rows} down. Print at 100% / actual size with no scaling or fit-to-page. Trim each sheet to the grey dashed seam lines and tape them together. To align, overlap adjacent sheets so the light grey grid lines meet, and match the orange corner crosses. The grid is 50 mm and labeled along the top (mm from tail) and left (mm from centerline). Blue dashed is the centerline (mirror here for a half). Amber dashed is the base cut line (follows the edge wrap and inset). Green dashed is the core outline. The strip below the plan is the side profile: the core thickness taper, drawn at the same length scale. Trace its top curve onto the edge of your core blank and cut it (a bandsaw works) to get the thickness taper. Orange dashed lines mark the tail and tip contact points in both views, so you can trim the core to length there. Blue ticks give the width at tail, waist, and tip contact; the numbers under the profile are the core thickness every 50 mm.</p>`
     + `<p>Scale check: the square below must measure exactly 100 mm on each side. If it doesn't, turn off any scaling in your print dialog and reprint.</p>`
     + `<svg width="100mm" height="100mm" viewBox="0 0 100 100"><rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#000" stroke-width="0.4"/><text x="50" y="52" font-size="7" text-anchor="middle" font-family="monospace">100 mm</text></svg></div>`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${(ski.designName || "Ski")} 1:1</title><style>`
@@ -8056,9 +8085,9 @@ export default function App() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm(L)}</div>
                         <div style={{ display: "flex", gap: 4, marginTop: 2, alignItems: "center", flexWrap: "wrap" }}>
-                          {(L.kind === "fabric" || L.kind === "uni") && <><input type="number" value={L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm} step={25} min={50} onChange={e => upd(idx, { gsm: parseFloat(e.target.value) || 0 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>g/m²</span></>}
-                          {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>mm (0=full)</span></>}
-                          {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
+                          {(L.kind === "fabric" || L.kind === "uni") && <><input type="number" value={L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm} step={25} min={50} onChange={e => upd(idx, { gsm: parseFloat(e.target.value) || 0 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>g/m²</span></>}
+                          {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
+                          {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
                           {L.kind === "core" && <select value={L.wood} onChange={e => upd(idx, { wood: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(WOODS).map(k => <option key={k} value={k}>{WOODS[k].name}</option>)}</select>}
                         </div>
                       </div>
@@ -9066,4 +9095,4 @@ export default function App() {
       )}
     </div>
   );
-} 
+}
