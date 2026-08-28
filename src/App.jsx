@@ -6449,8 +6449,12 @@ function TopsheetDesigner({ ski, C, onClose }) {
   // on one side than the nominal width still sits inside the band and the bleed. Falls back to nominal.
   const latMax = outline.length ? Math.max(...outline.map(p => Math.abs(p.x))) : Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth) / 2;
   const margin = 12.7;   // 1/2" safe margin between each ski and the trim box, all the way around
-  const W = 2 * latMax, tL = L + 2 * (bleed + margin), tW = 2 * W + gap + 2 * (bleed + margin);
-  const skiYc = [bleed + margin + W / 2, bleed + margin + W + gap + W / 2];
+  // Skis print as a mirrored pair; a snowboard is a single item, so it gets one board and a sheet only one
+  // board wide — otherwise the width doubles and the sheet is unprintable.
+  const isBoard = ski.mode === "snowboard";
+  const W = 2 * latMax, tL = L + 2 * (bleed + margin);
+  const tW = isBoard ? (W + 2 * (bleed + margin)) : (2 * W + gap + 2 * (bleed + margin));
+  const skiYc = isBoard ? [bleed + margin + W / 2] : [bleed + margin + W / 2, bleed + margin + W + gap + W / 2];
   const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
   const [dpi, setDpi] = useState(150);
@@ -6572,7 +6576,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
   const dup = () => { const l = layers.find(x => x.id === sel); if (!l || l.type === "bg") return; const id = "d" + Date.now(); const clone = { ...l, id, x: l.x + 25, y: l.y + 25 }; if (l.pts) clone.pts = l.pts.map(pt => ({ ...pt })); setLayers(ls => [...ls, clone]); setSel(id); };
-  const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-pair-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
+  const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-${isBoard ? "board" : "pair"}-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
 
   const s = layers.find(l => l.id === sel);
   const inp = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
@@ -6586,7 +6590,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
-      <BrandBar title="Topsheet Designer" subtitle={`pair · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={onClose} C={C} />
+      <BrandBar title="Topsheet Designer" subtitle={`${isBoard ? "board" : "pair"} · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={onClose} C={C} />
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 322, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -6868,9 +6872,10 @@ export default function App() {
   // = flattened raster at ~150 DPI for print RIPs. In pair view it renders both skis with the art
   // projected across the set.
   const exportTopsheetTemplate = useCallback((fmt = "svg") => {
-    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template${pairView ? "-pair" : ""}`;
+    const isPair = pairView && ski.mode !== "snowboard";   // snowboards are a single board, never a pair
+    const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template${isPair ? "-pair" : ""}`;
     const finish = (imgDims) => {
-      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8, pairView);
+      const svg = buildTopsheetTemplateSVG(ski, topsheet, imgDims, 8, isPair);
       if (fmt === "svg") {
         const blob = new Blob([svg], { type: "image/svg+xml" });
         const url = URL.createObjectURL(blob);
@@ -8485,7 +8490,7 @@ export default function App() {
             {topsheet.src ? "Replace Image" : "Upload Image"}
           </button>
 
-          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Print Template{pairView ? " (pair)" : ""}</div>
+          <div style={{ color: C.label, fontSize: 10.5, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Print Template{pairView && ski.mode !== "snowboard" ? " (pair)" : ""}</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
             <button onClick={() => exportTopsheetTemplate("svg")}
               style={{ ...secondaryBtn, flex: 1 }}>
