@@ -7727,16 +7727,8 @@ export default function App() {
               "{recoverBanner.meta?.designName || "Untitled"}" was left in progress.
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={acceptRecover} style={{
-                flex: 1, background: C.heading, border: "none", borderRadius: 3,
-                padding: "6px 0", color: C.bgDeep, fontSize: 11, fontWeight: 700,
-                fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
-              }}>Recover</button>
-              <button onClick={dismissRecover} style={{
-                flex: 1, background: "transparent", border: `1px solid ${C.panelBorder}`, borderRadius: 3,
-                padding: "6px 0", color: C.label, fontSize: 11,
-                fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
-              }}>Discard</button>
+              <button onClick={acceptRecover} style={{ ...primaryBtn, flex: 1 }}>Recover</button>
+              <button onClick={dismissRecover} style={{ ...secondaryBtn, flex: 1, color: C.labelDim }}>Discard</button>
             </div>
           </div>
         )}
@@ -7772,14 +7764,6 @@ export default function App() {
         )}
 
         {groupHeader(SIDEBAR_GROUPS[0])}
-        <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 10 }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
-        {refGhost && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
-            <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
-            <div style={{ flex: 1 }} />
-            <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
-          </div>
-        )}
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -7862,33 +7846,13 @@ export default function App() {
           {isCompact && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-                <button onClick={handleSave} style={{
-                  background: C.heading, border: "none", borderRadius: 3, padding: "8px 0",
-                  color: C.bgDeep, fontSize: 12, fontWeight: 700,
-                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
-                  textTransform: "uppercase",
-                }}>Save</button>
-                <button onClick={handleLoadClick} style={{
-                  background: "transparent", border: `1px solid ${C.heading}`, borderRadius: 3, padding: "8px 0",
-                  color: C.heading, fontSize: 12, fontWeight: 700,
-                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.7, cursor: "pointer",
-                  textTransform: "uppercase",
-                }}>Load</button>
+                <button onClick={handleSave} style={{ ...primaryBtn }}>Save</button>
+                <button onClick={handleLoadClick} style={{ ...secondaryBtn }}>Load</button>
               </div>
-              <button onClick={handleNewDesign} style={{
-                width: "100%", background: "transparent", border: `1px solid ${C.inputBorder}`,
-                borderRadius: 3, padding: "6px 0", color: C.label, fontSize: 11,
-                fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer",
-                textTransform: "uppercase",
-              }}>New Design</button>
+              <button onClick={handleNewDesign} style={{ ...secondaryBtn, width: "100%", color: C.labelDim }}>New Design</button>
             </>
           )}
-          <button onClick={handleCopyShareLink} style={{
-            width: "100%", background: "transparent", border: `1px solid ${C.heading}`,
-            borderRadius: 3, padding: "8px 0", color: C.heading, fontSize: 12, fontWeight: 700,
-            fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.6, cursor: "pointer",
-            textTransform: "uppercase", marginTop: 10,
-          }}>Copy Share Link</button>
+          <button onClick={handleCopyShareLink} style={{ ...secondaryBtn, width: "100%", marginTop: 10 }}>Copy Share Link</button>
           {shareMsg && (
             <div style={{ marginTop: 6, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace",
               color: shareMsg.type === "error" ? C.torch : shareMsg.type === "warn" ? C.heading : "#9FB8A8" }}>
@@ -7930,7 +7894,7 @@ export default function App() {
           </div>
           {ski.mode !== "snowboard" && (
             <button onClick={() => setPairView(v => !v)}
-              style={{ width: "100%", marginTop: 8, background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              style={{ ...secondaryBtn, width: "100%", marginTop: 8, ...(pairView ? { background: btnGrad, color: C.bgDeep, border: "none", boxShadow: btnShadow } : {}) }}>
               {pairView ? "Pair View: ON" : "Pair View: OFF"}
             </button>
           )}
@@ -7938,6 +7902,15 @@ export default function App() {
 
         {groupHeader(SIDEBAR_GROUPS[1])}
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
+          <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 8 }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
+          {refGhost && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
+              <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
+            </div>
+          )}
+          <div style={{ color: C.labelDim, fontSize: 10, margin: "0 0 7", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Or start from a template:</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
               <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
@@ -8361,7 +8334,7 @@ export default function App() {
             Overlay artwork on the ski silhouette to preview a finished topsheet. Clipped to the outline. Export a rendered PNG below.
           </div>
 
-          <button onClick={() => setTopsheetOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>◨  Open Topsheet Designer</button>
+          <button onClick={() => setTopsheetOpen(true)} style={{ ...primaryBtn, marginBottom: 6 }}>◨  Open Topsheet Designer</button>
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 12, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             Full pair-template designer — colors, gradients, uploaded art, text & shapes, with a print-ready export (1" bleed) for a topsheet printer. The quick overlay below is just for previewing on the silhouette.
           </div>
@@ -8369,18 +8342,18 @@ export default function App() {
           <input ref={topsheetFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={e => handleTopsheetFile(e.target.files && e.target.files[0])} />
           <button onClick={() => topsheetFileRef.current && topsheetFileRef.current.click()}
-            style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
+            style={{ ...secondaryBtn, width: "100%", marginBottom: 8 }}>
             {topsheet.src ? "Replace Image" : "Upload Image"}
           </button>
 
           <div style={{ color: C.label, fontSize: 10.5, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Print Template{pairView ? " (pair)" : ""}</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
             <button onClick={() => exportTopsheetTemplate("svg")}
-              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              style={{ ...secondaryBtn, flex: 1 }}>
               SVG (vector)
             </button>
             <button onClick={() => exportTopsheetTemplate("png")}
-              style={{ flex: 1, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "8px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+              style={{ ...secondaryBtn, flex: 1 }}>
               PNG (150dpi)
             </button>
           </div>
@@ -8396,7 +8369,7 @@ export default function App() {
           {ski.mode !== "snowboard" && (
             <>
               <button onClick={() => setPairView(v => !v)}
-                style={{ width: "100%", background: pairView ? C.heading : "transparent", border: `1px solid ${C.heading}`, color: pairView ? C.bgDeep : C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 6 }}>
+                style={{ ...secondaryBtn, width: "100%", marginBottom: 6, ...(pairView ? { background: btnGrad, color: C.bgDeep, border: "none", boxShadow: btnShadow } : {}) }}>
                 {pairView ? "Pair View: ON" : "Pair View: OFF"}
               </button>
               <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -8441,17 +8414,17 @@ export default function App() {
 
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <button onClick={() => setTopsheet(t => ({ ...t, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0 }))}
-                  style={{ flex: 1, background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                  style={{ ...secondaryBtn, flex: 1, color: C.label }}>
                   Reset
                 </button>
                 <button onClick={clearTopsheet}
-                  style={{ flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover, fontWeight: 600, padding: "7px 8px", borderRadius: 4, cursor: "pointer", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                  style={{ ...secondaryBtn, flex: 1, background: "rgba(232,85,42,0.14)", border: `1px solid ${C.torch}`, color: C.controlHover }}>
                   Remove
                 </button>
               </div>
 
               <button onClick={exportTopsheetPNG}
-                style={{ width: "100%", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginTop: 8 }}>
+                style={{ ...secondaryBtn, width: "100%", marginTop: 8 }}>
                 Export Rendered PNG
               </button>
             </>
@@ -8648,7 +8621,7 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.cam} onToggle={() => toggleSection("cam")} title="CNC G-code (CAM)">
-          <button onClick={() => setCamOpen(true)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, padding: "12px 8px", borderRadius: 5, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>⛶  Open CAM Workspace</button>
+          <button onClick={() => setCamOpen(true)} style={{ ...primaryBtn }}>⛶  Open CAM Workspace</button>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
