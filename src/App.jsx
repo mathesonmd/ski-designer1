@@ -5495,7 +5495,7 @@ const ORDERED_SUPPLIERS = [...SUPPLIERS].sort((a, b) => (a.region === USER_REGIO
 
 function AccordionSection({ isOpen, onToggle, title, accent, children }) {
   return (
-    <div style={{ borderBottom: `1px solid ${C.panelBorder}` }}>
+    <div style={{ borderBottom: `1px solid ${C.panelBorder}`, borderLeft: `2px solid ${isOpen ? C.heading : "transparent"}`, background: isOpen ? "rgba(200,147,90,0.028)" : "transparent" }}>
       <div style={{
         display: "flex", alignItems: "center", width: "100%",
         // Open panels keep their title pinned just below the sticky top bar while their (often long)
@@ -6630,6 +6630,30 @@ const CAM_LEN_KEYS = [
 
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
+  // One cohesive stylesheet for the whole UI: consistent hover/active feedback on every button, a focus
+  // ring on inputs, smooth transitions, and themed thin scrollbars. Injected once so the look is uniform
+  // across every panel regardless of the inline styles each control was built with.
+  useEffect(() => {
+    if (document.getElementById("bcs-ui-polish")) return;
+    const st = document.createElement("style"); st.id = "bcs-ui-polish";
+    st.textContent = `
+      button { transition: filter .13s ease, background-color .13s ease, border-color .13s ease, box-shadow .13s ease; }
+      button:not(:disabled):hover { filter: brightness(1.14) saturate(1.03); }
+      button:not(:disabled):active { filter: brightness(.94); transform: translateY(.5px); }
+      button:disabled { opacity: .55; }
+      input, select, textarea { transition: border-color .13s ease, box-shadow .13s ease, background-color .13s ease; }
+      input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(200,147,90,.30); }
+      select { -webkit-appearance: none; appearance: none; background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+        background-position: right 9px center, right 5px center; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; padding-right: 20px !important; }
+      * { scrollbar-width: thin; scrollbar-color: rgba(200,147,90,.4) transparent; }
+      *::-webkit-scrollbar { width: 9px; height: 9px; }
+      *::-webkit-scrollbar-track { background: transparent; }
+      *::-webkit-scrollbar-thumb { background: rgba(160,120,80,.32); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+      *::-webkit-scrollbar-thumb:hover { background: rgba(200,147,90,.55); background-clip: padding-box; }
+    `;
+    document.head.appendChild(st);
+  }, []);
   // Per-mode in-memory stash: when you toggle away from a mode, its design is parked here so toggling
   // back restores it (rather than mutating one shared design). Keyed "ski" / "snowboard".
   const modeStash = useRef({});
@@ -7389,7 +7413,7 @@ export default function App() {
           }
           return next;
         })}
-        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }}
         onFocus={e => e.target.style.borderColor = C.inputFocus}
         onBlur={e => e.target.style.borderColor = C.inputBorder}
       />
@@ -7399,7 +7423,7 @@ export default function App() {
     <div style={{ marginBottom: 7 }}>
       <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{label}</div>
       <select value={value} onChange={e => onChange(e.target.value)}
-        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
+        style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box", cursor: "pointer" }}>
         {Object.entries(options).map(([k, v]) => (
           <option key={k} value={k}>
             {v.name}{v.E > 0 ? ` (${(v.E / 1000).toFixed(v.E > 50000 ? 0 : 1)}GPa)` : ""}
@@ -7420,7 +7444,7 @@ export default function App() {
       background: effectiveActiveView === val ? C.heading : C.inputBg,
       color: effectiveActiveView === val ? C.bgDeep : C.label,
       border: `1px solid ${effectiveActiveView === val ? C.heading : C.inputBorder}`,
-      borderRadius: 3, cursor: "pointer",
+      borderRadius: 5, cursor: "pointer",
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
@@ -7458,9 +7482,9 @@ export default function App() {
   );
 
   const expBtn = {
-    background: C.exportBtn, border: "none", borderRadius: 3, padding: "7px 0",
+    background: C.exportBtn, border: "none", borderRadius: 5, padding: "8px 0",
     color: C.bgDeep, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-    cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%"
+    cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%", boxShadow: "0 1px 2px rgba(0,0,0,0.28)"
   };
   const headerBtn = {
     background: C.bgLight, color: C.value, border: `1px solid ${C.panelBorder}`,
