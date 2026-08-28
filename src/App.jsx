@@ -8336,6 +8336,11 @@ export default function App() {
             const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }], ["Topsheet", { kind: "topsheet" }], ["Base + steel edges", { kind: "base" }]];
             const FABRIC_MATS = ["glassBiax", "glassTriax", "carbonBiax", "carbonTriax", "flaxTwill"];
             const UNI_MATS = ["glassUni", "carbonUni", "flaxUni"];
+            const LAYER_MATS = [
+              ...FABRIC_MATS.map(m => ({ key: "fabric:" + m, kind: "fabric", mat: m, label: FIBERS[m].name })),
+              ...UNI_MATS.map(m => ({ key: "uni:" + m, kind: "uni", mat: m, label: FIBERS[m].name + " stringer" })),
+              ...Object.keys(METALS).filter(k => k.startsWith("titanal")).map(m => ({ key: "metal:" + m, kind: "metal", mat: m, label: METALS[m].name })),
+            ];
             return (
               <div>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Top of the ski is at the top. Move layers up or down to set the stack order; stiffness depends on where each layer sits. Fabric weight (g/m²) and stringer width are editable per layer.</div>
@@ -8345,13 +8350,16 @@ export default function App() {
                     <div key={L.id || idx} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4, padding: "4px 6px", background: C.panelBg || C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4 }}>
                       <div style={{ width: 8, height: 22, borderRadius: 2, background: col(L), flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        {(L.kind === "fabric" || L.kind === "uni") ? (
-                          <select value={L.mat} onChange={e => upd(idx, { mat: e.target.value, gsm: FIBERS[e.target.value].gsm })} style={{ ...inp, width: "100%", fontSize: 11 }}>
-                            {(L.kind === "fabric" ? FABRIC_MATS : UNI_MATS).map(k => <option key={k} value={k}>{FIBERS[k].name}{L.kind === "uni" ? " stringer" : ""}</option>)}
-                          </select>
-                        ) : L.kind === "metal" ? (
-                          <select value={L.mat} onChange={e => upd(idx, { mat: e.target.value })} style={{ ...inp, width: "100%", fontSize: 11 }}>
-                            {Object.keys(METALS).filter(k => k !== "none").map(k => <option key={k} value={k}>{METALS[k].name}</option>)}
+                        {(L.kind === "fabric" || L.kind === "uni" || L.kind === "metal") ? (
+                          <select value={L.kind + ":" + L.mat} onChange={e => {
+                            const opt = LAYER_MATS.find(o => o.key === e.target.value); if (!opt) return;
+                            const patch = { kind: opt.kind, mat: opt.mat };
+                            if (opt.kind === "fabric") { patch.gsm = FIBERS[opt.mat].gsm; patch.width = undefined; }
+                            else if (opt.kind === "uni") { patch.gsm = FIBERS[opt.mat].gsm; if (L.width == null) patch.width = 0; }
+                            else { patch.gsm = undefined; patch.width = undefined; if (L.thick == null) patch.thick = METALS[opt.mat].thick; }
+                            upd(idx, patch);
+                          }} style={{ ...inp, width: "100%", fontSize: 11 }}>
+                            {LAYER_MATS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                           </select>
                         ) : (
                           <div style={{ color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm(L)}</div>
