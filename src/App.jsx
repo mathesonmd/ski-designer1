@@ -8810,7 +8810,7 @@ export default function App() {
           <div style={{ height: camH, position: "relative", background: "#14100d" }}>
             <ToolpathView gcode={camResult.gcode} width={canvasW} height={camH} />
             <div style={{ position: "absolute", left: 12, top: 10, color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>
-              TOOLPATH · {camOpt.op === "outline" ? "① OUTLINE" : camOpt.op === "mold" ? "③ MOLD" : camOpt.op === "slat" ? "④ SLATS" : camOpt.op === "bore" ? "⑤ BORE" : camOpt.op === "pocket" ? "⑥ POCKET" : camOpt.op === "base" ? "⑦ BASE (DRAG KNIFE)" : "② SURFACE TAPER"}
+              TOOLPATH · {camOpt.op === "outline" ? "OUTLINE" : camOpt.op === "mold" ? "MOLD" : camOpt.op === "slat" ? "SLATS" : camOpt.op === "bore" ? "BORE" : camOpt.op === "pocket" ? "POCKET" : camOpt.op === "base" ? "BASE (DRAG KNIFE)" : "SURFACE TAPER"}
             </div>
             {camResult.stats && (
               <div style={{ position: "absolute", right: 12, top: 10, color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -8923,7 +8923,7 @@ export default function App() {
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
-                    {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"], ["base", "⑦ Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
+                    {[["outline", "Outline"], ["taper", "Taper"], ["mold", "Mold"], ["slat", "Slats"], ["bore", "Bore"], ["pocket", "Pocket"], ["base", "Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
@@ -8938,6 +8938,32 @@ export default function App() {
                   ))}
                 </div>
                 <FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />
+                {(isMold || camOpt.op === "taper") && (
+                  <div style={{ border: `1px solid ${camOpt.roughing ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>Passes</div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {[[false, "Single pass"], [true, "Rough + finish"]].map(([v, l]) => (
+                        <button key={l} onClick={() => setCam("roughing", v)} style={camSeg(!!camOpt.roughing === v)}>{l}</button>
+                      ))}
+                    </div>
+                    {camOpt.roughing ? (
+                      <>
+                        <div style={{ color: C.labelDim, fontSize: 10, margin: "7px 0 6", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                          The rough pass hogs out the bulk with a bigger bit, leaving the allowance below; the tool &amp; feeds set above then run the finishing skim.
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                          {[["Rough tool #", "roughToolNum", 1], ["Rough \u00D8 " + uu, "roughToolDia", st], ["Leave " + uu, "finishAllowance", st], ["Rough stepover " + uu, "roughStepover", st], ["Rough stepdown " + uu, "roughStepdown", st]].map(([lab, key, step]) => (
+                            <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ color: C.labelDim, fontSize: 10, marginTop: 7, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                        One carve with the tool &amp; feeds set above.
+                      </div>
+                    )}
+                  </div>
+                )}
                 {isOutline ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Outline cut (flat blank)</div>
@@ -9072,25 +9098,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {(isMold || camOpt.op === "taper") && (
-                  <div style={{ border: `1px solid ${camOpt.roughing ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.roughing ? C.heading : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
-                      <input type="checkbox" checked={camOpt.roughing} onChange={e => setCam("roughing", e.target.checked)} /> Rough + finish (2 passes)
-                    </label>
-                    {camOpt.roughing && (
-                      <>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 6 }}>
-                          {[["Rough tool #", "roughToolNum", 1], ["Rough \u00D8 " + uu, "roughToolDia", st], ["Leave " + uu, "finishAllowance", st], ["Rough stepover " + uu, "roughStepover", st], ["Rough stepdown " + uu, "roughStepdown", st]].map(([lab, key, step]) => (
-                            <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                          ))}
-                        </div>
-                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                          Hogs out the bulk with the big {camOpt.roughToolDia} {uu} bit (T{camOpt.roughToolNum}), leaving {camOpt.finishAllowance} {uu}, then a single finishing skim with the fine bit (T{camOpt.moldToolNum || camOpt.taperToolNum}). Cuts a huge mold in a fraction of the time.
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
                 </AccordionSection>
                 <AccordionSection isOpen={camSec.output} onToggle={() => toggleCamSec("output")} title="③ Output & generate">
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
@@ -9117,7 +9124,7 @@ export default function App() {
                   </>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={downloadCAM} style={{ ...primaryBtn, flex: 1, padding: "10px 8px" }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : isBaseOp ? "⑦ Base" : "② Taper"} .nc</button>
+                  <button onClick={downloadCAM} style={{ ...primaryBtn, flex: 1, padding: "10px 8px" }}>Download {isOutline ? "Outline" : isMold ? "Mold" : isSlat ? "Slats" : isBore ? "Bore" : isPocket ? "Pocket" : isBaseOp ? "Base" : "Taper"} .nc</button>
                   <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ ...secondaryBtn, color: C.label, padding: "10px 14px", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
                 </div>
                 <button onClick={() => setShowToolpath(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Preview Toolpaths</button>
