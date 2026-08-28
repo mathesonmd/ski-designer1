@@ -3081,25 +3081,30 @@ function buildCoreCAM(ski, opt) {
       for (let y = -sHalf + so; y < yR - 1e-6; y += so) lanes.push(y);
       lanes.push(yR);
       const passes = Math.max(1, Math.ceil((startTop - (minTop + zOff)) / sd));
+      // Full-length lanes: run each lane end to end across the whole part length (air-cutting where the core
+      // narrows toward the waist) instead of chopping it into tip/tail segments with a lift+plunge across the
+      // gap. Fewer plunges, and the two edge lanes become clean continuous sidewall passes with a fixed cut
+      // direction. X0..X1 is the full length extent of the surfacing region.
+      let X0 = 1e9, X1 = -1e9; for (const p of surfPoly) { if (p.x < X0) X0 = p.x; if (p.x > X1) X1 = p.x; }
       if (tnum != null) { P(`G0 Z${f(safeZ)}`); toolChange(tnum); P(`S${o.spindle} M3`); }
       for (let k = 1; k <= passes; k++) {
         const floor = startTop - k * sd;
         PC(`-- ${label} pass ${k}/${passes} --`);
+        const zAt = x => MZ(Math.max(topH(x) + zOff, floor));
         lanes.forEach((y, li) => {
-          const xs = _camCrossingsX(surfPoly, y); if (xs.length < 2) return;
-          for (let s = 0; s + 1 < xs.length; s += 2) {
-            const xa = xs[s], xb = xs[s + 1]; if (xb - xa < 3) continue;
-            const isLeft = li === 0, isRight = li === lanes.length - 1;
-            let wantPlus;
-            if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) { let base = isLeft; if (o.sidewallEngage === "climb") base = !base; if (!o.spindleCW) base = !base; wantPlus = base; }
-            else { wantPlus = o.profPattern === "oneway" ? (o.profDir === "+") : ((o.profDir === "+") !== (li % 2 === 1)); }
-            const x0 = wantPlus ? xa : xb, x1 = wantPlus ? xb : xa, step = (x1 >= x0 ? 1 : -1) * 3;
-            const zAt = x => MZ(Math.max(topH(x) + zOff, floor));
-            g0(x0, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(x0));
-            let px = x0;
-            for (let x = x0; step > 0 ? x <= x1 : x >= x1; x += step) { g1(x, y, zAt(x)); cutDist += Math.abs(x - px); px = x; }
-            g1(x1, y, zAt(x1)); g0z(safeZ);
-          }
+          if (_camCrossingsX(surfPoly, y).length < 2) return;   // lane never meets the core → skip it entirely
+          const isLeft = li === 0, isRight = li === lanes.length - 1;
+          let wantPlus;
+          // Both sidewall lanes run so the spun cutter rotates INTO the core (conventional on each side,
+          // toward the centre), so it can't lift the glued-on ABS wall away from the wood and tear the edge.
+          // Interior lanes zigzag (or one-way) for speed. Flip with sidewallEngage / spindleCW for your setup.
+          if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) { let base = isLeft; if (o.sidewallEngage === "climb") base = !base; if (!o.spindleCW) base = !base; wantPlus = base; }
+          else { wantPlus = o.profPattern === "oneway" ? (o.profDir === "+") : ((o.profDir === "+") !== (li % 2 === 1)); }
+          const xStart = wantPlus ? X0 : X1, xEnd = wantPlus ? X1 : X0, step = (xEnd >= xStart ? 1 : -1) * 3;
+          g0(xStart, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(xStart));
+          let px = xStart;
+          for (let x = xStart; step > 0 ? x <= xEnd : x >= xEnd; x += step) { g1(x, y, zAt(x)); cutDist += Math.abs(x - px); px = x; }
+          g1(xEnd, y, zAt(xEnd)); g0z(safeZ);
         });
       }
     };
@@ -8917,8 +8922,8 @@ export default function App() {
                 <AccordionSection isOpen={camSec.operation} onToggle={() => toggleCamSec("operation")} title="② Operation">
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"], ["base", "⑦ Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={camSeg(camOpt.op === v)}>{l}</button>))}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
+                    {[["outline", "① Outline"], ["taper", "② Taper"], ["mold", "③ Mold"], ["slat", "④ Slats"], ["bore", "⑤ Bore"], ["pocket", "⑥ Pocket"], ["base", "⑦ Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
