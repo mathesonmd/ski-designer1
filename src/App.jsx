@@ -7481,10 +7481,27 @@ export default function App() {
     </div>
   );
 
+  const btnGrad = "linear-gradient(180deg, #d6a46d 0%, #bd854c 100%)";   // brass, top-lit for depth
+  const btnShadow = "0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22)";
   const expBtn = {
-    background: C.exportBtn, border: "none", borderRadius: 5, padding: "8px 0",
+    background: btnGrad, border: "none", borderRadius: 5, padding: "8px 0",
     color: C.bgDeep, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-    cursor: "pointer", fontWeight: 700, letterSpacing: 0.7, width: "100%", boxShadow: "0 1px 2px rgba(0,0,0,0.28)"
+    cursor: "pointer", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", width: "100%", boxShadow: btnShadow
+  };
+  // One primary action button — brass, raised, uppercase — for the prominent openers (database, 3D, cards)
+  // that were previously the stray red "torch" color and read as accidental warnings.
+  const primaryBtn = {
+    width: "100%", border: "none", borderRadius: 5, padding: "9px 12px", background: btnGrad,
+    color: C.bgDeep, fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: 1, textTransform: "uppercase", cursor: "pointer", boxShadow: btnShadow,
+  };
+  // Quieter counterpart: outlined, uppercase, same rhythm — for the in-panel actions (add / reset / export
+  // / print) that were each hand-styled differently. Spread {...secondaryBtn} and override only color when
+  // an action should read dimmer (a reset) rather than as an accent (an add).
+  const secondaryBtn = {
+    border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", background: C.inputBg,
+    color: C.heading, fontSize: 10.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+    letterSpacing: 0.8, textTransform: "uppercase", cursor: "pointer",
   };
   const headerBtn = {
     background: C.bgLight, color: C.value, border: `1px solid ${C.panelBorder}`,
@@ -7755,11 +7772,7 @@ export default function App() {
         )}
 
         {groupHeader(SIDEBAR_GROUPS[0])}
-        <button onClick={() => setShowDb(true)} style={{
-          width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "10px 12px",
-          borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
-          letterSpacing: 0.5, marginBottom: 10,
-        }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
+        <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 10 }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
         {refGhost && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
             <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
@@ -8235,13 +8248,13 @@ export default function App() {
                     <option value="">+ Add layer…</option>
                     {ADD.map(a => <option key={a[0]} value={a[0]}>{a[0]}</option>)}
                   </select>
-                  <button onClick={() => setLayup("stack", undefined)} style={{ padding: "6px 10px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.labelDim, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Reset to simple</button>
+                  <button onClick={() => setLayup("stack", undefined)} style={{ ...secondaryBtn, color: C.labelDim }}>Reset to simple</button>
                 </div>
                 <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Remove the topsheet, base, and fabric layers to read the flex of just the wood core. Topsheet and base stay pinned top and bottom.</div>
               </div>
             );
           })() : (<>
-            <button onClick={() => setLayup("stack", seedStack(ski.layup))} style={{ width: "100%", padding: "8px", marginBottom: 10, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>✎ Customize layer stack (order + weights)</button>
+            <button onClick={() => setLayup("stack", seedStack(ski.layup))} style={{ ...secondaryBtn, width: "100%", marginBottom: 10 }}>✎ Customize layer stack (order + weights)</button>
           {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
           {selectField(ski.layup.fabricSplit ? "Fabric — TOP (biax / triax)" : "Fabric (biax / triax)", ski.layup.glass, GLASS, v => setLayup("glass", v))}
           <div style={{ marginBottom: 7 }}>
@@ -8293,14 +8306,14 @@ export default function App() {
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             {[["+ Tapered strip", "strip"], ["+ Frame", "frame"]].map(([lab, ty]) => (
               <button key={ty} onClick={() => setSki(s => ({ ...s, inserts: [...(s.inserts || []), { id: "ins" + Date.now() + Math.floor(Math.random() * 1000), type: ty, material: "titanal", layer: "above", posStart: 0.3, posEnd: 0.7, wTail: 36, wWaist: ty === "frame" ? 90 : 56, wTip: 36, borderW: 12 }] }))}
-                style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
+                style={{ ...secondaryBtn, flex: 1 }}>{lab}</button>
             ))}
           </div>
           {(ski.inserts || []).length === 0 && <div style={{ color: C.labelDim, fontSize: 10.5, fontStyle: "italic", fontFamily: "'JetBrains Mono', monospace" }}>No inserts yet.</div>}
           {(ski.inserts || []).length > 0 && (
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              <button onClick={() => exportInserts(ski, "dxf")} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Cut file DXF</button>
-              <button onClick={() => exportInserts(ski, "svg")} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Cut file SVG</button>
+              <button onClick={() => exportInserts(ski, "dxf")} style={{ ...secondaryBtn, flex: 1, color: C.label }}>Cut file DXF</button>
+              <button onClick={() => exportInserts(ski, "svg")} style={{ ...secondaryBtn, flex: 1, color: C.label }}>Cut file SVG</button>
             </div>
           )}
           {(ski.inserts || []).map((ins, idx) => {
@@ -8376,7 +8389,7 @@ export default function App() {
           </div>
 
           <button onClick={() => setShow3D(true)}
-            style={{ width: "100%", background: C.control, border: "none", color: C.bgDeep, padding: "9px 12px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 8 }}>
+            style={{ ...primaryBtn, marginBottom: 8 }}>
             View in 3D
           </button>
 
@@ -8564,7 +8577,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {[["Print A4", "a4"], ["Print Letter", "letter"]].map(([lab, pp]) => (
-              <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ flex: 1, padding: "6px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: C.inputBg, color: C.heading, border: `1px solid ${C.heading}`, borderRadius: 4, cursor: "pointer" }}>{lab}</button>
+              <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ ...secondaryBtn, flex: 1 }}>{lab}</button>
             ))}
           </div>
         </AccordionSection>
@@ -8668,7 +8681,7 @@ export default function App() {
             A wide logo (e.g. 800×200 px) reads best. Saved on this device; the footer credits the tool.
           </div>
           <button onClick={openSpecPreview}
-            style={{ width: "100%", marginBottom: 6, background: C.control, border: "none", color: C.bgDeep, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
+            style={{ ...primaryBtn, marginBottom: 6 }}>
             Preview Build Card
           </button>
           <div style={{ display: "flex", gap: 6 }}>
@@ -9099,10 +9112,10 @@ export default function App() {
                   </>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={downloadCAM} style={{ flex: 1, background: C.heading, border: "none", color: C.bgDeep, padding: "10px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : isBaseOp ? "⑦ Base" : "② Taper"} .nc</button>
-                  <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "10px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
+                  <button onClick={downloadCAM} style={{ ...primaryBtn, flex: 1, padding: "10px 8px" }}>Download {isOutline ? "① Outline" : isMold ? "③ Mold" : isSlat ? "④ Slats" : isBore ? "⑤ Bore" : isPocket ? "⑥ Pocket" : isBaseOp ? "⑦ Base" : "② Taper"} .nc</button>
+                  <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ ...secondaryBtn, color: C.label, padding: "10px 14px", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
                 </div>
-                <button onClick={() => setShowToolpath(true)} style={{ width: "100%", marginTop: 6, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Preview Toolpaths</button>
+                <button onClick={() => setShowToolpath(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Preview Toolpaths</button>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
                   Centroid CNC12 / Avid CNC ATC · {camOpt.units === "inch" ? "G20 inch / IPM" : "G21 mm"} · emits T{isOutline ? camOpt.outlineToolNum : isMold ? camOpt.moldToolNum : isSlat ? camOpt.slatToolNum : isBore ? camOpt.boreToolNum : isPocket ? camOpt.pocketToolNum : camOpt.taperToolNum} M6 for the changer. Always air-cut first and confirm your WCS zero.
                 </div>
