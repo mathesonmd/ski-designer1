@@ -56,6 +56,25 @@ const WOODS = {
   maple:{name:"Hard Maple",E:12600,density:670},birch:{name:"Birch",E:13900,density:635},
   bamboo:{name:"Bamboo",E:14000,density:725},
 };
+// Core materials = woods plus low-density foams for foam-stringer / lightweight cores. E in MPa, density
+// in kg/m^3. Foam E is measured-ish (structural PU/XPS ski foam), NOT density-derived like wood.
+const CORE_MATERIALS = { ...WOODS,
+  pufoam: { name: "PU foam ~100", E: 55, density: 100 },
+  xpsfoam: { name: "XPS foam ~35", E: 25, density: 35 },
+};
+// Effective core density and modulus for a single material or a two-part blend. Rule of mixtures by volume
+// fraction: density is the exact arithmetic mean (mass is additive); modulus uses the Voigt/parallel model
+// (E = Σ fᵢEᵢ), the correct bound for materials running lengthwise along the core (e.g. hardwood or foam
+// stringers parallel to the load). A measured density, if entered, overrides the computed one for weight.
+function coreProps(L) {
+  const M = k => CORE_MATERIALS[k] || CORE_MATERIALS.poplar;
+  const m1 = M(L.mat || L.wood);
+  const f2 = (L.mat2 && L.pct2 > 0) ? Math.min(1, L.pct2 / 100) : 0;
+  const m2 = f2 ? M(L.mat2) : null;
+  const E = m1.E * (1 - f2) + (m2 ? m2.E * f2 : 0);
+  const densityComputed = m1.density * (1 - f2) + (m2 ? m2.density * f2 : 0);
+  return { E, density: (L.density != null && L.density > 0) ? L.density : densityComputed, densityComputed };
+}
 const GLASS = {
   triax23:{name:"Glass Triax 23oz",E:26900,thick:0.57},triax19:{name:"Glass Triax 19oz",E:24200,thick:0.48},
   biax:{name:"Glass Biax \u00B145",E:12000,thick:0.45},
@@ -110,10 +129,10 @@ const FIBERS = {
 const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; return (gsm || f.gsm) / (1000 * f.dens * 0.5); };
 // A stack layer: { id, kind:'fabric'|'uni'|'metal'|'core', mat, gsm?, width?, thick?, wood?, density?, E? }
 // Flatten a stack (base→top) into the {E,b,t} layers the EI integrator + drawing + BOM consume.
-function stackToLayers(stack, skiWidth, coreThick) {
-  const out = [{ E: BASE_E, b: skiWidth, t: BASE_THICK, role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: EDGE_H, role: "edge" }];
+function stackToLayers(stack, skiWidth, coreThick, withBaseEdge) {
+  const out = (withBaseEdge === false) ? [] : [{ E: BASE_E, b: skiWidth, t: BASE_THICK, role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: EDGE_H, role: "edge" }];
   for (const L of stack || []) {
-    if (L.kind === "core") { const w = WOODS[L.wood] || WOODS.poplar; out.push({ E: L.E != null ? L.E : (L.density != null ? Math.round(L.density * 21) : w.E), b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.wood }); }
+    if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
     else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const b = (L.kind === "uni" && L.width > 0) ? L.width : skiWidth; out.push({ E: f.E, b, t: fiberThickOf(L.mat, L.gsm), role: L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : "stringerC") : "fabric", mat: L.mat }); }
   }
@@ -542,7 +561,7 @@ function getCoreThickAt(profile, pos) {
 function computeEIAtStation(skiWidth,coreThick,layup){
   let layers;
   if (layup.stack && layup.stack.length) {
-    layers = stackToLayers(layup.stack, skiWidth, coreThick);
+    layers = stackToLayers(layup.stack, skiWidth, coreThick, !layup.bareCore);
   } else {
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
   const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width,cT=carbon.thick||CARBON_THICK;
@@ -610,7 +629,7 @@ function computeBOM(ski) {
   // Custom layer stack drives the fibre/metal areas and the core wood when present.
   if (ski.layup && ski.layup.stack && ski.layup.stack.length) {
     const st = ski.layup.stack, coreL = st.find(l => l.kind === "core");
-    if (coreL) { density = WOOD_DENSITY[coreL.wood] || 500; coreMassKg = (vol / 1e9) * density; }
+    if (coreL) { density = coreProps(coreL).density; coreMassKg = (vol / 1e9) * density; }
     let gN = 0, cN = 0, mN = 0;
     for (const L of st) {
       if (L.kind === "metal") mN++;
@@ -644,11 +663,26 @@ function computeBOM(ski) {
   };
 }
 
+// Measured-flex calibration. A builder does a test bend and enters the load, the support span, the measured
+// deflection, and whether it was a centre-loaded simply-supported beam (δ = PL³/48EI) or a cantilever tip
+// load (δ = PL³/3EI). We back out the measured EI and scale the modelled EI to match, so every downstream
+// number (rating, curve, tip stiffness) is anchored to a real measurement instead of the material tables.
+function flexCalFactor(ski) {
+  const fc = ski.flexCal;
+  if (!fc || !(fc.load > 0) || !(fc.span > 0) || !(fc.defl > 0)) return 1;
+  const P = fc.load * 9.81, L = fc.span, c = fc.type === "cantilever" ? 3 : 48;
+  const EImeas = P * L * L * L / (c * fc.defl);            // N·mm² from beam theory
+  let sum = 0, n = 0; const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
+  for (let i = 0; i <= 40; i++) { const pos = (tailC + (tipC - tailC) * i / 40) / ski.length; try { sum += computeEIAtStation(getWidthAtPos(ski, pos), getCoreThickAt(ski.coreProfile, pos), ski.layup); n++; } catch (e) {} }
+  const EImodel = n ? sum / n : 1;
+  return EImodel > 0 ? Math.max(0.2, Math.min(5, EImeas / EImodel)) : 1;
+}
 function computeFlexProfile(ski){
+  const cal=flexCalFactor(ski);
   const N=250,stations=[];
   for(let i=0;i<=N;i++){
     const pos=i/N,w=getWidthAtPos(ski,pos),ct=getCoreThickAt(ski.coreProfile,pos);
-    const ei=computeEIAtStation(w,ct,ski.layup);
+    const ei=computeEIAtStation(w,ct,ski.layup)*cal;
     stations.push({pos,xmm:pos*ski.length,width:w,coreThick:ct,ei,kCant:3*ei/(1e6)});
   }
   const span=ski.length-ski.tipLength-ski.tailLength,tailStart=ski.tailLength;
@@ -656,11 +690,11 @@ function computeFlexProfile(ski){
   for(let i=0;i<=N;i++){
     const x=i*dx,m=(x<=span/2)?x/2:(span-x)/2;
     const pos=(tailStart+x)/ski.length;
-    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup);
+    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup)*cal;
     const f=ei>0?(m*m)/ei:0;integral+=(i===0||i===N?0.5:1.0)*f*dx;
   }
   const k3pt=integral>0?1/integral:0,midIdx=Math.round(N*0.5);
-  return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei))};
+  return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei)),cal};
 }
 function flexRating(k){
   if(k<400)return{label:"Very Soft",color:"#9FB8A8"};if(k<550)return{label:"Soft",color:"#B8C8B0"};
@@ -2788,7 +2822,7 @@ function layupStack(ski) {
     const St = [{ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }];
     for (let i = lu.stack.length - 1; i >= 0; i--) {   // draw top → bottom
       const L = lu.stack[i];
-      if (L.kind === "core") { const w = WOODS[L.wood] || WOODS.poplar; St.push({ role: "core", name: (w.name || "Wood") + " core", thick: coreThick, count: 1 }); }
+      if (L.kind === "core") { const cp = coreProps(L); const nm = (L.mat2 && L.pct2 > 0) ? `${(CORE_MATERIALS[L.mat || L.wood] || {}).name || "Wood"} + ${CORE_MATERIALS[L.mat2] ? CORE_MATERIALS[L.mat2].name : "?"} core` : ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name || "Wood") + " core"; St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
       else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const role = L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : isF(L.mat) ? "fabricF" : "stringerC") : (isC(L.mat) ? "fabricC" : isF(L.mat) ? "fabricF" : "fabric"); const nm = f.name + (L.kind === "uni" ? (L.width > 0 ? " " + L.width + "mm" : " full") : "") + " \u00B7 " + (L.gsm || f.gsm) + "g"; St.push({ role, name: nm, thick: fiberThickOf(L.mat, L.gsm), count: 1 }); }
     }
@@ -8070,7 +8104,7 @@ export default function App() {
             const mv = (idx, dir) => { const j = idx + dir; if (j < 0 || j >= stack.length) return; const ns = stack.slice(); const t = ns[idx]; ns[idx] = ns[j]; ns[j] = t; setStack(ns); };
             const rm = idx => setStack(stack.filter((_, i) => i !== idx));
             const upd = (idx, patch) => setStack(stack.map((l, i) => i === idx ? { ...l, ...patch } : l));
-            const nm = L => L.kind === "core" ? (WOODS[L.wood] || WOODS.poplar).name + " core" : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
+            const nm = L => L.kind === "core" ? ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name + (L.mat2 && L.pct2 > 0 ? " + " + ((CORE_MATERIALS[L.mat2] || {}).name || "?") : "") + " core") : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
             const col = L => L.kind === "core" ? "#b0824e" : L.kind === "metal" ? "#8f99a6" : String(L.mat).startsWith("carbon") ? "#e8552a" : String(L.mat).startsWith("flax") ? "#9a8f5f" : "#d8b48a";
             const inp = { width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
             const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }]];
@@ -8088,7 +8122,16 @@ export default function App() {
                           {(L.kind === "fabric" || L.kind === "uni") && <><input type="number" value={L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm} step={25} min={50} onChange={e => upd(idx, { gsm: parseFloat(e.target.value) || 0 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>g/m²</span></>}
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
                           {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
-                          {L.kind === "core" && <select value={L.wood} onChange={e => upd(idx, { wood: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(WOODS).map(k => <option key={k} value={k}>{WOODS[k].name}</option>)}</select>}
+                          {L.kind === "core" && (() => { const cp = coreProps(L); return (<>
+                            <select value={L.mat || L.wood} onChange={e => upd(idx, { mat: e.target.value, wood: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(CORE_MATERIALS).map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
+                            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>+</span>
+                            <select value={L.mat2 || ""} onChange={e => upd(idx, { mat2: e.target.value || undefined, pct2: e.target.value ? (L.pct2 || 30) : 0 })} style={{ ...inp, width: "auto" }}><option value="">(no blend)</option>{Object.keys(CORE_MATERIALS).map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
+                            {L.mat2 && <><input type="number" value={L.pct2 || 0} min={0} max={100} step={5} onChange={e => upd(idx, { pct2: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 42 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>% of 2nd</span></>}
+                            <div style={{ flexBasis: "100%", height: 0 }} />
+                            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>density</span>
+                            <input type="number" value={L.density != null ? L.density : ""} placeholder={String(Math.round(cp.densityComputed))} min={0} step={10} onChange={e => upd(idx, { density: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 50 }} />
+                            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>kg/m³ · E {Math.round(cp.E)} MPa</span>
+                          </>); })()}
                         </div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
@@ -8106,6 +8149,10 @@ export default function App() {
                   </select>
                   <button onClick={() => setLayup("stack", undefined)} style={{ padding: "6px 10px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.labelDim, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Reset to simple</button>
                 </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", marginTop: 8, color: ski.layup.bareCore ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <input type="checkbox" checked={!!ski.layup.bareCore} onChange={e => setLayup("bareCore", e.target.checked)} /> Bare-core flex (ignore base + steel edges)
+                </label>
+                <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Remove the fabric and metal layers above and turn this on to read the flex of just the wood core.</div>
               </div>
             );
           })() : (<>
@@ -8339,6 +8386,34 @@ export default function App() {
           {derived.asymmetric && stat("R front / back",
             `${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m`,
             C.contactLabel)}
+          {flex.cal && Math.abs(flex.cal - 1) > 0.001 && stat("Calibration", `\u00D7${flex.cal.toFixed(2)} to test bend`, C.heading)}
+          <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${C.inputBorder}` }}>
+            <div style={{ color: C.heading, fontSize: 10.5, marginBottom: 5, letterSpacing: 0.5, fontFamily: "'JetBrains Mono', monospace" }}>CALIBRATE TO A TEST BEND (optional)</div>
+            <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+              {[["center", "Center load"], ["cantilever", "Cantilever"]].map(([v, l]) => {
+                const on = (ski.flexCal && ski.flexCal.type || "center") === v;
+                return <button key={v} onClick={() => setSki(s => ({ ...s, flexCal: { ...(s.flexCal || {}), type: v } }))} style={{ flex: 1, padding: "5px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", fontWeight: on ? 700 : 400 }}>{l}</button>;
+              })}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+              {[["Load kg", "load"], ["Span mm", "span"], ["Defl mm", "defl"]].map(([lab, key]) => (
+                <div key={key}><div style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>{lab}</div><input type="number" value={(ski.flexCal && ski.flexCal[key] != null) ? ski.flexCal[key] : ""} min={0} step={key === "span" ? 50 : 1} onChange={e => setSki(s => ({ ...s, flexCal: { ...(s.flexCal || {}), [key]: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) } }))} style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} /></div>
+              ))}
+            </div>
+            <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+              {(ski.flexCal && ski.flexCal.type) === "cantilever" ? "Clamp one end, hang the load at the free tip, measure the tip drop. EI = PL\u00B3 / 3\u03B4." : "Support both ends span apart, load the middle, measure the center drop. EI = PL\u00B3 / 48\u03B4."} We solve for the measured EI and scale the modelled EI to match, so the rating and curve follow your real bend.
+            </div>
+          </div>
+          <details style={{ marginTop: 9 }}>
+            <summary style={{ cursor: "pointer", color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>How these numbers are calculated</summary>
+            <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.55, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+              <b style={{ color: C.label }}>Bending stiffness (EI).</b> Transformed-section beam theory. At each length station the layup is a stack of layers, each with modulus E, width b, thickness t. The neutral axis is ybar = sum(E·b·t·y) / sum(E·b·t); then EI = sum of E·(b·t³/12 + b·t·d²), with d each layer's distance from ybar (parallel-axis theorem). Width-limited stringers use their real width; base, steel edges, and core span full width.
+              <br /><br /><b style={{ color: C.label }}>Materials.</b> Fabric and stringer moduli are laminate values (glass biax ~12, triax ~25, carbon biax ~24, triax ~58, UD ~135 GPa). Ply thickness = areal weight / (fibre density × ~0.5 fibre volume fraction). Metal, base, and edge from tables.
+              <br /><br /><b style={{ color: C.label }}>Core.</b> Density is the volume-weighted mean of the constituents (mass is additive). Modulus uses the Voigt / parallel bound E = sum(fi·Ei), the correct bound for stringers running lengthwise; an entered measured density overrides for weight. Foam moduli are estimates, not density-derived.
+              <br /><br /><b style={{ color: C.label }}>Calibration.</b> A test bend gives EI = P·L³ / (48·δ) for a centre load, or P·L³ / (3·δ) for a cantilever; the modelled EI is scaled to that ratio.
+              <br /><br /><b style={{ color: C.label }}>Limits.</b> Longitudinal bending only — no torsion, no core shear, isotropic-ply assumption. The rating maps the 3-point bending constant to bands. Treat uncalibrated numbers as comparative between designs, not absolute, until a test bend anchors them.
+            </div>
+          </details>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.materials} onToggle={() => toggleSection("materials")}
