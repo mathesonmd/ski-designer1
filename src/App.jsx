@@ -5874,6 +5874,37 @@ function loadThree() {
   return _threePromise;
 }
 
+// A soft vertical-gradient background texture (studio backdrop) for the 3D view.
+function makeGradientTex(THREE, top, bottom) {
+  const c = document.createElement("canvas"); c.width = 16; c.height = 256;
+  const ctx = c.getContext("2d"); const grd = ctx.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, top); grd.addColorStop(1, bottom); ctx.fillStyle = grd; ctx.fillRect(0, 0, 16, 256);
+  const t = new THREE.CanvasTexture(c);
+  if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; else if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+// A small procedural studio (bright softbox planes on a dim room) baked to an environment map with PMREM,
+// so the topsheet and steel edges pick up real reflections instead of flat shading. No examples/jsm needed.
+function makeStudioEnv(THREE, renderer) {
+  try {
+    const pm = new THREE.PMREMGenerator(renderer);
+    const es = new THREE.Scene(); es.background = new THREE.Color(0x1c1a17);
+    const soft = (x, y, z, w, h, col, intn) => {
+      const c = new THREE.Color(col).multiplyScalar(intn);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
+      m.position.set(x, y, z); m.lookAt(0, 0, 0); es.add(m);
+    };
+    soft(0, 10, 4, 16, 10, 0xffffff, 5);      // key softbox overhead
+    soft(-9, 3, -5, 10, 12, 0xbcd2ff, 2.0);   // cool fill, camera left
+    soft(8, 2, 3, 8, 8, 0xffe6c4, 1.6);       // warm fill, camera right
+    soft(0, -6, -2, 20, 12, 0x14110e, 1);     // dark floor
+    const env = pm.fromScene(es, 0.04).texture;
+    pm.dispose();
+    es.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    return env;
+  } catch (e) { return null; }
+}
+
 function Ski3DModal({ ski, topsheet, pairView, onClose }) {
   const mountRef = useRef(null);
   const [status, setStatus] = useState("loading"); // loading | ok | error
@@ -5887,21 +5918,25 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const mount = mountRef.current;
       const W = mount.clientWidth, H = mount.clientHeight;
       scene = new THREE.Scene();
-      scene.background = new THREE.Color("#0e0c0a");
-      camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000);
+      scene.background = makeGradientTex(THREE, "#26221c", "#0b0a08");
+      camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 1000);
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(W, H);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.15;
+      if (THREE.SRGBColorSpace && "outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
+      else if (THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       mount.appendChild(renderer.domElement);
 
-      // Lights.
-      scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-      dir.position.set(6, 12, 8); scene.add(dir);
-      const dir2 = new THREE.DirectionalLight(0xffffff, 0.35);
-      dir2.position.set(-8, 6, -6); scene.add(dir2);
+      // Image-based lighting from a procedural studio — real reflections on topsheet and edges.
+      const envMap = makeStudioEnv(THREE, renderer);
+      if (envMap) scene.environment = envMap;
+      cleanupFns.push(() => { if (envMap) envMap.dispose(); });
 
-      // Geometry (one mesh set; in pair mode it already contains both skis with continuous UVs).
+      // Geometry first so lights/ground can size to it.
       const g = buildSki3DGeometry(ski, pairView);
       const grp = new THREE.Group();
       const mkGeom = (pos, idx, uv) => {
@@ -5916,23 +5951,44 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const botGeo = mkGeom(g.botPos, g.botIdx);
       const wallGeo = mkGeom(g.wallPos, g.wallIdx);
 
+      // Lights: soft hemisphere fill, a warm key that casts a soft contact shadow, and a cool rim.
+      scene.add(new THREE.HemisphereLight(0xf3ede2, 0x26211c, 0.35));
+      const key = new THREE.DirectionalLight(0xfff2e2, 2.1);
+      key.position.set(-0.55, 1.5, 0.85).multiplyScalar(g.len);
+      key.castShadow = true;
+      key.shadow.mapSize.set(2048, 2048);
+      { const s = g.len * 0.85, sc = key.shadow.camera; sc.left = -s; sc.right = s; sc.top = s; sc.bottom = -s; sc.near = g.len * 0.05; sc.far = g.len * 6; key.shadow.bias = -0.0005; if ("radius" in key.shadow) key.shadow.radius = 6; }
+      scene.add(key);
+      const rim = new THREE.DirectionalLight(0x9ec4ff, 0.55);
+      rim.position.set(0.6, 0.5, -1.1).multiplyScalar(g.len); scene.add(rim);
+
+      const eiTop = 1.0, eiEdge = 1.15, eiBase = 0.5;
       let topMat;
       if (topsheet && topsheet.src) {
         const tex = new THREE.Texture();
         const im = new Image();
         im.onload = () => { tex.image = im; tex.needsUpdate = true; };
         im.src = topsheet.src;
-        tex.colorSpace = THREE.SRGBColorSpace || undefined;
-        topMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide });
+        if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace; else if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+        if (renderer.capabilities && renderer.capabilities.getMaxAnisotropy) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        topMat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.42, metalness: 0.0, clearcoat: 0.9, clearcoatRoughness: 0.16, envMapIntensity: eiTop, side: THREE.DoubleSide });
       } else {
-        topMat = new THREE.MeshStandardMaterial({ color: "#c8935a", roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide });
+        topMat = new THREE.MeshPhysicalMaterial({ color: "#c8935a", roughness: 0.45, metalness: 0.05, clearcoat: 0.85, clearcoatRoughness: 0.2, envMapIntensity: eiTop, side: THREE.DoubleSide });
       }
-      const botMat = new THREE.MeshStandardMaterial({ color: "#0e0c0a", roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide });
-      const wallMat = new THREE.MeshStandardMaterial({ color: "#8a8f96", roughness: 0.35, metalness: 0.6, side: THREE.DoubleSide });
-      grp.add(new THREE.Mesh(topGeo, topMat));
-      grp.add(new THREE.Mesh(botGeo, botMat));
-      grp.add(new THREE.Mesh(wallGeo, wallMat));
+      const botMat = new THREE.MeshStandardMaterial({ color: "#161310", roughness: 0.86, metalness: 0.0, envMapIntensity: eiBase, side: THREE.DoubleSide });
+      const wallMat = new THREE.MeshStandardMaterial({ color: "#c4c8ce", roughness: 0.26, metalness: 0.92, envMapIntensity: eiEdge, side: THREE.DoubleSide });
+      const meshes = [new THREE.Mesh(topGeo, topMat), new THREE.Mesh(botGeo, botMat), new THREE.Mesh(wallGeo, wallMat)];
+      meshes.forEach(m => { m.castShadow = true; grp.add(m); });
       scene.add(grp);
+
+      // Soft contact shadow on a transparent ground plane just under the ski.
+      const bbox = new THREE.Box3().setFromObject(grp);
+      const groundGeo = new THREE.PlaneGeometry(g.len * 4, g.len * 4);
+      const groundMat = new THREE.ShadowMaterial({ opacity: 0.4 });
+      const ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.rotation.x = -Math.PI / 2; ground.position.y = bbox.min.y - g.len * 0.004; ground.receiveShadow = true;
+      scene.add(ground);
+      cleanupFns.push(() => { groundGeo.dispose(); groundMat.dispose(); });
       cleanupFns.push(() => { [topGeo, botGeo, wallGeo].forEach(x => x.dispose()); [topMat, botMat, wallMat].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); });
 
       // Orbit (custom, no OrbitControls dep).
