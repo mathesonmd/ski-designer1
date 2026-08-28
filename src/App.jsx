@@ -2964,6 +2964,12 @@ function buildCoreCAM(ski, opt) {
   const lerp = (a, b, t) => a + (b - a) * t;
   const L = ski.length, prof = ski.coreProfile;
   const core = applyVCutToCore(ski);
+  // Assembled-core outline for the taper: the wood core (carved in the outline op) grown out to the MEASURED
+  // assembled width the builder entered — that measurement already includes the glued-on sidewalls, so the
+  // per-side wall extent is just (measured half-width − wood-core half-width). We only add the user's overlap
+  // on top so the cutter clears the whole assembled edge. No separate "sidewall thickness" input needed.
+  let _woodHalf = 0; for (const _p of core) { const a = Math.abs(_p.y); if (a > _woodHalf) _woodHalf = a; }
+  const wallPerSide = Math.max(0, ((o.stockW > 0 ? o.stockW / 2 : _woodHalf) - _woodHalf));
   // Base-cut line (drag knife) — computed up front so the origin shift and footprint account for its FULL
   // length. It runs to the tips/tails, unlike the coreEndExt-truncated core; using the core here would push
   // the base toolpath below the origin (negative coords).
@@ -3013,7 +3019,7 @@ function buildCoreCAM(ski, opt) {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(baseEdge || core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
-    else if (o.doProfile && !isBase) { const ext = Math.max(0, (o.sidewallThick || 0) + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
+    else if (o.doProfile && !isBase) { const ext = Math.max(0, wallPerSide + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
   }
@@ -3050,7 +3056,7 @@ function buildCoreCAM(ski, opt) {
   PC(`Z ZERO = ${o.zZero === "bed" ? "BED / TABLE TOP" : "TOP OF STOCK"}   (stock ${disp.stockThick} ${uu})`);
   PC(`Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
   if (o.doProfile) {
-    PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (o.sidewallThick > 0 || o.edgeOverlap > 0 ? ", carve walls +" + disp.sidewallThick + " + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
+    PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (wallPerSide > 0 || o.edgeOverlap > 0 ? ", to assembled edge (from measured width) + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
     if (!isBase) PC(`Sidewall engagement (glued walls): ${o.sidewallEngage === "off" ? "off" : o.sidewallEngage + " (edge lanes)"}`);
   }
   if (o.doPerimeter) PC(`Outline: ${o.perimDir} milling, ${o.rampEntry ? "ramp entry " + disp.rampLen + " " + uu : "straight plunge"}`);
@@ -3073,7 +3079,7 @@ function buildCoreCAM(ski, opt) {
         // offset from the core edge = wallThick + overlap - toolR (outward with walls; falls back to inward
         // toolR to reach the bare core edge when both are 0). topH is length-based (flat across width), so
         // the walls get cut to the same height as the core edge at each station.
-        const net = (o.sidewallThick || 0) + (o.edgeOverlap || 0) - toolR;
+        const net = wallPerSide + (o.edgeOverlap || 0) - toolR;
         try { const pp = net >= 0 ? offsetPolygonOutward(core, net) : offsetPolygonInward(core, -net); if (pp && pp.length >= 3) surfPoly = pp; } catch (e) {}
       }
       let sHalf = 0; for (const p of surfPoly) sHalf = Math.max(sHalf, Math.abs(p.y));
@@ -9093,12 +9099,9 @@ export default function App() {
                     <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       Conventional presses each glued wall into the core (won’t peel it); the two edges auto-run opposite ways. Climb can tear it off.
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      <div><div style={camSmall}>Sidewall thickness {uu}</div><NumberInput value={camOpt.sidewallThick} step={st} min={0} onCommit={v => setCam("sidewallThick", v)} style={camInput} /></div>
-                      <div><div style={camSmall}>Edge overlap {uu}</div><NumberInput value={camOpt.edgeOverlap} step={st} min={0} onCommit={v => setCam("edgeOverlap", v)} style={camInput} /></div>
-                    </div>
+                    <div><div style={camSmall}>Edge overlap {uu}</div><NumberInput value={camOpt.edgeOverlap} step={st} min={0} onCommit={v => setCam("edgeOverlap", v)} style={camInput} /></div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      Sidewall thickness = how far your glued-on walls stick out past the cut core edge (per side). The carve extends out that far so the tool skims the walls level with the core top. Edge overlap pushes the tool a hair further past the outer edge so the corner cuts clean. Both 0 = carve only the bare wood core to its edge.
+                      The carve reaches out to your assembled core's edge automatically — it uses the assembled width you measured up top, which already includes the glued-on sidewalls, so you don't re-enter the wall thickness here. Edge overlap just pushes the cutter a hair further past that edge so the walls and corners cut clean all the way through.
                     </div>
                   </div>
                 )}
