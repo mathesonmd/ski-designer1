@@ -7108,6 +7108,8 @@ export default function App() {
         ? { ...SNOWBOARD_PRESETS[0], designName: "Untitled Board", layup: ski.layup }
         : { ...DEFAULT_SKI, layup: ski.layup };
     }
+    // Snowboards are never side-to-side asymmetric — lock both ends to mirror left/right.
+    if (targetMode === "snowboard") next = { ...next, tipSymmetric: true, tailSymmetric: true };
     setSki(next);
   }, [ski]);
 
@@ -8062,12 +8064,12 @@ export default function App() {
             <div style={{ marginBottom: 8, marginTop: 2 }}>
               <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tip &amp; Tail Shape</div>
               <div style={{ display: "flex", gap: 5 }}>
-                {[["Symmetric", true], ["Independent", false]].map(([lbl, symVal]) => {
+                {[["Symmetric", true], ["Asymmetric", false]].map(([lbl, symVal]) => {
                   const active = !!ski.tipTailSym === symVal;
                   return (
                     <button key={lbl} onClick={() => setSki(s => symVal
-                      ? { ...s, tipTailSym: true }
-                      : { ...s, tipTailSym: false, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)), tailSymmetric: s.tipSymmetric })}
+                      ? { ...s, tipTailSym: true, tipSymmetric: true, tailSymmetric: true }
+                      : { ...s, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)) })}
                       style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
                         background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
                         border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
@@ -8077,7 +8079,7 @@ export default function App() {
                 })}
               </div>
               <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                {ski.tipTailSym ? "Twin: the tail mirrors the tip. Shape the tip on the plan view and the tail follows." : "Directional: tip and tail are shaped independently on the plan view."}
+                {ski.tipTailSym ? "True twin: both ends the same shape. Shape the tip and the tail follows. Both sides always mirror." : "Directional: tip and tail can differ, but each end still mirrors left to right."}
               </div>
             </div>
             <div style={{ marginBottom: 7 }}>
@@ -8121,10 +8123,12 @@ export default function App() {
           </>)}
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
-          {toggleBtn("Tip Symmetric", "tipSymmetric")}
-          {toggleBtn("Tail Symmetric", "tailSymmetric")}
-        </AccordionSection>
+        {ski.mode !== "snowboard" && (
+          <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
+            {toggleBtn("Tip Symmetric", "tipSymmetric")}
+            {toggleBtn("Tail Symmetric", "tailSymmetric")}
+          </AccordionSection>
+        )}
 
         <AccordionSection isOpen={sectionsOpen.coreFill !== false} onToggle={() => toggleSection("coreFill")}
           title="Edges & Core">
