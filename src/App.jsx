@@ -6727,6 +6727,11 @@ export default function App() {
     `;
     document.head.appendChild(st);
   }, []);
+  // The layer stack is the only layup editor now — seed it from the (triax/poplar) default the first time a
+  // design lacks one, covering both new designs and older saved files.
+  useEffect(() => {
+    if (ski.layup && !ski.layup.stack) setSki(s => ({ ...s, layup: { ...s.layup, stack: seedStack(s.layup) } }));
+  }, [ski.layup && ski.layup.stack]);
   // Per-mode in-memory stash: when you toggle away from a mode, its design is parked here so toggling
   // back restores it (rather than mutating one shared design). Keyed "ski" / "snowboard".
   const modeStash = useRef({});
@@ -7853,14 +7858,14 @@ export default function App() {
               ["3", "Tip & tail shape", "In the Snowboard panel pick Symmetric (true twin, both ends match) or Asymmetric (directional). Shape the nose by dragging the nodes on the plan view; on a twin the tail follows. Both sides always mirror on a board."],
               ["4", "Stance, inserts & board type", "Set stance width, setback, and the insert pattern (2x4 / 4x4 / channel). Choose Solid or Splitboard — Splitboard adds the two inner edges to the materials, plots the hardware layout (bindings, touring brackets, tip/tail hooks) on the plan, and shows a build checklist."],
               ["5", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber is there for triple-camber boards."],
-              ["6", "Layup & Flex", "In Layup / Materials pick the wood core and fabrics, or Customize layer stack to reorder plies, set fabric weights, blend the core, add foam or metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
+              ["6", "Layup & Flex", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
               ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
             ] : [
               ["1", "Pick a Preset", "Open Presets and choose a starting shape (All-Mtn is a safe first ski), or Browse the Database for a reference. It fills in sensible dimensions to tweak."],
               ["2", "Set Dimensions", "In Dimensions, set overall length, tip / waist / tail width, tip / tail length, and sidecut. The plan view updates live."],
               ["3", "Shape the tip & tail", "Drag the round nodes on the plan view to move contacts and widths; drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan."],
               ["4", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber and a serrated edge are available too."],
-              ["5", "Layup & Flex", "In Layup / Materials pick the wood core and fabrics, or Customize layer stack to reorder plies, set fabric weights, blend the core, add foam or metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
+              ["5", "Layup & Flex", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
               ["6", "Check the Flex", "Read the flex rating. Adjust core thickness, width, or materials until it rides right for the skier."],
               ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
             ]).map(([n, title, body]) => (
@@ -8316,8 +8321,9 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
-          {ski.layup.stack ? (() => {
+          {(() => {
             const stack = ski.layup.stack;
+            if (!stack) return null;
             const setStack = ns => setLayup("stack", ns);
             const isPinned = L => L.kind === "base" || L.kind === "topsheet";
             const mv = (idx, dir) => { const j = idx + dir; if (j < 0 || j >= stack.length) return; if (isPinned(stack[idx]) || isPinned(stack[j])) return; const ns = stack.slice(); const t = ns[idx]; ns[idx] = ns[j]; ns[j] = t; setStack(ns); };
@@ -8328,6 +8334,8 @@ export default function App() {
             const upd = (idx, patch) => setStack(stack.map((l, i) => i === idx ? { ...l, ...patch } : l));
             const inp = { width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
             const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }], ["Topsheet", { kind: "topsheet" }], ["Base + steel edges", { kind: "base" }]];
+            const FABRIC_MATS = ["glassBiax", "glassTriax", "carbonBiax", "carbonTriax", "flaxTwill"];
+            const UNI_MATS = ["glassUni", "carbonUni", "flaxUni"];
             return (
               <div>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Top of the ski is at the top. Move layers up or down to set the stack order; stiffness depends on where each layer sits. Fabric weight (g/m²) and stringer width are editable per layer.</div>
@@ -8337,7 +8345,17 @@ export default function App() {
                     <div key={L.id || idx} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4, padding: "4px 6px", background: C.panelBg || C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4 }}>
                       <div style={{ width: 8, height: 22, borderRadius: 2, background: col(L), flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm(L)}</div>
+                        {(L.kind === "fabric" || L.kind === "uni") ? (
+                          <select value={L.mat} onChange={e => upd(idx, { mat: e.target.value, gsm: FIBERS[e.target.value].gsm })} style={{ ...inp, width: "100%", fontSize: 11 }}>
+                            {(L.kind === "fabric" ? FABRIC_MATS : UNI_MATS).map(k => <option key={k} value={k}>{FIBERS[k].name}{L.kind === "uni" ? " stringer" : ""}</option>)}
+                          </select>
+                        ) : L.kind === "metal" ? (
+                          <select value={L.mat} onChange={e => upd(idx, { mat: e.target.value })} style={{ ...inp, width: "100%", fontSize: 11 }}>
+                            {Object.keys(METALS).filter(k => k !== "none").map(k => <option key={k} value={k}>{METALS[k].name}</option>)}
+                          </select>
+                        ) : (
+                          <div style={{ color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nm(L)}</div>
+                        )}
                         <div style={{ display: "flex", gap: 4, marginTop: 2, alignItems: "center", flexWrap: "wrap" }}>
                           {(L.kind === "fabric" || L.kind === "uni") && <><input type="number" value={L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm} step={25} min={50} onChange={e => upd(idx, { gsm: parseFloat(e.target.value) || 0 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>g/m²</span></>}
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
@@ -8369,55 +8387,12 @@ export default function App() {
                     <option value="">+ Add layer…</option>
                     {ADD.map(a => <option key={a[0]} value={a[0]}>{a[0]}</option>)}
                   </select>
-                  <button onClick={() => setLayup("stack", undefined)} style={{ ...secondaryBtn, color: C.labelDim }}>Reset to simple</button>
+                  <button onClick={() => setLayup("stack", seedStack({ ...DEFAULT_LAYUP }))} style={{ ...secondaryBtn, color: C.labelDim }}>Reset to default</button>
                 </div>
                 <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Remove the topsheet, base, and fabric layers to read the flex of just the wood core. Topsheet and base stay pinned top and bottom.</div>
               </div>
             );
-          })() : (<>
-            <button onClick={() => setLayup("stack", seedStack(ski.layup))} style={{ ...secondaryBtn, width: "100%", marginBottom: 10 }}>✎ Customize layer stack (order + weights)</button>
-          {selectField("Wood Core", ski.layup.wood, WOODS, v => setLayup("wood", v))}
-          {selectField(ski.layup.fabricSplit ? "Fabric — TOP (biax / triax)" : "Fabric (biax / triax)", ski.layup.glass, GLASS, v => setLayup("glass", v))}
-          <div style={{ marginBottom: 7 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{ski.layup.fabricSplit ? "Top layers / side" : "Fabric Layers / side"}</div>
-            <input type="number" value={ski.layup.glassLayers} min={1} max={4} step={1}
-              onChange={e => setLayup("glassLayers", parseInt(e.target.value) || 1)}
-              style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-          </div>
-          {/* Split the fabric so the top and bottom faces can use different weaves (e.g. biax carbon
-              above the core, triax carbon below). Off = the top fabric is mirrored on the bottom. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: ski.layup.fabricSplit ? 8 : 6 }}>
-            <button onClick={() => setSki(s => { const sp = !s.layup.fabricSplit; const lu = { ...s.layup, fabricSplit: sp }; if (sp && lu.glassBot === undefined) { lu.glassBot = lu.glass; lu.glassBotLayers = lu.glassLayers; } return { ...s, layup: lu }; })}
-              style={{ width: 30, height: 14, borderRadius: 7, border: "none", cursor: "pointer", position: "relative", background: ski.layup.fabricSplit ? C.heading : C.inputBorder, flexShrink: 0 }}>
-              <div style={{ width: 10, height: 10, borderRadius: 5, background: "#F0EDE4", position: "absolute", top: 2, left: ski.layup.fabricSplit ? 18 : 2, transition: "left 0.2s" }} />
-            </button>
-            <span style={{ color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3 }}>Different bottom fabric</span>
-          </div>
-          {ski.layup.fabricSplit && (
-            <>
-              {selectField("Fabric — BOTTOM (biax / triax)", ski.layup.glassBot || ski.layup.glass, GLASS, v => setLayup("glassBot", v))}
-              <div style={{ marginBottom: 7 }}>
-                <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Bottom layers / side</div>
-                <input type="number" value={ski.layup.glassBotLayers || ski.layup.glassLayers} min={1} max={4} step={1}
-                  onChange={e => setLayup("glassBotLayers", parseInt(e.target.value) || 1)}
-                  style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-              </div>
-            </>
-          )}
-          {selectField("Metal / Carbon laminate", ski.layup.metal, METALS, v => setLayup("metal", v))}
-          {selectField("UD Stringer", ski.layup.carbon, CARBON, v => setLayup("carbon", v))}
-          {ski.layup.carbon !== "none" && (
-            <div style={{ marginBottom: 7 }}>
-              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Stringer Layers</div>
-              <input type="number" value={ski.layup.carbonLayers} min={1} max={4} step={1}
-                onChange={e => setLayup("carbonLayers", parseInt(e.target.value) || 1)}
-                style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-            </div>
-          )}
-          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Both slots take glass or carbon — e.g. a carbon triax fabric over UD glass stringers. Turn on "Different bottom fabric" to run, say, biax carbon on top and triax below. The Flex panel updates as you mix.
-          </div>
-          </>)}
+          })()}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.inserts !== false} onToggle={() => toggleSection("inserts")} title="Metal Inserts (flex)">
