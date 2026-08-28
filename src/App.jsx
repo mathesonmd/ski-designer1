@@ -110,7 +110,7 @@ const CARBON = {
   glassMedium:{name:"Glass UD 25mm",E:40000,width:25,thick:0.5},
   glassWide:{name:"Glass UD Full",E:40000,width:0,thick:0.5},
 };
-const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=2,BASE_E=800,BASE_THICK=1.2;
+const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=2,BASE_E=800,BASE_THICK=1.2,TOPSHEET_E=1500,TOPSHEET_THICK=0.5;
 
 // ── Custom layer stack ──
 // Unified fibre palette for the drag-order stack. E is the laminate modulus (MPa); ply thickness is derived
@@ -129,10 +129,12 @@ const FIBERS = {
 const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; return (gsm || f.gsm) / (1000 * f.dens * 0.5); };
 // A stack layer: { id, kind:'fabric'|'uni'|'metal'|'core', mat, gsm?, width?, thick?, wood?, density?, E? }
 // Flatten a stack (base→top) into the {E,b,t} layers the EI integrator + drawing + BOM consume.
-function stackToLayers(stack, skiWidth, coreThick, withBaseEdge) {
-  const out = (withBaseEdge === false) ? [] : [{ E: BASE_E, b: skiWidth, t: BASE_THICK, role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: EDGE_H, role: "edge" }];
+function stackToLayers(stack, skiWidth, coreThick) {
+  const out = [];
   for (const L of stack || []) {
-    if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
+    if (L.kind === "base") { out.push({ E: BASE_E, b: skiWidth, t: BASE_THICK, role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: EDGE_H, role: "edge" }); }
+    else if (L.kind === "topsheet") { out.push({ E: TOPSHEET_E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
+    else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
     else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const b = (L.kind === "uni" && L.width > 0) ? L.width : skiWidth; out.push({ E: f.E, b, t: fiberThickOf(L.mat, L.gsm), role: L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : "stringerC") : "fabric", mat: L.mat }); }
   }
@@ -141,7 +143,7 @@ function stackToLayers(stack, skiWidth, coreThick, withBaseEdge) {
 const _sid = () => "L" + Math.random().toString(36).slice(2, 8);
 // Seed a stack from the legacy fixed layup so a design opens with the same stack it already implies.
 function seedStack(layup) {
-  const s = [];
+  const s = [{ id: _sid(), kind: "base" }];
   const gmap = { triax23: "glassTriax", triax19: "glassTriax", biax: "glassBiax", carbonBiax: "carbonBiax", carbonTriax: "carbonTriax", flaxTwill: "flaxTwill", flaxUD: "flaxUni" };
   const topMat = gmap[layup.glass] || "glassBiax";
   const botMat = layup.fabricSplit ? (gmap[layup.glassBot] || topMat) : topMat;
@@ -149,13 +151,14 @@ function seedStack(layup) {
   const metal = METALS[layup.metal], carb = CARBON[layup.carbon];
   const uniMat = carb && carb.name && carb.name.startsWith("Glass") ? "glassUni" : "carbonUni";
   const uni = () => carb && carb.E > 0 ? Array.from({ length: layup.carbonLayers || 1 }, () => ({ id: _sid(), kind: "uni", mat: uniMat, gsm: FIBERS[uniMat].gsm, width: carb.width || 0 })) : [];
+  uni().forEach(x => s.push(x));   // bottom UD — outboard, just above the base
   for (let i = 0; i < nGb; i++) s.push({ id: _sid(), kind: "fabric", mat: botMat, gsm: FIBERS[botMat].gsm });
   if (metal && metal.E > 0) s.push({ id: _sid(), kind: "metal", mat: layup.metal });
-  uni().forEach(x => s.push(x));
   s.push({ id: _sid(), kind: "core", wood: layup.wood });
-  uni().forEach(x => s.push(x));
   if (metal && metal.E > 0) s.push({ id: _sid(), kind: "metal", mat: layup.metal });
   for (let i = 0; i < nG; i++) s.push({ id: _sid(), kind: "fabric", mat: topMat, gsm: FIBERS[topMat].gsm });
+  uni().forEach(x => s.push(x));   // top UD — outboard, just below the topsheet
+  s.push({ id: _sid(), kind: "topsheet" });
   return s;
 }
 
@@ -561,7 +564,7 @@ function getCoreThickAt(profile, pos) {
 function computeEIAtStation(skiWidth,coreThick,layup){
   let layers;
   if (layup.stack && layup.stack.length) {
-    layers = stackToLayers(layup.stack, skiWidth, coreThick, !layup.bareCore);
+    layers = stackToLayers(layup.stack, skiWidth, coreThick);
   } else {
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
   const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width,cT=carbon.thick||CARBON_THICK;
@@ -572,13 +575,13 @@ function computeEIAtStation(skiWidth,coreThick,layup){
   layers=[];
   layers.push({E:BASE_E,b:skiWidth,t:BASE_THICK});
   layers.push({E:EDGE_E,b:EDGE_W*2,t:EDGE_H});
-  for(let i=0;i<nGb;i++)layers.push({E:botFab.E,b:skiWidth,t:botFab.thick});   // bottom fabric
-  if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
-  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
+  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});          // bottom UD stringer — outboard, just above the base
+  for(let i=0;i<nGb;i++)layers.push({E:botFab.E,b:skiWidth,t:botFab.thick});       // bottom fabric
+  if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});                  // metal against the core
   layers.push({E:wood.E,b:skiWidth,t:Math.max(coreThick,0.5)});
-  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});
   if(metal.E>0)layers.push({E:metal.E,b:skiWidth,t:metal.thick});
-  for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});      // top fabric
+  for(let i=0;i<nG;i++)layers.push({E:glass.E,b:skiWidth,t:glass.thick});          // top fabric
+  if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});          // top UD stringer — outboard, just below the topsheet
   }
   let yBot=0;const yc=[];
   for(const l of layers){yc.push(yBot+l.t/2);yBot+=l.t;}
@@ -2819,14 +2822,15 @@ function layupStack(ski) {
   const coreThick = (ski.coreProfile && ski.coreProfile.length) ? Math.max(...ski.coreProfile.map(p => p.thick || 0)) : 8;
   if (lu.stack && lu.stack.length) {
     const isC = k => String(k).toLowerCase().includes("carbon"), isF = k => String(k).toLowerCase().includes("flax");
-    const St = [{ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }];
+    const St = [];
     for (let i = lu.stack.length - 1; i >= 0; i--) {   // draw top → bottom
       const L = lu.stack[i];
-      if (L.kind === "core") { const cp = coreProps(L); const nm = (L.mat2 && L.pct2 > 0) ? `${(CORE_MATERIALS[L.mat || L.wood] || {}).name || "Wood"} + ${CORE_MATERIALS[L.mat2] ? CORE_MATERIALS[L.mat2].name : "?"} core` : ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name || "Wood") + " core"; St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
+      if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
+      else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: 1.5, count: 1 }); }
+      else if (L.kind === "core") { const cp = coreProps(L); const nm = (L.mat2 && L.pct2 > 0) ? `${(CORE_MATERIALS[L.mat || L.wood] || {}).name || "Wood"} + ${CORE_MATERIALS[L.mat2] ? CORE_MATERIALS[L.mat2].name : "?"} core` : ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name || "Wood") + " core"; St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
       else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const role = L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : isF(L.mat) ? "fabricF" : "stringerC") : (isC(L.mat) ? "fabricC" : isF(L.mat) ? "fabricF" : "fabric"); const nm = f.name + (L.kind === "uni" ? (L.width > 0 ? " " + L.width + "mm" : " full") : "") + " \u00B7 " + (L.gsm || f.gsm) + "g"; St.push({ role, name: nm, thick: fiberThickOf(L.mat, L.gsm), count: 1 }); }
     }
-    St.push({ role: "base", name: "Base + steel edges", thick: 1.5, count: 1 });
     return St;
   }
   const isCarbon = k => typeof k === "string" && k.toLowerCase().includes("carbon");
@@ -2835,13 +2839,13 @@ function layupStack(ski) {
   const strRole = k => (typeof k === "string" && k.startsWith("glass")) ? "stringerG" : "stringerC";
   const S = [];
   S.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 });
+  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });   // top UD — below topsheet, above glass
   S.push({ role: fabRole(lu.glass), name: g.name, thick: g.thick, count: nGt });
   if (hasMetal) S.push({ role: "metal", name: metal.name, thick: metal.thick, count: 1 });
-  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });
   S.push({ role: "core", name: (wood.name || "Wood") + " core", thick: coreThick, count: 1 });
-  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });
   if (hasMetal) S.push({ role: "metal", name: metal.name, thick: metal.thick, count: 1 });
   S.push({ role: fabRole(split ? lu.glassBot : lu.glass), name: gb.name, thick: gb.thick, count: nGb });
+  if (hasCarbon) S.push({ role: strRole(lu.carbon), name: carbon.name, thick: carbon.thick || 0.3, count: nC, width: carbon.width });   // bottom UD — above base, below glass
   S.push({ role: "base", name: "Base + steel edges", thick: 1.5, count: 1 });
   return S;
 }
@@ -8101,13 +8105,15 @@ export default function App() {
           {ski.layup.stack ? (() => {
             const stack = ski.layup.stack;
             const setStack = ns => setLayup("stack", ns);
-            const mv = (idx, dir) => { const j = idx + dir; if (j < 0 || j >= stack.length) return; const ns = stack.slice(); const t = ns[idx]; ns[idx] = ns[j]; ns[j] = t; setStack(ns); };
+            const isPinned = L => L.kind === "base" || L.kind === "topsheet";
+            const mv = (idx, dir) => { const j = idx + dir; if (j < 0 || j >= stack.length) return; if (isPinned(stack[idx]) || isPinned(stack[j])) return; const ns = stack.slice(); const t = ns[idx]; ns[idx] = ns[j]; ns[j] = t; setStack(ns); };
             const rm = idx => setStack(stack.filter((_, i) => i !== idx));
+            const addLayer = spec => { const ns = stack.slice(); if (spec.kind === "base") { if (!ns.some(l => l.kind === "base")) ns.unshift({ id: _sid(), kind: "base" }); } else if (spec.kind === "topsheet") { if (!ns.some(l => l.kind === "topsheet")) ns.push({ id: _sid(), kind: "topsheet" }); } else { const it = { id: _sid(), ...spec, ...((spec.kind === "fabric" || spec.kind === "uni") ? { gsm: FIBERS[spec.mat].gsm } : {}) }; const ti = ns.findIndex(l => l.kind === "topsheet"); if (ti >= 0) ns.splice(ti, 0, it); else ns.push(it); } setStack(ns); };
+            const nm = L => L.kind === "topsheet" ? "Topsheet" : L.kind === "base" ? "Base + steel edges" : L.kind === "core" ? ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name + (L.mat2 && L.pct2 > 0 ? " + " + ((CORE_MATERIALS[L.mat2] || {}).name || "?") : "") + " core") : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
+            const col = L => L.kind === "topsheet" ? "#2a2620" : L.kind === "base" ? "#1c1a17" : L.kind === "core" ? "#b0824e" : L.kind === "metal" ? "#8f99a6" : String(L.mat).startsWith("carbon") ? "#e8552a" : String(L.mat).startsWith("flax") ? "#9a8f5f" : "#d8b48a";
             const upd = (idx, patch) => setStack(stack.map((l, i) => i === idx ? { ...l, ...patch } : l));
-            const nm = L => L.kind === "core" ? ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name + (L.mat2 && L.pct2 > 0 ? " + " + ((CORE_MATERIALS[L.mat2] || {}).name || "?") : "") + " core") : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
-            const col = L => L.kind === "core" ? "#b0824e" : L.kind === "metal" ? "#8f99a6" : String(L.mat).startsWith("carbon") ? "#e8552a" : String(L.mat).startsWith("flax") ? "#9a8f5f" : "#d8b48a";
             const inp = { width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
-            const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }]];
+            const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }], ["Topsheet", { kind: "topsheet" }], ["Base + steel edges", { kind: "base" }]];
             return (
               <div>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Top of the ski is at the top. Move layers up or down to set the stack order; stiffness depends on where each layer sits. Fabric weight (g/m²) and stringer width are editable per layer.</div>
@@ -8134,25 +8140,24 @@ export default function App() {
                           </>); })()}
                         </div>
                       </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
-                        <button onClick={() => mv(idx, 1)} disabled={idx === stack.length - 1} style={{ background: "transparent", border: "none", color: idx === stack.length - 1 ? C.inputBorder : C.label, cursor: idx === stack.length - 1 ? "default" : "pointer", fontSize: 10, lineHeight: 1, padding: "1px 3px" }}>▲</button>
-                        <button onClick={() => mv(idx, -1)} disabled={idx === 0} style={{ background: "transparent", border: "none", color: idx === 0 ? C.inputBorder : C.label, cursor: idx === 0 ? "default" : "pointer", fontSize: 10, lineHeight: 1, padding: "1px 3px" }}>▼</button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0, width: 16, alignItems: "center" }}>
+                        {!isPinned(L) && (() => { const upDis = idx >= stack.length - 1 || isPinned(stack[idx + 1]); const dnDis = idx <= 0 || isPinned(stack[idx - 1]); return (<>
+                          <button onClick={() => mv(idx, 1)} disabled={upDis} style={{ background: "transparent", border: "none", color: upDis ? C.inputBorder : C.label, cursor: upDis ? "default" : "pointer", fontSize: 10, lineHeight: 1, padding: "1px 3px" }}>▲</button>
+                          <button onClick={() => mv(idx, -1)} disabled={dnDis} style={{ background: "transparent", border: "none", color: dnDis ? C.inputBorder : C.label, cursor: dnDis ? "default" : "pointer", fontSize: 10, lineHeight: 1, padding: "1px 3px" }}>▼</button>
+                        </>); })()}
                       </div>
                       {L.kind !== "core" && <button onClick={() => rm(idx)} title="remove" style={{ background: "transparent", border: "none", color: C.labelDim, cursor: "pointer", fontSize: 14, lineHeight: 1, flexShrink: 0 }}>×</button>}
                     </div>
                   );
                 })}
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <select value="" onChange={e => { const o = ADD.find(a => a[0] === e.target.value); if (o) setStack([...stack, { id: _sid(), ...o[1], ...((o[1].kind === "fabric" || o[1].kind === "uni") ? { gsm: FIBERS[o[1].mat].gsm } : {}) }]); }} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.heading}`, borderRadius: 4, padding: "6px", color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <select value="" onChange={e => { const o = ADD.find(a => a[0] === e.target.value); if (o) addLayer(o[1]); }} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.heading}`, borderRadius: 4, padding: "6px", color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                     <option value="">+ Add layer…</option>
                     {ADD.map(a => <option key={a[0]} value={a[0]}>{a[0]}</option>)}
                   </select>
                   <button onClick={() => setLayup("stack", undefined)} style={{ padding: "6px 10px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: "transparent", color: C.labelDim, border: `1px solid ${C.inputBorder}`, borderRadius: 4, cursor: "pointer" }}>Reset to simple</button>
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", marginTop: 8, color: ski.layup.bareCore ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                  <input type="checkbox" checked={!!ski.layup.bareCore} onChange={e => setLayup("bareCore", e.target.checked)} /> Bare-core flex (ignore base + steel edges)
-                </label>
-                <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Remove the fabric and metal layers above and turn this on to read the flex of just the wood core.</div>
+                <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Remove the topsheet, base, and fabric layers to read the flex of just the wood core. Topsheet and base stay pinned top and bottom.</div>
               </div>
             );
           })() : (<>
