@@ -779,8 +779,11 @@ function computeOutline(ski) {
 
   const tipR = sampleShape(ski.tipNodesR, nSamplesShape);
   const tipL = ski.tipSymmetric ? tipR : sampleShape(ski.tipNodesL, nSamplesShape);
-  const tailR = sampleShape(ski.tailNodesR, nSamplesShape);
-  const tailL = ski.tailSymmetric ? tailR : sampleShape(ski.tailNodesL, nSamplesShape);
+  // Snowboard twin: when tip/tail are locked symmetric, the tail curve mirrors the tip (same shape at both
+  // ends) rather than using its own nodes. Skis keep tip and tail independent (tipTailSym off).
+  const ttSym = !!ski.tipTailSym;
+  const tailR = ttSym ? tipR : sampleShape(ski.tailNodesR, nSamplesShape);
+  const tailL = ttSym ? tipL : (ski.tailSymmetric ? tailR : sampleShape(ski.tailNodesL, nSamplesShape));
 
   const buildSide = (tailPtsNorm, tipPtsNorm, sign, ww2, tipCY, tailCY) => {
     const side = [];
@@ -1076,9 +1079,9 @@ const PRESETS=[
 // Snowboard presets — wide, board-appropriate geometry with stance/setback/insert defaults. The
 // engine is shared with skis; these just carry mode:"snowboard" plus the board-only fields.
 const SNOWBOARD_PRESETS=[
-  makePreset("True Twin",{mode:"snowboard",length:1560,tipWidth:290,waistWidth:250,tailWidth:290,tipLength:230,tailLength:230,stanceWidth:560,setback:0,insertPattern:"2x4"},
+  makePreset("True Twin",{mode:"snowboard",length:1560,tipWidth:290,waistWidth:250,tailWidth:290,tipLength:230,tailLength:230,stanceWidth:560,setback:0,insertPattern:"2x4",tipTailSym:true},
     rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:4,waistPosition:0.50}),
-  makePreset("Dir. Twin",{mode:"snowboard",length:1580,tipWidth:295,waistWidth:252,tailWidth:292,tipLength:250,tailLength:220,stanceWidth:570,setback:20,insertPattern:"2x4"},
+  makePreset("Dir. Twin",{mode:"snowboard",length:1580,tipWidth:295,waistWidth:252,tailWidth:292,tipLength:250,tailLength:220,stanceWidth:570,setback:20,insertPattern:"2x4",tipTailSym:true},
     rT,null,rTa,null,true,true,{tipHeight:45,tailHeight:38,camberHeight:4,waistPosition:0.50}),
   makePreset("Directional",{mode:"snowboard",length:1600,tipWidth:300,waistWidth:255,tailWidth:290,tipLength:275,tailLength:205,stanceWidth:570,setback:30,insertPattern:"2x4"},
     rT,null,rTa,null,true,true,{tipHeight:50,tailHeight:32,camberHeight:3,waistPosition:0.48}),
@@ -3799,8 +3802,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     };
     addShape(ski.tipNodesR, "tipR", true, 1, "tip");
     if (!ski.tipSymmetric) addShape(ski.tipNodesL, "tipL", true, -1, "tip");
-    addShape(ski.tailNodesR, "tailR", false, 1, "tail");
-    if (!ski.tailSymmetric) addShape(ski.tailNodesL, "tailL", false, -1, "tail");
+    if (!ski.tipTailSym) { addShape(ski.tailNodesR, "tailR", false, 1, "tail");
+    if (!ski.tailSymmetric) addShape(ski.tailNodesL, "tailL", false, -1, "tail"); }
     return cps;
   }, [ski, tipContactY, tailContactY, waistY]);
   const cps = useMemo(buildCPs, [buildCPs]);
@@ -4251,8 +4254,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     const tipClip  = { x: tipZoomX  + 3, y: tipZoomY  + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
     drawTangents(toTip, ski.tipNodesR, true, 1, tipClip);
     if (!ski.tipSymmetric) drawTangents(toTip, ski.tipNodesL, true, -1, tipClip);
-    drawTangents(toTail, ski.tailNodesR, false, 1, tailClip);
-    if (!ski.tailSymmetric) drawTangents(toTail, ski.tailNodesL, false, -1, tailClip);
+    if (!ski.tipTailSym) { drawTangents(toTail, ski.tailNodesR, false, 1, tailClip);
+    if (!ski.tailSymmetric) drawTangents(toTail, ski.tailNodesL, false, -1, tailClip); }
 
     // ── Draw control points ─────────────────────────────────────
     const drawCP = (cp, screenPos, scaleMul, doClip) => {
@@ -5012,6 +5015,9 @@ function CoreView({ ski, setSki, width, height }) {
     ctx.font = "9px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 3, baseY - 4);
     ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 3, baseY - 4);
+    ctx.globalAlpha = 0.72;
+    ctx.textAlign = "center"; ctx.fillText("double-click the line to add a point \u00B7 double-click a point to remove", padL + plotW / 2, padT - 6);
+    ctx.globalAlpha = 1;
   }, [ski, width, height, cp, cps, hovered, dragging, toC2, baseY, plotW, plotH, padL, padT, getThickAt]);
 
   const findCP3 = useCallback((mx, my) => {
@@ -8048,6 +8054,27 @@ export default function App() {
           <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title="Snowboard">
             {inputField("Stance W", "stanceWidth", 400, 720)}
             {inputField("Setback", "setback", -40, 80)}
+            <div style={{ marginBottom: 8, marginTop: 2 }}>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tip &amp; Tail Shape</div>
+              <div style={{ display: "flex", gap: 5 }}>
+                {[["Symmetric", true], ["Independent", false]].map(([lbl, symVal]) => {
+                  const active = !!ski.tipTailSym === symVal;
+                  return (
+                    <button key={lbl} onClick={() => setSki(s => symVal
+                      ? { ...s, tipTailSym: true }
+                      : { ...s, tipTailSym: false, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)), tailSymmetric: s.tipSymmetric })}
+                      style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+                        background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                        border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                {ski.tipTailSym ? "Twin: the tail mirrors the tip. Shape the tip on the plan view and the tail follows." : "Directional: tip and tail are shaped independently on the plan view."}
+              </div>
+            </div>
             <div style={{ marginBottom: 7 }}>
               <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
                 Insert Pattern
