@@ -7842,20 +7842,28 @@ export default function App() {
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
-              Build your first ski
+              Build your first {(ski.mode || "ski") === "snowboard" ? "snowboard" : "ski"}
             </div>
             <p style={{ margin: "0 0 12px" }}>
               Work top to bottom through the panels on the left. Each step below matches a panel.
             </p>
-            {[
-              ["1", "Pick a Preset", "Open Presets and choose a starting shape (All-Mtn is a safe first ski). It fills in sensible dimensions you can tweak."],
-              ["2", "Set Dimensions", "In Dimensions, set overall length, tip / waist / tail width, and tip / tail length. Watch the plan view update live."],
-              ["3", "Shape the tip & tail", "Drag the round nodes in the plan view to move contact points and widths. Drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan."],
-              ["4", "Dial the Side Profile", "In Side Profile, set camber and tip / tail rise. This is the rocker line your press mold follows."],
-              ["5", "Choose your Layup", "In Layup / Materials, pick wood core, fiberglass, optional metal and carbon. The Flex panel updates to show how stiff the ski will ride."],
-              ["6", "Check the Flex", "Read the flex rating chip. Adjust core thickness, width, or materials until it feels right for the skier."],
-              ["7", "Set edges & export", "In Edges & Core (Design), set the edge inset, core inset, and Full Wrap vs Contact-to-Contact edges. Then in CNC Export choose Base, Core, Core Side, Core STL, or the Combined file."],
-            ].map(([n, title, body]) => (
+            {((ski.mode || "ski") === "snowboard" ? [
+              ["1", "Pick a Preset", "Open Presets and choose a starting board — True Twin, Dir. Twin, or Directional — or Browse the Database for a reference. It fills in sensible dimensions to tweak."],
+              ["2", "Set Dimensions", "In Dimensions, set overall length and tip / waist / tail width. The plan view updates live."],
+              ["3", "Tip & tail shape", "In the Snowboard panel pick Symmetric (true twin, both ends match) or Asymmetric (directional). Shape the nose by dragging the nodes on the plan view; on a twin the tail follows. Both sides always mirror on a board."],
+              ["4", "Stance, inserts & board type", "Set stance width, setback, and the insert pattern (2x4 / 4x4 / channel). Choose Solid or Splitboard — Splitboard adds the two inner edges to the materials, plots the hardware layout (bindings, touring brackets, tip/tail hooks) on the plan, and shows a build checklist."],
+              ["5", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber is there for triple-camber boards."],
+              ["6", "Layup & Flex", "In Layup / Materials pick the wood core and fabrics, or Customize layer stack to reorder plies, set fabric weights, blend the core, add foam or metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
+              ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
+            ] : [
+              ["1", "Pick a Preset", "Open Presets and choose a starting shape (All-Mtn is a safe first ski), or Browse the Database for a reference. It fills in sensible dimensions to tweak."],
+              ["2", "Set Dimensions", "In Dimensions, set overall length, tip / waist / tail width, tip / tail length, and sidecut. The plan view updates live."],
+              ["3", "Shape the tip & tail", "Drag the round nodes on the plan view to move contacts and widths; drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan."],
+              ["4", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber and a serrated edge are available too."],
+              ["5", "Layup & Flex", "In Layup / Materials pick the wood core and fabrics, or Customize layer stack to reorder plies, set fabric weights, blend the core, add foam or metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
+              ["6", "Check the Flex", "Read the flex rating. Adjust core thickness, width, or materials until it rides right for the skier."],
+              ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
+            ]).map(([n, title, body]) => (
               <div key={n} style={{ display: "flex", gap: 10, marginBottom: 11 }}>
                 <div style={{
                   flexShrink: 0, width: 22, height: 22, borderRadius: 3,
@@ -7871,7 +7879,7 @@ export default function App() {
             ))}
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 4, paddingTop: 10 }}>
               <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
-                Matching a published ski
+                Matching a published {(ski.mode || "ski") === "snowboard" ? "board" : "ski"}
               </div>
               <div style={{ color: C.label, fontSize: 12, lineHeight: 1.55 }}>
                 Two toggles let you reproduce a real ski from its spec sheet — because on a real ski the
@@ -7900,7 +7908,7 @@ export default function App() {
             </div>
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 10, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
               <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
-              <b style={{ color: C.heading }}>What comes next?</b> The exported DXFs are cut on a CNC (the Base file runs as one continuous drag-knife path), and the Core Side profile shapes the wood core for pressing. See External Tools for cutting and press notes.
+              <b style={{ color: C.heading }}>What comes next?</b> Cut the outline and carve the core taper — on a CNC from the CAM workspace or the DXF/STL exports, or by hand from the 1:1 tiled print — then press it in a mold that follows your side profile.{(ski.mode || "ski") === "snowboard" ? " For a splitboard, rip the finished board down the centerline and mount the split hardware to the layout shown on the plan." : ""} See External Tools for cutting and press notes.
             </div>
           </div>
         </AccordionSection>
@@ -7996,6 +8004,48 @@ export default function App() {
             ))}
           </div>
         </AccordionSection>
+
+        {(ski.mode || "ski") === "snowboard" && (
+          <AccordionSection isOpen={sectionsOpen.splitboard !== false} onToggle={() => toggleSection("splitboard")} title="Splitboard">
+            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+              A solid board, or one split down the centerline into two touring skis for skinning uphill? This is the first call — it changes the edges, the hardware, and how you cut.
+            </div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {[["Solid", false], ["Splitboard", true]].map(([lbl, on]) => {
+                const active = !!ski.splitboard === on;
+                return (
+                  <button key={lbl} onClick={() => setSki(s => ({ ...s, splitboard: on }))}
+                    style={{ flex: 1, padding: "6px 4px", fontSize: 11.5, fontWeight: active ? 700 : 400, fontFamily: "'JetBrains Mono', monospace",
+                      background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                      border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+            {ski.splitboard && (
+              <div style={{ marginTop: 8, padding: 9, border: `1px solid ${C.inputBorder}`, borderRadius: 5, background: C.inputBg }}>
+                <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>SPLITBOARD BUILD</div>
+                <div style={{ color: C.labelDim, fontSize: 10.5, lineHeight: 1.55, fontFamily: "'JetBrains Mono', monospace" }}>
+                  Build the board whole, then rip it down the centerline into two touring skis. That center cut needs its own treatment and hardware:
+                  <ul style={{ margin: "7px 0 0", paddingLeft: 16 }}>
+                    <li style={{ marginBottom: 3 }}>Two inner steel edges along the split (active length only) — added to the edge total in Materials. Wood inner edges work but are weaker.</li>
+                    <li style={{ marginBottom: 3 }}>Solid wood core (no foam) wherever hardware mounts — foam won't hold the inserts.</li>
+                    <li style={{ marginBottom: 3 }}>Binding pucks on T-nuts / inserts for ride mode; touring brackets + heel risers for tour mode.</li>
+                    <li style={{ marginBottom: 3 }}>Tip and tail hooks ("Chinese hooks") plus center clips / slider pins to lock the halves together.</li>
+                    <li style={{ marginBottom: 3 }}>Seal the cut inner edges and every insert hole with slow epoxy (e.g. G/flex) — the exposed core soaks up water.</li>
+                    <li>Climbing skins to tour.</li>
+                  </ul>
+                  <div style={{ marginTop: 7 }}>The connecting hardware comes as a kit: Voile's Split Kit / Split Decision is the standard; Karakoram, Spark R&amp;D, and Prowder also sell systems. Buy the kit first and follow its template — its hole pattern drives where your inserts and hooks go.</div>
+                  <div style={{ marginTop: 7, color: C.label }}>On the plan view: blue boxes are the binding positions (exact, from your stance and setback in Stance &amp; Inserts below), green dots are the touring-bracket pivots at the balance point, and orange dots are the tip and tail hooks. These are layout positions to plan around — drill to the kit's own template for the exact M6 holes.</div>
+                  {splitHardware(ski).stanceTooNarrow && (
+                    <div style={{ marginTop: 7, color: C.torch, fontWeight: 700 }}>Stance is under 18 in ({splitHardware(ski).stanceIn.toFixed(1)} in) — Voile warns the pucks can interfere with the touring brackets below that. Consider widening the stance.</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </AccordionSection>
+        )}
 
         <AccordionSection isOpen={sectionsOpen.dimensions} onToggle={() => toggleSection("dimensions")} title="Dimensions (mm)">
           {(() => {
@@ -8120,7 +8170,7 @@ export default function App() {
         </AccordionSection>
 
         {(ski.mode || "ski") === "snowboard" && (
-          <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title="Snowboard">
+          <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title="Stance & Inserts">
             {inputField("Stance W", "stanceWidth", 400, 720)}
             {inputField("Setback", "setback", -40, 80)}
             <div style={{ marginBottom: 8, marginTop: 2 }}>
@@ -8167,43 +8217,6 @@ export default function App() {
                   : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
                 {" "}Stance {(ski.stanceWidth/10).toFixed(1)}cm · setback from effective-edge center.
               </div>
-            </div>
-            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.inputBorder}` }}>
-              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Board Type</div>
-              <div style={{ display: "flex", gap: 5 }}>
-                {[["Solid", false], ["Splitboard", true]].map(([lbl, on]) => {
-                  const active = !!ski.splitboard === on;
-                  return (
-                    <button key={lbl} onClick={() => setSki(s => ({ ...s, splitboard: on }))}
-                      style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                        background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
-                        border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
-                      {lbl}
-                    </button>
-                  );
-                })}
-              </div>
-              {ski.splitboard && (
-                <div style={{ marginTop: 8, padding: 9, border: `1px solid ${C.inputBorder}`, borderRadius: 5, background: C.inputBg }}>
-                  <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>SPLITBOARD BUILD</div>
-                  <div style={{ color: C.labelDim, fontSize: 10.5, lineHeight: 1.55, fontFamily: "'JetBrains Mono', monospace" }}>
-                    Build the board whole, then rip it down the centerline into two touring skis. That center cut needs its own treatment and hardware:
-                    <ul style={{ margin: "7px 0 0", paddingLeft: 16 }}>
-                      <li style={{ marginBottom: 3 }}>Two inner steel edges along the split (active length only) — added to the edge total in Materials. Wood inner edges work but are weaker.</li>
-                      <li style={{ marginBottom: 3 }}>Solid wood core (no foam) wherever hardware mounts — foam won't hold the inserts.</li>
-                      <li style={{ marginBottom: 3 }}>Binding pucks on T-nuts / inserts for ride mode; touring brackets + heel risers for tour mode.</li>
-                      <li style={{ marginBottom: 3 }}>Tip and tail hooks ("Chinese hooks") plus center clips / slider pins to lock the halves together.</li>
-                      <li style={{ marginBottom: 3 }}>Seal the cut inner edges and every insert hole with slow epoxy (e.g. G/flex) — the exposed core soaks up water.</li>
-                      <li>Climbing skins to tour.</li>
-                    </ul>
-                    <div style={{ marginTop: 7 }}>The connecting hardware comes as a kit: Voile's Split Kit / Split Decision is the standard; Karakoram, Spark R&amp;D, and Prowder also sell systems. Buy the kit first and follow its template — its hole pattern drives where your inserts and hooks go.</div>
-                    <div style={{ marginTop: 7, color: C.label }}>On the plan view: blue boxes are the binding positions (exact, from your stance and setback), green dots are the touring-bracket pivots at the balance point, and orange dots are the tip and tail hooks. These are layout positions to plan around — drill to the kit's own template for the exact M6 holes.</div>
-                    {splitHardware(ski).stanceTooNarrow && (
-                      <div style={{ marginTop: 7, color: C.torch, fontWeight: 700 }}>Stance is under 18 in ({splitHardware(ski).stanceIn.toFixed(1)} in) — Voile warns the pucks can interfere with the touring brackets below that. Consider widening the stance.</div>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </AccordionSection>
         )}
