@@ -7638,18 +7638,26 @@ export default function App() {
           </button>
         )}
 
-        {/* Brand: logo + divider + tool name */}
+        {/* Brand: logo + divider + tool name + divider + mode switch. Logo/divider/title match BrandBar
+            (CAM + Topsheet) exactly, so only the type to the right of the logo changes between screens. */}
         <div style={{ display: "flex", alignItems: "center", gap: isCompact ? 10 : 14, flex: 1, overflow: "hidden" }}>
           <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", lineHeight: 0, flexShrink: 0 }}>
-            <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: isCompact ? 30 : 40, width: "auto", display: "block" }} />
+            <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: isCompact ? 30 : 34, width: "auto", display: "block" }} />
           </a>
-          {!isCompact && <div style={{ width: 1, height: 26, background: C.panelBorder, flexShrink: 0 }} />}
-          <div style={{ overflow: "hidden" }}>
-            <div style={{ color: C.label, fontSize: 11, letterSpacing: "0.22em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {!isCompact && <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />}
+          <div style={{ minWidth: 0, overflow: "hidden" }}>
+            <div style={{ color: C.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {(ski.mode === "snowboard" ? "Snowboard Designer" : "Ski Designer")}
-              {ski.designName && ski.designName !== "Untitled Design" && ski.designName !== "Untitled Board" ? ` · ${ski.designName}` : ""}
+              {ski.designName && ski.designName !== "Untitled Design" && ski.designName !== "Untitled Board" ? <span style={{ color: C.labelDim }}> · {ski.designName}</span> : null}
             </div>
           </div>
+          {!isCompact && <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />}
+          {!isCompact && (
+            <button onClick={() => switchMode(ski.mode === "snowboard" ? "ski" : "snowboard")}
+              style={{ flexShrink: 0, whiteSpace: "nowrap", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "7px 13px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.7, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>
+              {ski.mode === "snowboard" ? "Go to Ski Designer" : "Go to Snowboard Designer"}
+            </button>
+          )}
         </div>
 
         {/* Right-side actions */}
