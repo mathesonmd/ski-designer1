@@ -291,6 +291,7 @@ const DEFAULT_SKI={
   stanceWidth:560,   // mm, center-to-center of the two binding insert packs (rider reference stance).
   setback:0,         // mm the stance center sits BEHIND the effective-edge center (0 = true twin).
   insertPattern:"2x4", // "2x4" (40mm across × 20mm along, modern standard), "4x4" (40×40), "channel".
+  splitboard:false,  // splits down the centerline into two touring skis: adds two inner edges + split hardware.
   // ── Core tip/tail V-cut fill (skis + boards) ──
   // A symmetric V notch where the wood core ENDS: base runs edge-to-edge across the core at the
   // contact point, two equal sides converge to an apex pointing toward the tip/tail end. The
@@ -621,7 +622,11 @@ function computeBOM(ski) {
   let effEdge = 0, effEdgeSum = 0;
   try { const d = computeDerived(ski); effEdge = d.effectiveEdge || 0; effEdgeSum = ski.asymContact ? (d.effectiveEdgeOutside + d.effectiveEdgeInside) : 2 * effEdge; } catch (e) {}
   const edgeWrap = ski.edgeWrap || "full";
-  const edgeLenM = (edgeWrap === "contact" ? effEdgeSum : perimMM) / 1000;
+  let edgeLenM = (edgeWrap === "contact" ? effEdgeSum : perimMM) / 1000;
+  // Splitboard: cutting the board in half creates two inner edges along the centerline. Builders steel only
+  // the active (contact-to-contact) length of each, so add ~2× the running length of edge material.
+  const splitInnerEdgeM = ski.splitboard ? 2 * Math.max(0, (ski.length - ski.tipLength - ski.tailLength)) / 1000 : 0;
+  edgeLenM += splitInnerEdgeM;
   const glassLayers = (ski.layup && ski.layup.glassLayers) || 1;
   const glassBotLayers = (ski.layup && ski.layup.fabricSplit) ? ((ski.layup.glassBotLayers) || 1) : glassLayers;
   let glassM2 = areaM2 * (glassLayers + glassBotLayers);   // top + bottom faces (may differ if split)
@@ -768,6 +773,25 @@ function insertPolys(ski, ins) {
   if (iy1 - iy0 < 4) return { outer, inner: null };   // too small to hollow
   const inner = loop(iy0, iy1, (f) => Math.max(0, halfAt(iy1 > iy0 ? ((iy0 + f * (iy1 - iy0)) - y0) / (y1 - y0) : f) - bw));
   return { outer, inner };
+}
+
+// Splitboard hardware layout, derived from the board's own geometry. Binding positions are exact (from the
+// rider's stance and setback); the touring bracket sits at the balance point (geometric centre of the
+// running length); tip/tail hooks sit a nominal distance in from the ends. All positions are LAYOUT only —
+// the exact hole pattern (M6, Voile-owned) comes from the kit template. Ski coords: x lateral, y = length.
+function splitHardware(ski) {
+  const L = ski.length, runStart = ski.tailLength || 0, runEnd = L - (ski.tipLength || 0);
+  const effCenter = (runStart + runEnd) / 2;
+  const stanceCenter = effCenter - (ski.setback || 0);
+  const half = (ski.stanceWidth || 560) / 2;
+  const stanceIn = ski.stanceWidth ? ski.stanceWidth / 25.4 : 22;   // inches, for the >=18" guideline
+  return {
+    effCenter,
+    feet: [{ y: stanceCenter - half, label: "BACK" }, { y: stanceCenter + half, label: "FRONT" }],
+    bracketY: Math.min(runEnd - 20, effCenter + 25),   // touring pivot just ahead of balance
+    tipHookY: L - 55, tailHookY: 55,
+    stanceIn, stanceTooNarrow: stanceIn < 18,
+  };
 }
 
 function computeOutline(ski) {
@@ -3894,6 +3918,38 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
+
+    // Splitboard: the centerline is where the finished board is ripped into two touring skis.
+    if (ski.splitboard) {
+      ctx.save();
+      const a = toMain(0, 0), b = toMain(0, ski.length);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = C.torch || "#e8552a"; ctx.lineWidth = 1.6; ctx.setLineDash([10, 6]); ctx.stroke();
+      ctx.setLineDash([]);
+      const m = toMain(0, ski.length * 0.5);
+      ctx.fillStyle = C.torch || "#e8552a"; ctx.font = "bold 9px 'JetBrains Mono', monospace";
+      ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      ctx.fillText("SPLIT", m.x, m.y - 4);
+      ctx.restore();
+
+      // Hardware layout: binding footprints (exact, from stance), touring brackets (balance point), hooks.
+      const hw = splitHardware(ski);
+      ctx.save();
+      ctx.font = "bold 8px 'JetBrains Mono', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const bw = 52, bl = 44;   // binding footprint straddling the split
+      for (const ft of hw.feet) {
+        const c = [toMain(-bw, ft.y - bl / 2), toMain(bw, ft.y - bl / 2), toMain(bw, ft.y + bl / 2), toMain(-bw, ft.y + bl / 2)];
+        ctx.beginPath(); c.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.closePath();
+        ctx.fillStyle = "rgba(58,120,216,0.14)"; ctx.fill();
+        ctx.strokeStyle = "#3a78d8"; ctx.lineWidth = 1.4; ctx.stroke();
+        const lc = toMain(0, ft.y); ctx.fillStyle = "#3a78d8"; ctx.fillText(ft.label, lc.x, lc.y);
+      }
+      ctx.fillStyle = "#0a8a5f";   // touring brackets, one per half
+      for (const sgn of [-1, 1]) { const p = toMain(sgn * 26, hw.bracketY); ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 2 * Math.PI); ctx.fill(); }
+      ctx.fillStyle = "#e8552a";   // tip + tail hooks on the split
+      for (const y of [hw.tipHookY, hw.tailHookY]) { const p = toMain(0, y); ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 2 * Math.PI); ctx.fill(); }
+      ctx.restore();
+    }
 
     // Shaped metal/carbon inserts drawn on top of the shape (Rustler strip / Mantra frame).
     if (Array.isArray(ski.inserts) && ski.inserts.length) {
@@ -8111,6 +8167,43 @@ export default function App() {
                   : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
                 {" "}Stance {(ski.stanceWidth/10).toFixed(1)}cm · setback from effective-edge center.
               </div>
+            </div>
+            <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.inputBorder}` }}>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Board Type</div>
+              <div style={{ display: "flex", gap: 5 }}>
+                {[["Solid", false], ["Splitboard", true]].map(([lbl, on]) => {
+                  const active = !!ski.splitboard === on;
+                  return (
+                    <button key={lbl} onClick={() => setSki(s => ({ ...s, splitboard: on }))}
+                      style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+                        background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
+                        border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+              {ski.splitboard && (
+                <div style={{ marginTop: 8, padding: 9, border: `1px solid ${C.inputBorder}`, borderRadius: 5, background: C.inputBg }}>
+                  <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>SPLITBOARD BUILD</div>
+                  <div style={{ color: C.labelDim, fontSize: 10.5, lineHeight: 1.55, fontFamily: "'JetBrains Mono', monospace" }}>
+                    Build the board whole, then rip it down the centerline into two touring skis. That center cut needs its own treatment and hardware:
+                    <ul style={{ margin: "7px 0 0", paddingLeft: 16 }}>
+                      <li style={{ marginBottom: 3 }}>Two inner steel edges along the split (active length only) — added to the edge total in Materials. Wood inner edges work but are weaker.</li>
+                      <li style={{ marginBottom: 3 }}>Solid wood core (no foam) wherever hardware mounts — foam won't hold the inserts.</li>
+                      <li style={{ marginBottom: 3 }}>Binding pucks on T-nuts / inserts for ride mode; touring brackets + heel risers for tour mode.</li>
+                      <li style={{ marginBottom: 3 }}>Tip and tail hooks ("Chinese hooks") plus center clips / slider pins to lock the halves together.</li>
+                      <li style={{ marginBottom: 3 }}>Seal the cut inner edges and every insert hole with slow epoxy (e.g. G/flex) — the exposed core soaks up water.</li>
+                      <li>Climbing skins to tour.</li>
+                    </ul>
+                    <div style={{ marginTop: 7 }}>The connecting hardware comes as a kit: Voile's Split Kit / Split Decision is the standard; Karakoram, Spark R&amp;D, and Prowder also sell systems. Buy the kit first and follow its template — its hole pattern drives where your inserts and hooks go.</div>
+                    <div style={{ marginTop: 7, color: C.label }}>On the plan view: blue boxes are the binding positions (exact, from your stance and setback), green dots are the touring-bracket pivots at the balance point, and orange dots are the tip and tail hooks. These are layout positions to plan around — drill to the kit's own template for the exact M6 holes.</div>
+                    {splitHardware(ski).stanceTooNarrow && (
+                      <div style={{ marginTop: 7, color: C.torch, fontWeight: 700 }}>Stance is under 18 in ({splitHardware(ski).stanceIn.toFixed(1)} in) — Voile warns the pucks can interfere with the touring brackets below that. Consider widening the stance.</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </AccordionSection>
         )}
