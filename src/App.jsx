@@ -690,11 +690,19 @@ function computeBOM(ski) {
       insertAreaM2 += a / 1e6;
     } catch (e) {}
   }
+  // Sidewall mass: two strips down the edges, thickness/side × core height × running length. Core height
+  // averages ~60% of the peak over the taper, so estimate with that rather than integrating.
+  let sidewallMassKg = 0;
+  const swBom = sidewallProps(ski.layup && ski.layup.sidewall);
+  if (swBom && swBom.thick > 0 && swBom.density > 0) {
+    const runLen = Math.max(0, ski.length - ski.tipLength - ski.tailLength);
+    sidewallMassKg = (2 * swBom.thick * maxThick * 0.6 * runLen) / 1e9 * swBom.density;
+  }
   return {
     areaM2, perimM: perimMM / 1000, coreVolL, coreMassKg, maxThick, density,
     blank: { L: ski.length, W: Math.ceil(maxW + 10), T: Math.ceil(maxThick + 2) },
     edgeLenM, edgeWrap, glassLayers, glassM2, metalM2, carbonLayers, carbonM2,
-    baseM2: areaM2, topsheetM2: areaM2, inserts, epoxyKg, insertMassKg, insertAreaM2,
+    baseM2: areaM2, topsheetM2: areaM2, inserts, epoxyKg, insertMassKg, insertAreaM2, sidewallMassKg,
   };
 }
 
@@ -2941,10 +2949,13 @@ function buildLayerStackSVG(ski, opts) {
     fabricC: { fill: "#4b4742", txt: bone }, fabricF: { fill: "#8a9a5f", txt: "#141210" },
     metal: { fill: "#8f99a6", txt: "#141210" }, stringerC: { fill: "#e8552a", txt: "#141210" },
     stringerG: { fill: "#d8b48a", txt: "#141210" }, core: { fill: "#b0824e", txt: "#141210" },
-    base: { fill: "#1c1a17", txt: dim },
+    base: { fill: "#1c1a17", txt: dim }, sidewall: { fill: "#6e6a63", txt: bone },
   };
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const S = layupStack(ski), gap = 3;
+  const swp = sidewallProps(ski.layup && ski.layup.sidewall);
+  const skiW = Math.max(ski.tipWidth || 100, ski.waistWidth || 100, ski.tailWidth || 100);
+  const swName = swp ? ((ski.layup.sidewall.mat === "custom") ? "Sidewall" : ((SIDEWALL_MATERIALS[ski.layup.sidewall.mat] || {}).name || "Sidewall")) : "";
   const hOf = L => L.role === "core" ? Math.max(38, Math.min(62, 16 + L.thick * 4)) : Math.max(20, Math.min(34, 13 + L.thick * 7));
   let totalH = S.reduce((a, L) => a + hOf(L) + gap, 0) - gap;
   const scale = (o.maxH && totalH > o.maxH) ? o.maxH / totalH : 1;
@@ -2953,10 +2964,17 @@ function buildLayerStackSVG(ski, opts) {
     const h = hOf(L) * scale, c = COL[L.role] || COL.fabric;
     const bw = w, bx = x;   // every layer spans full width so labels never clip
     bars += `<rect x="${bx.toFixed(1)}" y="${cy.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${c.fill}" stroke="${border}" stroke-width="0.8"/>`;
+    // Sidewalls: strips down each edge of the core row, so the layup image shows what fills the Core-Inset gap.
+    if (L.role === "core" && swp && swp.thick > 0) {
+      const swPx = Math.max(9, Math.min(bw * 0.2, bw * swp.thick / Math.max(1, skiW)));
+      for (const sx of [bx, bx + bw - swPx]) bars += `<rect x="${sx.toFixed(1)}" y="${cy.toFixed(1)}" width="${swPx.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${COL.sidewall.fill}" stroke="${border}" stroke-width="0.8"/>`;
+      if (swPx > 24 && h >= 22) { const lx = bx + swPx / 2, ly = cy + h / 2; bars += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="10" fill="${COL.sidewall.txt}" font-family="monospace" text-anchor="middle" transform="rotate(-90 ${lx.toFixed(1)} ${ly.toFixed(1)})">${esc(swName)}</text>`; }
+    }
     if (L.count > 1) for (let k = 1; k < L.count; k++) { const ly = cy + h * k / L.count; bars += `<line x1="${bx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(bx + bw).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${c.txt}" stroke-opacity="0.35" stroke-width="0.6"/>`; }
     if (h >= 13) {
       const fs = Math.min(17, Math.max(12, h * 0.6)).toFixed(0);
-      bars += `<text x="${(bx + 10).toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace" font-weight="bold">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
+      const lblX = (L.role === "core" && swp && swp.thick > 0) ? (bx + Math.max(9, Math.min(bw * 0.2, bw * swp.thick / Math.max(1, skiW))) + 8) : (bx + 10);
+      bars += `<text x="${lblX.toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace" font-weight="bold">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
       bars += `<text x="${(bx + bw - 10).toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="13" fill="${c.txt}" font-family="monospace" text-anchor="end" opacity="0.85">${L.thick.toFixed(1)}mm${L.role === "core" ? " max" : ""}</text>`;
     }
     cy += h + gap * scale;
@@ -8792,6 +8810,7 @@ export default function App() {
                   {stat("Core blank", `${bom.blank.L}\u00D7${bom.blank.W}\u00D7${bom.blank.T} mm`)}
                   {stat("Planform", `${(bom.areaM2 * 1e4).toFixed(0)} cm\u00B2`)}
                   {bom.insertMassKg > 0 && stat("Inserts", `~${bom.insertMassKg.toFixed(2)} kg`, C.heading)}
+                  {bom.sidewallMassKg > 0 && stat("Sidewalls", `~${bom.sidewallMassKg.toFixed(2)} kg`, C.heading)}
                 </div>
               </>
             );
