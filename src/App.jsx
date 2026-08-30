@@ -122,7 +122,7 @@ const CARBON = {
   glassMedium:{name:"Glass UD 25mm",E:40000,width:25,thick:0.5},
   glassWide:{name:"Glass UD Full",E:40000,width:0,thick:0.5},
 };
-const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=2,BASE_E=800,BASE_THICK=1.2,TOPSHEET_E=1500,TOPSHEET_THICK=0.5;
+const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=1.8,BASE_E=800,BASE_THICK=1.2,TOPSHEET_E=1500,TOPSHEET_THICK=0.5;
 
 // ── Custom layer stack ──
 // Unified fibre palette for the drag-order stack. E is the laminate modulus (MPa); ply thickness is derived
@@ -164,7 +164,7 @@ const fabricEff = L => { if (L.gsm0 != null && L.gsm45 != null && (L.gsm0 + L.gs
 function stackToLayers(stack, skiWidth, coreThick) {
   const out = [];
   for (const L of stack || []) {
-    if (L.kind === "base") { out.push({ E: BASE_E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: EDGE_H, role: "edge" }); }
+    if (L.kind === "base") { out.push({ E: BASE_E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: (L.edgeThick != null ? L.edgeThick : EDGE_H), role: "edge" }); }
     else if (L.kind === "topsheet") { out.push({ E: TOPSHEET_E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
     else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
@@ -8433,20 +8433,23 @@ export default function App() {
             Narrows the wood core inside the edges (sidewall material) per side.
           </div>
 
-          <div style={{ marginTop: 8, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points</div>
+          <div style={{ marginTop: 8, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 5 }}>
-            {(ski.coreProfile || []).map((nd, i) => (
+            {(ski.coreProfile || []).map((nd, i) => ({ nd, i })).reverse().map(({ nd, i }) => {
+              const last = (ski.coreProfile || []).length - 1;
+              const end = i === last ? "tip" : i === 0 ? "tail" : "";
+              return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ color: C.labelDim, fontSize: 10, width: 58, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(nd.pos * ski.length)} mm</span>
+                <span style={{ color: end ? C.heading : C.labelDim, fontSize: 10, width: 74, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{end ? end.toUpperCase() + " " : ""}{Math.round(nd.pos * ski.length)} mm</span>
                 <input type="number" value={Number(nd.thick).toFixed(1)} step={0.1} min={0.5} max={40}
                   onChange={e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; setSki(s => ({ ...s, coreProfile: s.coreProfile.map((n, j) => j === i ? { ...n, thick: v } : n) })); }}
                   style={{ width: 70, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 8px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
                 <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>mm thick</span>
               </div>
-            ))}
+            ); })}
           </div>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Type an exact value (e.g. 10.8) for any point — position is mm from the tail. Or drag the points in the Core view; double-click the line there to add one.
+            Tip is at the top, tail at the bottom. Type an exact value (e.g. 10.8) for any point — position is mm from the tail. Or drag the points in the Core view; double-click the line there to add one.
           </div>
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>SIDEWALLS</div>
@@ -8561,7 +8564,12 @@ export default function App() {
                           </>))}
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
                           {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
-                          {L.kind === "base" && <><input type="number" value={L.thick != null ? L.thick : 1.2} step={0.1} min={0.5} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 1.2 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm base (P-tex)</span></>}
+                          {L.kind === "base" && (() => { const gL = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }; const et = L.edgeThick != null ? L.edgeThick : 1.8; const opts = [0.9, 1.2, 1.4, 1.5, 1.8]; const preset = opts.includes(et); return (<>
+                            <input type="number" value={L.thick != null ? L.thick : 1.2} step={0.1} min={0.5} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 1.2 })} style={inp} /><span style={gL}>mm base (P-tex)</span>
+                            <span style={gL}>· edge</span>
+                            <select value={preset ? String(et) : "custom"} onChange={e => { if (e.target.value === "custom") upd(idx, { edgeThick: et }); else upd(idx, { edgeThick: parseFloat(e.target.value) }); }} style={{ ...inp, width: "auto" }}>{opts.map(v => <option key={v} value={String(v)}>{v.toFixed(1)} mm</option>)}<option value="custom">custom…</option></select>
+                            {!preset && <><input type="number" value={et} step={0.1} min={0.3} max={4} onChange={e => upd(idx, { edgeThick: parseFloat(e.target.value) || 1.8 })} style={{ ...inp, width: 52 }} /><span style={gL}>mm</span></>}
+                          </>); })()}
                           {L.kind === "core" && (() => {
                             const cp = coreProps(L); const gLab = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
                             const ws = coreWoods(L);
