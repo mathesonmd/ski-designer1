@@ -294,6 +294,8 @@ function syncCoreContacts(ski){
   });
 }
 const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,fabricSplit:false,glassBot:"triax23",glassBotLayers:1,metal:"none",carbon:"none",carbonLayers:1};
+// Desktop main-canvas views, top → bottom. Multi-select: any subset can be shown at once.
+const SKI_VIEWS = ["plan", "profile", "core", "flex", "layers"];
 const DEFAULT_SKI={
   designName: "Untitled Design",
   mode: "ski",       // "ski" | "snowboard". Snowboard mode reveals stance/setback/insert controls
@@ -6817,6 +6819,16 @@ export default function App() {
     if (typeof window !== "undefined" && window.innerWidth < 1024) return "plan";
     return "all";
   });
+  // Desktop: which of the five canvas views are visible. Default all; clicking one from All isolates it,
+  // then each further click adds/removes a view, so you can see any 1–5 at once (e.g. Layup + Core).
+  const [activeViews, setActiveViews] = useState(() => new Set(SKI_VIEWS));
+  const toggleView = (v) => setActiveViews(prev => {
+    if (prev.size >= SKI_VIEWS.length) return new Set([v]);   // from All, a click isolates that view
+    const next = new Set(prev);
+    next.has(v) ? next.delete(v) : next.add(v);
+    return next.size === 0 ? new Set(SKI_VIEWS) : next;        // never blank — empty reverts to All
+  });
+  const showAllViews = () => setActiveViews(new Set(SKI_VIEWS));
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 1200, h: 800 });
   const derived = useMemo(() => computeDerived(ski), [ski]);
@@ -7518,35 +7530,41 @@ export default function App() {
   //
   // Reserve ~34px at the top of "analysis" mode for a small "expand these on desktop" banner.
   const analysisNoticeH = isCompact ? 34 : 0;
-  let effectiveActiveView;
+  let effectiveActiveView = "all";
   if (isCompact) {
     effectiveActiveView = (activeView === "plan") ? "plan" : "analysis";
+    if (effectiveActiveView === "plan") planH = canvasAreaH;
+    else {
+      const available = canvasAreaH - analysisNoticeH;
+      profH = Math.floor(available / 3);
+      coreH = Math.floor(available / 3);
+      flexH = available - profH - coreH;
+    }
   } else {
-    effectiveActiveView = activeView;
-  }
-  if (effectiveActiveView === "cam") effectiveActiveView = "plan";   // Path view lives in the CAM workspace now
-  if (effectiveActiveView === "plan")           planH = canvasAreaH;
-  else if (effectiveActiveView === "profile")   profH = canvasAreaH;
-  else if (effectiveActiveView === "core")      coreH = canvasAreaH;
-  else if (effectiveActiveView === "flex")      flexH = canvasAreaH;
-  else if (effectiveActiveView === "layers")    layersH = canvasAreaH;
-  else if (effectiveActiveView === "cam")       camH = canvasAreaH;
-  else if (effectiveActiveView === "analysis") {
-    // Compact stacked analysis: divide remaining area equally among Profile, Core, Flex.
-    const available = canvasAreaH - analysisNoticeH;
-    profH = Math.floor(available / 3);
-    coreH = Math.floor(available / 3);
-    flexH = available - profH - coreH;
-  } else {
-    // Desktop "All" — give the layup band its natural height (capped) so it never needs scrolling, and
-    // compress the other rows to make room.
-    const stackNatH = buildLayerStackSVG(ski, { w: 460 }).height + 70;
-    layersH = Math.min(stackNatH, Math.floor(canvasAreaH * 0.42));
-    const rest = canvasAreaH - layersH;
-    planH = Math.floor(rest * 0.50);
-    profH = Math.floor(rest * 0.16);
-    coreH = Math.floor(rest * 0.17);
-    flexH = rest - planH - profH - coreH;
+    // Desktop: draw whichever views are in the active set.
+    const sel = activeViews, n = sel.size;
+    if (n >= SKI_VIEWS.length) {
+      // "All" — give the layup band its natural height (capped) and compress the rest to fit.
+      const stackNatH = buildLayerStackSVG(ski, { w: 460 }).height + 70;
+      layersH = Math.min(stackNatH, Math.floor(canvasAreaH * 0.42));
+      const rest = canvasAreaH - layersH;
+      planH = Math.floor(rest * 0.50);
+      profH = Math.floor(rest * 0.16);
+      coreH = Math.floor(rest * 0.17);
+      flexH = rest - planH - profH - coreH;
+    } else if (n === 1) {
+      const v = [...sel][0];
+      if (v === "plan") planH = canvasAreaH; else if (v === "profile") profH = canvasAreaH; else if (v === "core") coreH = canvasAreaH; else if (v === "flex") flexH = canvasAreaH; else if (v === "layers") layersH = canvasAreaH;
+    } else {
+      // A subset of 2–4: give the layup its natural height (capped) if shown, split the rest by weight.
+      let remaining = canvasAreaH;
+      if (sel.has("layers")) { const nat = buildLayerStackSVG(ski, { w: 460 }).height + 70; layersH = Math.min(nat, Math.floor(canvasAreaH * (n === 2 ? 0.52 : 0.42))); remaining -= layersH; }
+      const WT = { plan: 3, profile: 1, core: 1, flex: 1 };
+      const others = SKI_VIEWS.filter(v => v !== "layers" && sel.has(v));
+      const sumW = others.reduce((a, v) => a + WT[v], 0) || 1;
+      let used = 0;
+      others.forEach((v, i) => { const h = (i === others.length - 1) ? (remaining - used) : Math.floor(remaining * WT[v] / sumW); used += h; if (v === "plan") planH = h; else if (v === "profile") profH = h; else if (v === "core") coreH = h; else if (v === "flex") flexH = h; });
+    }
   }
 
   const setLayup = (key, val) => setSki(s => ({ ...s, layup: { ...s.layup, [key]: val } }));
@@ -7605,6 +7623,29 @@ export default function App() {
       fontWeight: effectiveActiveView === val ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
     }}>{label}</button>
   );
+  // Desktop multi-select view buttons: each toggles its view in/out of the visible set.
+  const viewToggle = (label, val) => {
+    const on = activeViews.has(val) && activeViews.size < SKI_VIEWS.length;   // in All mode, only the All button lights
+    return (
+      <button onClick={() => toggleView(val)} style={{
+        flex: 1, padding: "6px 0", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+        background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+        border: `1px solid ${on ? C.heading : C.inputBorder}`,
+        borderRadius: 5, cursor: "pointer", fontWeight: on ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
+      }}>{label}</button>
+    );
+  };
+  const allViewsBtn = () => {
+    const on = activeViews.size >= SKI_VIEWS.length;
+    return (
+      <button onClick={showAllViews} style={{
+        flex: 1, padding: "6px 0", fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+        background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label,
+        border: `1px solid ${on ? C.heading : C.inputBorder}`,
+        borderRadius: 5, cursor: "pointer", fontWeight: on ? 700 : 400, textTransform: "uppercase", letterSpacing: 0.7
+      }}>All</button>
+    );
+  };
   // Section-group header. Carries a ref for jump-to scrolling and a click target that collapses /
   // expands every panel in the group at once. The info bubble keeps the one-line guidance a tap away.
   const groupHeader = (group) => {
@@ -8061,7 +8102,7 @@ export default function App() {
               </>
             ) : (
               <>
-                {viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("Layup", "layers")}{viewBtn("All", "all")}
+                {viewToggle("Plan", "plan")}{viewToggle("Prof", "profile")}{viewToggle("Core", "core")}{viewToggle("Flex", "flex")}{viewToggle("Layup", "layers")}{allViewsBtn()}
               </>
             )}
           </div>
@@ -8994,7 +9035,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ flexShrink: 0, display: "flex", gap: 4, padding: "7px 10px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel, alignItems: "center", overflowX: "auto" }}>
           <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, marginRight: 4, flexShrink: 0 }}>VIEW</span>
-          {isCompact ? (<>{viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}</>) : (<>{viewBtn("Plan", "plan")}{viewBtn("Prof", "profile")}{viewBtn("Core", "core")}{viewBtn("Flex", "flex")}{viewBtn("Layup", "layers")}{viewBtn("All", "all")}</>)}
+          {isCompact ? (<>{viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}</>) : (<>{viewToggle("Plan", "plan")}{viewToggle("Prof", "profile")}{viewToggle("Core", "core")}{viewToggle("Flex", "flex")}{viewToggle("Layup", "layers")}{allViewsBtn()}</>)}
         </div>
         {effectiveActiveView === "analysis" && (
           <div style={{
