@@ -67,14 +67,25 @@ const CORE_MATERIALS = { ...WOODS,
 // fraction: density is the exact arithmetic mean (mass is additive); modulus uses the Voigt/parallel model
 // (E = Σ fᵢEᵢ), the correct bound for materials running lengthwise along the core (e.g. hardwood or foam
 // stringers parallel to the load). A measured density, if entered, overrides the computed one for weight.
+// The core is a blend of 1-4 wood/foam varieties, each with an optional density override and a percentage
+// (percentages sum to 100). coreWoods returns that list, migrating older mat / mat2 / pct2 designs. Density
+// is the percentage-weighted mean of each variety's density; modulus is the Voigt (parallel) bound over
+// their table moduli, with an optional blend-level modulus override (L.E).
+function coreWoods(L) {
+  if (Array.isArray(L.woods) && L.woods.length) return L.woods;
+  const first = { mat: L.mat || L.wood || "poplar", pct: 100 };
+  if (L.density != null && L.density > 0) first.density = L.density;   // carry a legacy density override
+  if (L.mat2 && L.pct2 > 0) { first.pct = 100 - L.pct2; return [first, { mat: L.mat2, pct: L.pct2 }]; }
+  return [first];
+}
 function coreProps(L) {
   const M = k => CORE_MATERIALS[k] || CORE_MATERIALS.poplar;
-  const m1 = M(L.mat || L.wood);
-  const f2 = (L.mat2 && L.pct2 > 0) ? Math.min(1, L.pct2 / 100) : 0;
-  const m2 = f2 ? M(L.mat2) : null;
-  const E = m1.E * (1 - f2) + (m2 ? m2.E * f2 : 0);
-  const densityComputed = m1.density * (1 - f2) + (m2 ? m2.density * f2 : 0);
-  return { E, density: (L.density != null && L.density > 0) ? L.density : densityComputed, densityComputed };
+  const ws = coreWoods(L);
+  let dSum = 0, eSum = 0, pSum = 0;
+  for (const w of ws) { const m = M(w.mat); const pct = w.pct != null ? w.pct : (100 / ws.length); const dens = (w.density != null && w.density > 0) ? w.density : m.density; dSum += dens * pct; eSum += m.E * pct; pSum += pct; }
+  const densityComputed = pSum > 0 ? dSum / pSum : M(ws[0].mat).density;
+  const eComputed = pSum > 0 ? eSum / pSum : M(ws[0].mat).E;
+  return { E: (L.E != null && L.E > 0) ? L.E : eComputed, density: densityComputed, densityComputed, eComputed };
 }
 const GLASS = {
   triax23:{name:"Glass Triax 23oz",E:26900,thick:0.57},triax19:{name:"Glass Triax 19oz",E:24200,thick:0.48},
@@ -2918,7 +2929,7 @@ function layupStack(ski) {
       const L = lu.stack[i];
       if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
       else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: (L.thick != null ? L.thick : 1.2), count: 1 }); }
-      else if (L.kind === "core") { const cp = coreProps(L); const nm = (L.mat2 && L.pct2 > 0) ? `${(CORE_MATERIALS[L.mat || L.wood] || {}).name || "Wood"} + ${CORE_MATERIALS[L.mat2] ? CORE_MATERIALS[L.mat2].name : "?"} core` : ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name || "Wood") + " core"; St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
+      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const nm = ws.length > 1 ? (ws.map(w => (CORE_MATERIALS[w.mat] || {}).name || "Wood").join(" + ") + " core") : (((CORE_MATERIALS[ws[0].mat] || WOODS.poplar).name || "Wood") + " core"); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
       else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const role = L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : isF(L.mat) ? "fabricF" : "stringerC") : (isC(L.mat) ? "fabricC" : isF(L.mat) ? "fabricF" : "fabric"); const eff = L.kind === "fabric" ? fabricEff(L) : null; const gsm = eff ? eff.gsm : (L.gsm || f.gsm); const nm = f.name + (L.kind === "uni" ? (L.width > 0 ? " " + L.width + "mm" : " full") : "") + " \u00B7 " + gsm + " g/m\u00B2"; St.push({ role, name: nm, thick: fiberThickOf(L.mat, gsm), count: 1 }); }
     }
@@ -8551,16 +8562,38 @@ export default function App() {
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
                           {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
                           {L.kind === "base" && <><input type="number" value={L.thick != null ? L.thick : 1.2} step={0.1} min={0.5} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 1.2 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm base (P-tex)</span></>}
-                          {L.kind === "core" && (() => { const cp = coreProps(L); const gLab = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }; return (<>
-                            <select value={L.mat || L.wood} onChange={e => upd(idx, { mat: e.target.value, wood: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(CORE_MATERIALS).map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
-                            <span style={gLab}>+</span>
-                            <select value={L.mat2 || ""} onChange={e => upd(idx, { mat2: e.target.value || undefined, pct2: e.target.value ? (L.pct2 || 30) : 0 })} style={{ ...inp, width: "auto" }}><option value="">(no blend)</option>{Object.keys(CORE_MATERIALS).map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
-                            {L.mat2 && <><input type="number" value={L.pct2 || 0} min={0} max={100} step={5} onChange={e => upd(idx, { pct2: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 42 }} /><span style={gLab}>% of 2nd</span></>}
-                            <div style={{ flexBasis: "100%", height: 0 }} />
-                            <span style={gLab}>density</span>
-                            <input type="number" value={L.density != null ? L.density : ""} placeholder={String(Math.round(cp.densityComputed))} min={0} step={10} onChange={e => upd(idx, { density: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 50 }} /><span style={gLab}>kg/m³ · E</span>
-                            <input type="number" value={L.E != null ? L.E : ""} placeholder={String(Math.round(cp.E))} min={0} step={500} onChange={e => upd(idx, { E: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 62 }} /><span style={gLab}>MPa · using {Math.round(cp.density)} kg/m³ / {Math.round(cp.E)} MPa (blank fields = auto)</span>
-                          </>); })()}
+                          {L.kind === "core" && (() => {
+                            const cp = coreProps(L); const gLab = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
+                            const ws = coreWoods(L);
+                            const woodKeys = Object.keys(CORE_MATERIALS);
+                            const commit = nw => upd(idx, { woods: nw, mat: nw[0].mat, wood: nw[0].mat, mat2: undefined, pct2: undefined, density: undefined });
+                            const setMat = (wi, mat) => commit(ws.map((x, i) => i === wi ? { ...x, mat, density: undefined } : { ...x }));
+                            const setDens = (wi, v) => commit(ws.map((x, i) => i === wi ? { ...x, density: (v === "" ? undefined : (parseFloat(v) || 0)) } : { ...x }));
+                            const setPct = (wi, val) => {
+                              const v = Math.max(0, Math.min(100, Math.round(parseFloat(val) || 0)));
+                              const nw = ws.map(x => ({ ...x })); const others = nw.map((_, i) => i).filter(i => i !== wi);
+                              const remaining = 100 - v; const otherSum = others.reduce((a, i) => a + (nw[i].pct || 0), 0); let alloc = 0;
+                              others.forEach((i, k) => { if (k === others.length - 1) nw[i].pct = remaining - alloc; else { const s = otherSum > 0 ? Math.round(remaining * (nw[i].pct || 0) / otherSum) : Math.round(remaining / others.length); nw[i].pct = s; alloc += s; } });
+                              nw[wi].pct = v; commit(nw);
+                            };
+                            const addWood = () => { const used = ws.map(w => w.mat); const avail = woodKeys.find(k => !used.includes(k)) || "poplar"; const nw = [...ws.map(x => ({ ...x })), { mat: avail }]; const eq = Math.floor(100 / nw.length); nw.forEach((x, i) => x.pct = i === nw.length - 1 ? 100 - eq * (nw.length - 1) : eq); commit(nw); };
+                            const removeWood = wi => { const nw = ws.filter((_, i) => i !== wi).map(x => ({ ...x })); if (nw.length === 1) nw[0].pct = 100; else { const sum = nw.reduce((a, x) => a + (x.pct || 0), 0) || 1; let alloc = 0; nw.forEach((x, i) => { if (i === nw.length - 1) x.pct = 100 - alloc; else { x.pct = Math.round((x.pct || 0) / sum * 100); alloc += x.pct; } }); } commit(nw); };
+                            const multi = ws.length > 1;
+                            return (<>
+                              {ws.map((w, wi) => { const m = CORE_MATERIALS[w.mat] || CORE_MATERIALS.poplar; const dens = w.density != null ? w.density : m.density; return (
+                                <div key={wi} style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
+                                  <select value={w.mat} onChange={e => setMat(wi, e.target.value)} style={{ ...inp, width: "auto" }}>{woodKeys.map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
+                                  <input type="number" value={dens} min={0} step={10} onChange={e => setDens(wi, e.target.value)} style={{ ...inp, width: 52 }} /><span style={gLab}>kg/m³</span>
+                                  {multi && <><input type="number" value={w.pct != null ? w.pct : 0} min={0} max={100} step={5} onChange={e => setPct(wi, e.target.value)} style={{ ...inp, width: 44 }} /><span style={gLab}>%</span></>}
+                                  {multi && <button onClick={() => removeWood(wi)} title="remove this wood" style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>}
+                                </div>
+                              ); })}
+                              <div style={{ flexBasis: "100%", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                {ws.length < 4 && <button onClick={addWood} style={{ background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "3px 8px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>+ add wood</button>}
+                                <span style={gLab}>{multi ? `= blend ${Math.round(cp.density)} kg/m³ · E` : "E"}</span>
+                                <input type="number" value={L.E != null ? L.E : ""} placeholder={String(Math.round(cp.eComputed))} min={0} step={500} onChange={e => upd(idx, { E: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 62 }} /><span style={gLab}>MPa (blank = auto {Math.round(cp.eComputed)})</span>
+                              </div>
+                            </>); })()}
                         </div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0, width: 16, alignItems: "center" }}>
