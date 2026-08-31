@@ -57,6 +57,25 @@ const WOODS = {
   beech:{name:"Beech",E:14000,density:720},
   bamboo:{name:"Bamboo",E:14000,density:725},
 };
+// Decorative top veneers are a different set of species than core woods (walnut, oak, cherry, exotics used
+// by Meier, Wagner, Full Send and others). E in MPa, density kg/m³. Editable in Advanced.
+const VENEERS = {
+  walnut:     { name: "Black Walnut", E: 11600, density: 610 },
+  whiteOak:   { name: "White Oak",    E: 12300, density: 755 },
+  redOak:     { name: "Red Oak",      E: 12500, density: 700 },
+  cherry:     { name: "Cherry",       E: 10300, density: 560 },
+  hardMaple:  { name: "Hard Maple",   E: 12600, density: 705 },
+  quiltMaple: { name: "Quilted Maple",E: 11000, density: 705 },
+  ash:        { name: "Ash",          E: 12000, density: 670 },
+  mahogany:   { name: "Mahogany",     E: 9700,  density: 590 },
+  sapele:     { name: "Sapele",       E: 10500, density: 640 },
+  beech:      { name: "Beech",        E: 14000, density: 720 },
+  birch:      { name: "Birch",        E: 13900, density: 640 },
+  bamboo:     { name: "Bamboo",       E: 14000, density: 700 },
+  purpleheart:{ name: "Purpleheart",  E: 20300, density: 900 },
+  padauk:     { name: "Padauk",       E: 11700, density: 745 },
+  sassafras:  { name: "Sassafras",    E: 7700,  density: 480 },
+};
 // Core materials = woods plus low-density foams for foam-stringer / lightweight cores. E in MPa, density
 // in kg/m^3. Foam E is measured-ish (structural PU/XPS ski foam), NOT density-derived like wood.
 const CORE_MATERIALS = { ...WOODS,
@@ -173,8 +192,8 @@ const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; 
 // ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
 // Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
 // applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
-const _CONST_TABLES = { FIBERS, WOODS, METALS, SCALARS };
-const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], METALS: ["E", "thick", "density"], SCALARS: ["E"] };
+const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SCALARS };
+const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SCALARS: ["E"] };
 const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
 const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
 const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
@@ -208,7 +227,7 @@ function stackToLayers(stack, skiWidth, coreThick) {
     else if (L.kind === "topsheet") { out.push({ E: SCALARS.topsheet.E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
     else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
-    else if (L.kind === "veneer") { const w = WOODS[L.mat] || WOODS.maple; out.push({ E: L.E != null ? L.E : w.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.6), role: "veneer", mat: L.mat }); }
+    else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; out.push({ E: L.E != null ? L.E : w.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.6), role: "veneer", mat: L.mat }); }
     else if (L.kind === "vds") { out.push({ E: SCALARS.vds.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.2), role: "vds" }); }
     else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const b = (L.kind === "uni" && L.width > 0) ? L.width : skiWidth; const eff = L.kind === "fabric" ? fabricEff(L) : null; out.push({ E: eff ? eff.E : f.E, b, t: fiberThickOf(L.mat, eff ? eff.gsm : L.gsm), role: L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : "stringerC") : "fabric", mat: L.mat }); }
   }
@@ -768,7 +787,7 @@ function computeBOM(ski) {
         if (L.kind === "fabric") { const f = FIBERS[L.mat] || FIBERS.glassBiax; const eff = fabricEff(L); m += areaM2 * (eff ? eff.gsm : (L.gsm || f.gsm)) / 1000; }
         else if (L.kind === "uni") { const f = FIBERS[L.mat] || FIBERS.glassUni; const wf = (L.width && L.width > 0) ? Math.min(1, (L.width * 2) / Math.max(1, maxW)) : 1; m += areaM2 * wf * (L.gsm || f.gsm) / 1000; }
         else if (L.kind === "metal") { const mt = METALS[L.mat] || METALS.titanal; m += areaM2 * ((L.thick != null ? L.thick : mt.thick) / 1000) * (mt.density || 2700); }
-        else if (L.kind === "veneer") { const w = WOODS[L.mat] || WOODS.maple; m += areaM2 * ((L.thick != null ? L.thick : 0.6) / 1000) * (w.density || 600); }
+        else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; m += areaM2 * ((L.thick != null ? L.thick : 0.6) / 1000) * (w.density || 600); }
         else if (L.kind === "vds") { m += areaM2 * ((L.thick != null ? L.thick : 0.2) / 1000) * 1200; }
         else if (L.kind === "base") { m += areaM2 * ((L.thick != null ? L.thick : BASE_THICK) / 1000) * 950; m += edgeLenM * (EDGE_W / 1000) * ((L.edgeThick != null ? L.edgeThick : EDGE_H) / 1000) * 7850; }
         else if (L.kind === "topsheet") { m += areaM2 * (TOPSHEET_THICK / 1000) * 1200; }
@@ -2989,7 +3008,7 @@ function layupStack(ski) {
       if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
       else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: (L.thick != null ? L.thick : 1.2), count: 1 }); }
       else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const nm = ws.length > 1 ? (ws.map(w => (CORE_MATERIALS[w.mat] || {}).name || "Wood").join(" + ") + " core") : (((CORE_MATERIALS[ws[0].mat] || WOODS.poplar).name || "Wood") + " core"); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
-      else if (L.kind === "veneer") { const w = WOODS[L.mat] || WOODS.maple; St.push({ role: "veneer", name: (w.name || "Wood") + " veneer \u00B7 " + (L.thick != null ? L.thick : 0.6) + "mm", thick: (L.thick != null ? L.thick : 0.6), count: 1 }); }
+      else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; St.push({ role: "veneer", name: (w.name || "Wood") + " veneer \u00B7 " + (L.thick != null ? L.thick : 0.6) + "mm", thick: (L.thick != null ? L.thick : 0.6), count: 1 }); }
       else if (L.kind === "vds") { St.push({ role: "vds", name: "VDS rubber \u00B7 " + (L.thick != null ? L.thick : 0.2) + "mm", thick: (L.thick != null ? L.thick : 0.2), count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
       else { const f = FIBERS[L.mat] || FIBERS.glassBiax; const role = L.kind === "uni" ? (String(L.mat).startsWith("glass") ? "stringerG" : isF(L.mat) ? "fabricF" : "stringerC") : (isC(L.mat) ? "fabricC" : isF(L.mat) ? "fabricF" : "fabric"); const eff = L.kind === "fabric" ? fabricEff(L) : null; const gsm = eff ? eff.gsm : (L.gsm || f.gsm); const nm = f.name + (L.kind === "uni" ? (L.width > 0 ? " " + L.width + "mm" : " full") : "") + " \u00B7 " + gsm + " g/m\u00B2"; St.push({ role, name: nm, thick: fiberThickOf(L.mat, gsm), count: 1 }); }
@@ -3685,7 +3704,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const _fabs = _stack.filter(l => l.kind === "fabric").map(l => { const f = FIBERS[l.mat] || {}; const eff = fabricEff(l); return (f.name || l.mat) + " " + (eff ? eff.gsm : (l.gsm || f.gsm)) + "g"; });
   const _unis = _stack.filter(l => l.kind === "uni").map(l => (FIBERS[l.mat] || {}).name || l.mat);
   const _metals = _stack.filter(l => l.kind === "metal").map(l => (METALS[l.mat] || {}).name || l.mat);
-  const _veneers = _stack.filter(l => l.kind === "veneer").map(l => ((WOODS[l.mat] || {}).name || l.mat) + " veneer");
+  const _veneers = _stack.filter(l => l.kind === "veneer").map(l => ((VENEERS[l.mat] || {}).name || l.mat) + " veneer");
   const _vds = _stack.filter(l => l.kind === "vds").length;
   const rows = [
     ["Length", `${ski.length} mm`],
@@ -8608,7 +8627,7 @@ export default function App() {
             const col = L => L.kind === "topsheet" ? "#2a2620" : L.kind === "base" ? "#1c1a17" : L.kind === "core" ? "#b0824e" : L.kind === "veneer" ? "#c99a5e" : L.kind === "vds" ? "#3a3a3e" : L.kind === "metal" ? "#8f99a6" : String(L.mat).startsWith("carbon") ? "#e8552a" : String(L.mat).startsWith("flax") ? "#9a8f5f" : "#d8b48a";
             const upd = (idx, patch) => setStack(stack.map((l, i) => i === idx ? { ...l, ...patch } : l));
             const inp = { width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
-            const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Flax Biax", { kind: "fabric", mat: "flaxBiax" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }], ["Wood veneer (top)", { kind: "veneer", mat: "maple", thick: 0.6 }], ["VDS rubber foil (damping)", { kind: "vds", thick: 0.2 }], ["Topsheet", { kind: "topsheet" }], ["Base + steel edges", { kind: "base" }]];
+            const ADD = [["Glass Biax", { kind: "fabric", mat: "glassBiax" }], ["Glass Triax", { kind: "fabric", mat: "glassTriax" }], ["Carbon Biax", { kind: "fabric", mat: "carbonBiax" }], ["Carbon Triax", { kind: "fabric", mat: "carbonTriax" }], ["Flax Twill", { kind: "fabric", mat: "flaxTwill" }], ["Flax Biax", { kind: "fabric", mat: "flaxBiax" }], ["Glass UD stringer", { kind: "uni", mat: "glassUni", width: 0 }], ["Carbon UD stringer", { kind: "uni", mat: "carbonUni", width: 0 }], ["Titanal", { kind: "metal", mat: "titanal" }], ["Wood veneer (top)", { kind: "veneer", mat: "walnut", thick: 0.6 }], ["VDS rubber foil (damping)", { kind: "vds", thick: 0.2 }], ["Topsheet", { kind: "topsheet" }], ["Base + steel edges", { kind: "base" }]];
             const FABRIC_MATS = ["glassBiax", "glassTriax", "carbonBiax", "carbonTriax", "flaxTwill", "flaxBiax"];
             const UNI_MATS = ["glassUni", "carbonUni", "flaxUni"];
             const LAYER_MATS = [
@@ -8651,7 +8670,7 @@ export default function App() {
                           </>))}
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
                           {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
-                          {L.kind === "veneer" && <><select value={L.mat || "maple"} onChange={e => upd(idx, { mat: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(WOODS).map(k => <option key={k} value={k}>{WOODS[k].name}</option>)}</select><input type="number" value={L.thick != null ? L.thick : 0.6} step={0.1} min={0.2} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.6 })} style={{ ...inp, width: 52 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm veneer</span></>}
+                          {L.kind === "veneer" && <><select value={L.mat || "walnut"} onChange={e => upd(idx, { mat: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(VENEERS).map(k => <option key={k} value={k}>{VENEERS[k].name}</option>)}</select><input type="number" value={L.thick != null ? L.thick : 0.6} step={0.1} min={0.2} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.6 })} style={{ ...inp, width: 52 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm veneer</span></>}
                           {L.kind === "vds" && <><input type="number" value={L.thick != null ? L.thick : 0.2} step={0.1} min={0.1} max={2} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.2 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm rubber (damping)</span></>}
                           {L.kind === "base" && (() => { const gL = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }; const bt = L.thick != null ? L.thick : 1.2; const bOpts = [1.2, 1.3, 1.4, 1.5, 1.8]; const bPre = bOpts.includes(bt); const et = L.edgeThick != null ? L.edgeThick : 1.8; const opts = [0.9, 1.2, 1.4, 1.5, 1.8]; const preset = opts.includes(et); return (<>
                             <span style={gL}>base</span>
@@ -9171,6 +9190,8 @@ export default function App() {
               {Object.keys(FIBERS).map(k => row(k, [nameSpan(FIBERS[k].name), nInp(FIBERS[k].E, v => { FIBERS[k].E = v; }), nInp(FIBERS[k].dens, v => { FIBERS[k].dens = v; })]))}
               {grp("WOODS / CORE", <>E (MPa){info(E_TIP)} · density (kg/m³){info(DENS_WOOD_TIP)}</>)}
               {Object.keys(WOODS).map(k => row(k, [nameSpan(WOODS[k].name), nInp(WOODS[k].E, v => { WOODS[k].E = v; }), nInp(WOODS[k].density, v => { WOODS[k].density = v; })]))}
+              {grp("WOOD VENEERS", <>E (MPa){info(E_TIP)} · density (kg/m³){info(DENS_WOOD_TIP)}</>)}
+              {Object.keys(VENEERS).map(k => row(k, [nameSpan(VENEERS[k].name), nInp(VENEERS[k].E, v => { VENEERS[k].E = v; }), nInp(VENEERS[k].density, v => { VENEERS[k].density = v; })]))}
               {grp("METAL / LAMINATE", <>E (MPa){info(E_TIP)}</>)}
               {Object.keys(METALS).filter(k => k !== "none").map(k => row(k, [nameSpan(METALS[k].name), nInp(METALS[k].E, v => { METALS[k].E = v; })]))}
               {grp("STRUCTURE", <>E (MPa){info(E_TIP)}</>)}
