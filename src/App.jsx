@@ -6941,23 +6941,33 @@ const STUDY_COLORS = ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"];
 // Overlaid flex curves (cantilever stiffness vs length) for the captured variants, as an SVG string used both
 // on screen and in the printed report.
 function studyChartSVG(variants, W, H) {
-  const pad = 46, plotW = W - pad - 16, plotH = H - pad - 34;
+  const padL = 54, padR = 18, padT = 42, padB = 46;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
   let maxX = 1, maxK = 1;
   for (const v of variants) for (const s of v.stations) { if (s.x > maxX) maxX = s.x; if (s.k > maxK) maxK = s.k; }
-  maxK *= 1.1;
-  const X = x => pad + (x / maxX) * plotW, Y = k => (pad - 12) + plotH - (k / maxK) * plotH;
+  maxK *= 1.12;
+  const X = x => padL + (x / maxX) * plotW, Y = k => padT + plotH - (k / maxK) * plotH, F = "'Segoe UI',system-ui,sans-serif";
   let g = `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
-  // axes
-  g += `<line x1="${pad}" y1="${pad - 12}" x2="${pad}" y2="${pad - 12 + plotH}" stroke="#bbb" stroke-width="1"/>`;
-  g += `<line x1="${pad}" y1="${pad - 12 + plotH}" x2="${pad + plotW}" y2="${pad - 12 + plotH}" stroke="#bbb" stroke-width="1"/>`;
-  for (let f = 0; f <= 1.001; f += 0.25) { const yy = (pad - 12) + plotH - f * plotH; g += `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${pad + plotW}" y2="${yy.toFixed(1)}" stroke="#eee" stroke-width="1"/><text x="${pad - 5}" y="${(yy + 3).toFixed(1)}" font-size="9" fill="#888" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
-  g += `<text x="${(pad + plotW / 2).toFixed(0)}" y="${H - 6}" font-size="10" fill="#555" font-family="monospace" text-anchor="middle">position (mm, tail \u2192 tip)</text>`;
-  g += `<text x="12" y="${(pad - 20).toFixed(0)}" font-size="9" fill="#555" font-family="monospace">N/mm</text>`;
+  g += `<text x="${padL}" y="19" font-size="15" font-weight="700" fill="#222" font-family="${F}">Flex profile</text>`;
+  g += `<text x="${padL}" y="34" font-size="10.5" fill="#777" font-family="${F}">How stiff each design is at every point along the ski</text>`;
+  // underfoot band (where the skier stands)
+  g += `<rect x="${X(maxX * 0.40).toFixed(1)}" y="${padT}" width="${(plotW * 0.20).toFixed(1)}" height="${plotH}" fill="#f4efe3"/>`;
+  g += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
+  g += `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
+  for (let f = 0; f <= 1.001; f += 0.25) { const yy = padT + plotH - f * plotH; g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${padL + plotW}" y2="${yy.toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 6}" y="${(yy + 3).toFixed(1)}" font-size="8.5" fill="#bbb" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
+  // y meaning
+  g += `<text x="15" y="${padT + 16}" font-size="10.5" font-weight="700" fill="#555" font-family="${F}" transform="rotate(-90 15 ${padT + 16})">STIFFER \u2191</text>`;
+  g += `<text x="15" y="${padT + plotH}" font-size="9" fill="#aaa" font-family="${F}" transform="rotate(-90 15 ${padT + plotH})" text-anchor="end">softer</text>`;
+  g += `<text x="${padL - 46}" y="${padT - 6}" font-size="8" fill="#ccc" font-family="monospace">N/mm</text>`;
+  // x regions
+  const xlab = (fx, txt, bold) => `<text x="${X(maxX * fx).toFixed(1)}" y="${(padT + plotH + 18).toFixed(1)}" font-size="${bold ? 11 : 10}" font-weight="${bold ? 700 : 400}" fill="${bold ? "#444" : "#888"}" font-family="${F}" text-anchor="middle">${txt}</text>`;
+  g += xlab(0.06, "TAIL") + xlab(0.5, "UNDERFOOT", true) + xlab(0.94, "TIP");
+  g += `<text x="${(padL + plotW / 2).toFixed(0)}" y="${(padT + plotH + 34).toFixed(1)}" font-size="9" fill="#aaa" font-family="${F}" text-anchor="middle">along the length of the ski</text>`;
   variants.forEach((v, i) => {
     if (!v.stations.length) return;
     const pts = v.stations.map(s => `${X(s.x).toFixed(1)},${Y(s.k).toFixed(1)}`).join(" ");
-    g += `<polyline points="${pts}" fill="none" stroke="${STUDY_COLORS[i]}" stroke-width="2"/>`;
-    g += `<rect x="${pad + 4 + i * 150}" y="${(pad - 26).toFixed(0)}" width="10" height="10" fill="${STUDY_COLORS[i]}"/><text x="${pad + 18 + i * 150}" y="${(pad - 17).toFixed(0)}" font-size="9.5" fill="#333" font-family="monospace">${String(v.name).slice(0, 16)}</text>`;
+    g += `<polyline points="${pts}" fill="none" stroke="${STUDY_COLORS[i]}" stroke-width="2.4"/>`;
+    g += `<rect x="${(W - padR - 158).toFixed(0)}" y="${(19 + i * 15).toFixed(0)}" width="11" height="11" fill="${STUDY_COLORS[i]}"/><text x="${(W - padR - 143).toFixed(0)}" y="${(28.5 + i * 15).toFixed(0)}" font-size="10" fill="#333" font-family="${F}">${String(v.name).slice(0, 22)}</text>`;
   });
   return g;
 }
@@ -7072,7 +7082,7 @@ export default function App() {
     const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="font-size:11px;color:#666;line-height:1.55;margin:8px 2px 0">Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -9470,6 +9480,7 @@ export default function App() {
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
+            <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5, margin: "8px 2px 0" }}>Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div>
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
             <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
