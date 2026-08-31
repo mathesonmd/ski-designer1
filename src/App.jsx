@@ -6943,7 +6943,7 @@ const STUDY_COLORS = ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"];
 // Overlaid flex curves (cantilever stiffness vs length) for the captured variants, as an SVG string used both
 // on screen and in the printed report.
 function studyChartSVG(variants, W, H) {
-  const padL = 54, padR = 18, padT = 42, padB = 46;
+  const padL = 56, padR = 18, padT = 42, padB = 56;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   let maxX = 1, maxK = 1;
   for (const v of variants) for (const s of v.stations) { if (s.x > maxX) maxX = s.x; if (s.k > maxK) maxK = s.k; }
@@ -6951,25 +6951,25 @@ function studyChartSVG(variants, W, H) {
   const X = x => padL + (x / maxX) * plotW, Y = k => padT + plotH - (k / maxK) * plotH, F = "'Segoe UI',system-ui,sans-serif";
   let g = `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
   g += `<text x="${padL}" y="19" font-size="15" font-weight="700" fill="#222" font-family="${F}">Flex profile</text>`;
-  g += `<text x="${padL}" y="34" font-size="10.5" fill="#777" font-family="${F}">How stiff each design is at every point along the ski</text>`;
-  // underfoot band (where the skier stands)
+  g += `<text x="${padL}" y="34" font-size="10.5" fill="#777" font-family="${F}">Stiffness along the length of the ski</text>`;
   g += `<rect x="${X(maxX * 0.40).toFixed(1)}" y="${padT}" width="${(plotW * 0.20).toFixed(1)}" height="${plotH}" fill="#f4efe3"/>`;
   g += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
   g += `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
-  for (let f = 0; f <= 1.001; f += 0.25) { const yy = padT + plotH - f * plotH; g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${padL + plotW}" y2="${yy.toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 6}" y="${(yy + 3).toFixed(1)}" font-size="8.5" fill="#bbb" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
-  // y meaning
-  g += `<text x="15" y="${padT + 16}" font-size="10.5" font-weight="700" fill="#555" font-family="${F}" transform="rotate(-90 15 ${padT + 16})">STIFFER \u2191</text>`;
-  g += `<text x="15" y="${padT + plotH}" font-size="9" fill="#aaa" font-family="${F}" transform="rotate(-90 15 ${padT + plotH})" text-anchor="end">softer</text>`;
-  g += `<text x="${padL - 46}" y="${padT - 6}" font-size="8" fill="#ccc" font-family="monospace">N/mm</text>`;
-  // x regions
-  const xlab = (fx, txt, bold) => `<text x="${X(maxX * fx).toFixed(1)}" y="${(padT + plotH + 18).toFixed(1)}" font-size="${bold ? 11 : 10}" font-weight="${bold ? 700 : 400}" fill="${bold ? "#444" : "#888"}" font-family="${F}" text-anchor="middle">${txt}</text>`;
+  for (let f = 0; f <= 1.001; f += 0.25) { const yy = padT + plotH - f * plotH; g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${padL + plotW}" y2="${yy.toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 7}" y="${(yy + 3).toFixed(1)}" font-size="8.5" fill="#bbb" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
+  // y axis: unit at top, consistent Stiffer/Softer labels along the axis (no overlap)
+  g += `<text x="${padL - 7}" y="${padT - 5}" font-size="8.5" fill="#aaa" font-family="monospace" text-anchor="end">N/mm</text>`;
+  g += `<text x="16" y="${padT + 46}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + 46})" text-anchor="end">Stiffer</text>`;
+  g += `<text x="16" y="${padT + plotH - 6}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + plotH - 6})" text-anchor="start">Softer</text>`;
+  // x axis: mm scale + region labels + unit
+  for (let f = 0; f <= 1.001; f += 0.25) { const xx = X(maxX * f); g += `<text x="${xx.toFixed(1)}" y="${(padT + plotH + 13).toFixed(1)}" font-size="8.5" fill="#aaa" font-family="monospace" text-anchor="middle">${Math.round(maxX * f)}</text>`; }
+  const xlab = (fx, txt, bold) => `<text x="${X(maxX * fx).toFixed(1)}" y="${(padT + plotH + 29).toFixed(1)}" font-size="${bold ? 11 : 10}" font-weight="${bold ? 700 : 400}" fill="${bold ? "#444" : "#888"}" font-family="${F}" text-anchor="middle">${txt}</text>`;
   g += xlab(0.06, "TAIL") + xlab(0.5, "UNDERFOOT", true) + xlab(0.94, "TIP");
-  g += `<text x="${(padL + plotW / 2).toFixed(0)}" y="${(padT + plotH + 34).toFixed(1)}" font-size="9" fill="#aaa" font-family="${F}" text-anchor="middle">along the length of the ski</text>`;
+  g += `<text x="${(padL + plotW / 2).toFixed(0)}" y="${(padT + plotH + 45).toFixed(1)}" font-size="9" fill="#aaa" font-family="${F}" text-anchor="middle">position (mm)</text>`;
   variants.forEach((v, i) => {
     if (!v.stations.length) return;
     const pts = v.stations.map(s => `${X(s.x).toFixed(1)},${Y(s.k).toFixed(1)}`).join(" ");
     g += `<polyline points="${pts}" fill="none" stroke="${STUDY_COLORS[i]}" stroke-width="2.4"/>`;
-    g += `<rect x="${(W - padR - 158).toFixed(0)}" y="${(19 + i * 15).toFixed(0)}" width="11" height="11" fill="${STUDY_COLORS[i]}"/><text x="${(W - padR - 143).toFixed(0)}" y="${(28.5 + i * 15).toFixed(0)}" font-size="10" fill="#333" font-family="${F}">${String(v.name).slice(0, 22)}</text>`;
+    g += `<rect x="${(W - padR - 172).toFixed(0)}" y="${(18 + i * 16).toFixed(0)}" width="12" height="12" fill="${STUDY_COLORS[i]}"/><text x="${(W - padR - 156).toFixed(0)}" y="${(28 + i * 16).toFixed(0)}" font-size="10" fill="#333" font-family="${F}"><tspan font-weight="700">#${i + 1}</tspan> ${String(v.name).slice(0, 18)}</text>`;
   });
   return g;
 }
@@ -6990,7 +6990,7 @@ function studyTableHTML(variants) {
     ["Weight (est)", (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
-  variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">${String(v.name).slice(0, 20)}${i === 0 ? " (ref)" : ""}</td>`; });
+  variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">#${i + 1} ${String(v.name).slice(0, 18)}${i === 0 ? " (ref)" : ""}</td>`; });
   h += `</tr>`;
   for (const [label, fn] of rowsDef) { h += `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;color:#666">${label}</td>`; variants.forEach((v, i) => { h += `<td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;color:#111">${fn(v, i)}</td>`; }); h += `</tr>`; }
   h += `</table>`;
@@ -7001,7 +7001,7 @@ function studyLayupHTML(variants) {
   variants.forEach((v, i) => {
     let ls = { svg: "", height: 80 };
     try { ls = buildLayerStackSVG(v.ski, { w: 460 }); } catch (e) {}
-    h += `<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:${STUDY_COLORS[i]};margin-bottom:3px;font-family:monospace">${String(v.name).slice(0, 24)}</div><svg viewBox="0 0 460 ${Math.max(50, ls.height).toFixed(0)}" width="100%" style="max-width:460px;background:#f6f4ef;border:1px solid #eee;border-radius:4px">${ls.svg}</svg></div>`;
+    h += `<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:${STUDY_COLORS[i]};margin-bottom:3px;font-family:monospace">#${i + 1} ${String(v.name).slice(0, 22)}</div><svg viewBox="0 0 460 ${Math.max(50, ls.height).toFixed(0)}" width="100%" style="max-width:460px;background:#f6f4ef;border:1px solid #eee;border-radius:4px">${ls.svg}</svg></div>`;
   });
   return h;
 }
@@ -7084,11 +7084,12 @@ export default function App() {
     const W = 760, H = 340, chart = studyChartSVG(studyVariants, W, H), table = studyTableHTML(studyVariants);
     const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
-    const bName = (builderBrand.name || "").trim();
-    const logoImg = builderBrand.logoSrc ? `<img src="${builderBrand.logoSrc}" style="height:46px;width:auto;display:block"/>` : "";
-    const cap = `<div style="font-size:11px;color:#666;line-height:1.55;margin:8px 2px 0">Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div>`;
+    const bName = (builderBrand.name || "").trim() || "Black Chapel Studios";
+    const logoSrc = builderBrand.logoSrc || ((typeof window !== "undefined" ? window.location.origin : "") + "/blackchapel-logo.png");
+    const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
+    const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div>${bName ? `<div style="font-size:11px;color:#888">${esc(bName)}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg>${cap}<div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div>${bName ? `<div style="font-size:11px;color:#888">${esc(bName)}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -9298,7 +9299,7 @@ export default function App() {
             return (
             <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, padding: "5px 7px", background: isActive ? `${C.heading}1e` : C.inputBg, border: `1px solid ${isActive ? C.heading : C.inputBorder}`, borderRadius: 4 }}>
               <span style={{ width: 10, height: 10, borderRadius: 2, background: STUDY_COLORS[i], flexShrink: 0 }} />
-              <button onClick={() => loadVariant(v)} title="Load this variant into the editor" style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", padding: 0 }}>{v.name}</button>
+              <button onClick={() => loadVariant(v)} title="Load this variant into the editor" style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", padding: 0 }}><span style={{ fontWeight: 700, color: STUDY_COLORS[i] }}>#{i + 1}</span> {v.name}</button>
               <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>{v.weight ? v.weight.toFixed(2) + "kg" : ""}</span>
               <button onClick={() => updateVariant(v.id)} title="Overwrite this variant with the current design" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, fontSize: 9, fontWeight: 700, padding: "2px 5px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>UPDATE</button>
               <button onClick={() => { setStudyVariants(vs => vs.filter(x => x.id !== v.id)); if (isActive) setActiveVariant(null); }} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
@@ -9482,10 +9483,10 @@ export default function App() {
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: 10, marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                {builderBrand.logoSrc && <img src={builderBrand.logoSrc} alt="" style={{ height: 44, width: "auto", display: "block" }} />}
+                <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block" }} />
                 <div>
                   <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>DESIGN STUDY</div>
-                  {(builderBrand.name || "").trim() && <div style={{ fontSize: 11, color: "#888" }}>{builderBrand.name.trim()}</div>}
+                  <div style={{ fontSize: 11, color: "#888" }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"}</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -9494,7 +9495,6 @@ export default function App() {
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
-            <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5, margin: "8px 2px 0" }}>Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div>
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
             <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
