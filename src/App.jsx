@@ -124,6 +124,35 @@ const CARBON = {
 };
 const CARBON_THICK=0.3,EDGE_W=2,EDGE_H=1.8,BASE_THICK=1.2,TOPSHEET_THICK=0.5;
 const SCALARS = { edge: { name: "Steel edge", E: 200000 }, base: { name: "Base (P-tex)", E: 800 }, topsheet: { name: "Topsheet", E: 1500 }, vds: { name: "VDS rubber", E: 40 } };
+// Shaped reinforcement inserts can be cut from many materials, not just metal. thick mm, density kg/m³.
+const INSERT_MATERIALS = {
+  titanal:    { name: "Titanal",       thick: 0.4,  density: 2830 },
+  titanalH:   { name: "Titanal 0.6",   thick: 0.6,  density: 2830 },
+  carbonUD:   { name: "Carbon UD",     thick: 0.4,  density: 1600 },
+  carbonBiax: { name: "Carbon Biax",   thick: 0.4,  density: 1600 },
+  carbonTriax:{ name: "Carbon Triax",  thick: 0.55, density: 1600 },
+  glassUD:    { name: "Glass UD",      thick: 0.4,  density: 2550 },
+  glassBiax:  { name: "Glass Biax",    thick: 0.4,  density: 2550 },
+  glassTriax: { name: "Glass Triax",   thick: 0.5,  density: 2550 },
+  pu:         { name: "PU",            thick: 2.0,  density: 300 },
+  hardwood:   { name: "Hardwood",      thick: 2.0,  density: 670 },
+  abs:        { name: "ABS",            thick: 1.5,  density: 1050 },
+};
+// ── Language scaffolding ────────────────────────────────────────────────────────────────────────────────
+// t(id, english) returns the active language's string, falling back to English. Only a small starter set is
+// translated so far; the niche ski vocabulary (sidecut, camber, Voigt bound, and so on) needs native review
+// by builders in each language before it goes in here. Everything not yet translated shows in English.
+const I18N = {
+  en: {},
+  es: { "designer.ski": "Dise\u00F1ador de esqu\u00EDs", "designer.board": "Dise\u00F1ador de tablas", "goto.board": "Ir al dise\u00F1ador de tablas", "goto.ski": "Ir al dise\u00F1ador de esqu\u00EDs", "sec.gettingStarted": "Primeros pasos" },
+  fr: { "designer.ski": "Concepteur de skis", "designer.board": "Concepteur de snowboards", "goto.board": "Aller au concepteur de snowboards", "goto.ski": "Aller au concepteur de skis", "sec.gettingStarted": "Pour commencer" },
+  ru: { "designer.ski": "\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440 \u043B\u044B\u0436", "designer.board": "\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440 \u0441\u043D\u043E\u0443\u0431\u043E\u0440\u0434\u043E\u0432", "goto.board": "\u041A \u0441\u043D\u043E\u0443\u0431\u043E\u0440\u0434\u0430\u043C", "goto.ski": "\u041A \u043B\u044B\u0436\u0430\u043C", "sec.gettingStarted": "\u041D\u0430\u0447\u0430\u043B\u043E \u0440\u0430\u0431\u043E\u0442\u044B" },
+  ja: { "designer.ski": "\u30B9\u30AD\u30FC\u30C7\u30B6\u30A4\u30CA\u30FC", "designer.board": "\u30B9\u30CE\u30FC\u30DC\u30FC\u30C9\u30C7\u30B6\u30A4\u30CA\u30FC", "goto.board": "\u30B9\u30CE\u30FC\u30DC\u30FC\u30C9\u3078", "goto.ski": "\u30B9\u30AD\u30FC\u3078", "sec.gettingStarted": "\u306F\u3058\u3081\u306B" },
+};
+const LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["ru", "RU"], ["ja", "JA"]];
+let _LANG = "en";
+try { if (typeof localStorage !== "undefined") { const l = localStorage.getItem("bcs-lang"); if (l && I18N[l]) _LANG = l; } } catch (e) {}
+const t = (k, fb) => (I18N[_LANG] && I18N[_LANG][k]) || I18N.en[k] || fb || k;
 
 // ── Custom layer stack ──
 // Unified fibre palette for the drag-order stack. E is the laminate modulus (MPa); ply thickness is derived
@@ -710,8 +739,9 @@ function computeBOM(ski) {
       const pl = insertPolys(ski, ins);
       let a = Math.abs(_polyArea(pl.outer));
       if (pl.inner) a -= Math.abs(_polyArea(pl.inner));   // mm^2 (frame is hollow)
-      const thick = (METALS[ins.material] && METALS[ins.material].thick) || 0.5;
-      const dens = (ins.material || "").startsWith("carbon") ? 1.6e-3 : 2.8e-3;   // g/mm^3
+      const im = INSERT_MATERIALS[ins.material] || INSERT_MATERIALS.titanal;
+      const thick = ins.thick != null ? ins.thick : im.thick;
+      const dens = (im.density || 2830) / 1e6;   // kg/m^3 -> g/mm^3
       insertMassKg += (a * thick * dens) / 1000;
       insertAreaM2 += a / 1e6;
     } catch (e) {}
@@ -3677,11 +3707,19 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
     ["Total weight (est)", `~${bom.totalMassKg.toFixed(2)} kg`],
   ];
   const cx = 630, cyTop = 210, availH = H - cyTop - 150, rowH = availH / rows.length;
+  const valRightX = W - pad;
   const rowsSvg = rows.map((r, i) => {
     const yb = cyTop + i * rowH + rowH * 0.66;
-    return `<text x="${cx}" y="${yb.toFixed(0)}" font-size="21" fill="${dim}" font-family="monospace">${esc(r[0])}</text>`
-      + `<text x="${W - pad}" y="${yb.toFixed(0)}" font-size="22" fill="${bone}" font-family="monospace" text-anchor="end">${esc(r[1])}</text>`
-      + `<line x1="${cx}" y1="${(cyTop + (i + 1) * rowH).toFixed(0)}" x2="${W - pad}" y2="${(cyTop + (i + 1) * rowH).toFixed(0)}" stroke="${border}" stroke-width="1"/>`;
+    const labelFS = 21;
+    // Right-aligned value, font shrunk (down to 10) so a long list, e.g. many fabrics, never runs back over
+    // the label. Monospace glyphs are ~0.6em wide, so this fits the value into the space left of the label.
+    const labelW = r[0].length * labelFS * 0.6;
+    const availValW = Math.max(80, (valRightX - cx) - labelW - 22);
+    const valLen = (r[1] || "").length || 1;
+    const vFS = Math.min(22, Math.max(10, Math.floor(availValW / (valLen * 0.6))));
+    return `<text x="${cx}" y="${yb.toFixed(0)}" font-size="${labelFS}" fill="${dim}" font-family="monospace">${esc(r[0])}</text>`
+      + `<text x="${valRightX}" y="${yb.toFixed(0)}" font-size="${vFS}" fill="${bone}" font-family="monospace" text-anchor="end">${esc(r[1])}</text>`
+      + `<line x1="${cx}" y1="${(cyTop + (i + 1) * rowH).toFixed(0)}" x2="${valRightX}" y2="${(cyTop + (i + 1) * rowH).toFixed(0)}" stroke="${border}" stroke-width="1"/>`;
   }).join("");
 
   const dateStr = new Date().toISOString().slice(0, 10);
@@ -6884,6 +6922,7 @@ export default function App() {
   const derived = useMemo(() => computeDerived(ski), [ski]);
   const [constV, setConstV] = useState(0);   // bumps when a material constant is edited, to recompute flex
   const [constResetKey, setConstResetKey] = useState(0);   // re-mounts the constant inputs after a reset
+  const [langV, setLangV] = useState(0);   // bumps on language change to re-render translated strings
   const flex = useMemo(() => computeFlexProfile(ski), [ski, constV]);
   const bom = useMemo(() => computeBOM(ski), [ski]);
   // Editable per-unit material prices (USD) for the cost estimate. Persisted to localStorage.
@@ -7817,7 +7856,7 @@ export default function App() {
           {!isCompact && <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />}
           <div style={{ minWidth: 0, overflow: "hidden" }}>
             <div style={{ color: C.heading, fontSize: 12.5, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {(ski.mode === "snowboard" ? "Snowboard Designer" : "Ski Designer")}
+              {(ski.mode === "snowboard" ? t("designer.board", "Snowboard Designer") : t("designer.ski", "Ski Designer"))}
               {ski.designName && ski.designName !== "Untitled Design" && ski.designName !== "Untitled Board" ? <span style={{ color: C.labelDim }}> · {ski.designName}</span> : null}
             </div>
           </div>
@@ -7825,8 +7864,15 @@ export default function App() {
           {!isCompact && (
             <button onClick={() => switchMode(ski.mode === "snowboard" ? "ski" : "snowboard")}
               style={{ flexShrink: 0, whiteSpace: "nowrap", background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "7px 13px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 0.7, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>
-              {ski.mode === "snowboard" ? "Go to Ski Designer" : "Go to Snowboard Designer"}
+              {ski.mode === "snowboard" ? t("goto.ski", "Go to Ski Designer") : t("goto.board", "Go to Snowboard Designer")}
             </button>
+          )}
+          {!isCompact && (
+            <select value={_LANG} onChange={e => { _LANG = e.target.value; try { localStorage.setItem("bcs-lang", _LANG); } catch (err) {} setLangV(v => v + 1); }}
+              title="Language (beta) — most text is still English while native translations are added"
+              style={{ flexShrink: 0, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "6px 6px", color: C.label, fontSize: 10.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+              {LANGS.map(([code, lbl]) => <option key={code} value={code}>{lbl}</option>)}
+            </select>
           )}
         </div>
 
@@ -8022,7 +8068,7 @@ export default function App() {
         )}
 
         {groupHeader(SIDEBAR_GROUPS[0])}
-        <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title="Getting Started">
+        <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title={t("sec.gettingStarted", "Getting Started")}>
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
               Build your first {(ski.mode || "ski") === "snowboard" ? "snowboard" : "ski"}
@@ -8706,7 +8752,7 @@ export default function App() {
                 </div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                   <select value={ins.material} onChange={e => up({ material: e.target.value })} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                    {Object.keys(METALS).filter(k => k !== "none").map(k => <option key={k} value={k}>{METALS[k].name}</option>)}
+                    {Object.keys(INSERT_MATERIALS).map(k => <option key={k} value={k}>{INSERT_MATERIALS[k].name}</option>)}
                   </select>
                   <select value={ins.layer} onChange={e => up({ layer: e.target.value })} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                     <option value="above">Above core</option>
