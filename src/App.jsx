@@ -122,7 +122,8 @@ const CARBON = {
   glassMedium:{name:"Glass UD 25mm",E:40000,width:25,thick:0.5},
   glassWide:{name:"Glass UD Full",E:40000,width:0,thick:0.5},
 };
-const CARBON_THICK=0.3,EDGE_E=200000,EDGE_W=2,EDGE_H=1.8,BASE_E=800,BASE_THICK=1.2,TOPSHEET_E=1500,TOPSHEET_THICK=0.5;
+const CARBON_THICK=0.3,EDGE_W=2,EDGE_H=1.8,BASE_THICK=1.2,TOPSHEET_THICK=0.5;
+const SCALARS = { edge: { name: "Steel edge", E: 200000 }, base: { name: "Base (P-tex)", E: 800 }, topsheet: { name: "Topsheet", E: 1500 } };
 
 // ── Custom layer stack ──
 // Unified fibre palette for the drag-order stack. E is the laminate modulus (MPa); ply thickness is derived
@@ -143,8 +144,8 @@ const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; 
 // ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
 // Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
 // applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
-const _CONST_TABLES = { FIBERS, WOODS, METALS };
-const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], METALS: ["E", "thick", "density"] };
+const _CONST_TABLES = { FIBERS, WOODS, METALS, SCALARS };
+const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], METALS: ["E", "thick", "density"], SCALARS: ["E"] };
 const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
 const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
 const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
@@ -174,8 +175,8 @@ const fabricEff = L => { if (L.gsm0 != null && L.gsm45 != null && (L.gsm0 + L.gs
 function stackToLayers(stack, skiWidth, coreThick) {
   const out = [];
   for (const L of stack || []) {
-    if (L.kind === "base") { out.push({ E: BASE_E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: EDGE_E, b: EDGE_W * 2, t: (L.edgeThick != null ? L.edgeThick : EDGE_H), role: "edge" }); }
-    else if (L.kind === "topsheet") { out.push({ E: TOPSHEET_E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
+    if (L.kind === "base") { out.push({ E: SCALARS.base.E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: SCALARS.edge.E, b: EDGE_W * 2, t: (L.edgeThick != null ? L.edgeThick : EDGE_H), role: "edge" }); }
+    else if (L.kind === "topsheet") { out.push({ E: SCALARS.topsheet.E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
     else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
     else if (L.kind === "veneer") { const w = WOODS[L.mat] || WOODS.maple; out.push({ E: L.E != null ? L.E : w.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.6), role: "veneer", mat: L.mat }); }
@@ -619,8 +620,8 @@ function computeEIAtStation(skiWidth,coreThick,layup){
   const split=!!layup.fabricSplit;
   const botFab=split?(GLASS[layup.glassBot]||glass):glass, nGb=split?(layup.glassBotLayers||1):nG;
   layers=[];
-  layers.push({E:BASE_E,b:skiWidth,t:BASE_THICK});
-  layers.push({E:EDGE_E,b:EDGE_W*2,t:EDGE_H});
+  layers.push({E:SCALARS.base.E,b:skiWidth,t:BASE_THICK});
+  layers.push({E:SCALARS.edge.E,b:EDGE_W*2,t:EDGE_H});
   if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});          // bottom UD stringer — outboard, just above the base
   for(let i=0;i<nGb;i++)layers.push({E:botFab.E,b:skiWidth,t:botFab.thick});       // bottom fabric
   layers.push({E:metal.E,b:skiWidth,t:metal.thick});                  // metal against the core
@@ -9104,19 +9105,25 @@ export default function App() {
           </div>
           {(() => {
             const gL = { color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" };
+            const E_TIP = "Young's modulus: how much the material resists bending, i.e. its stiffness. Higher = stiffer. Units are megapascals (MPa); 1 GPa = 1000 MPa. For scale: steel edge ~200000, Titanal ~72000, carbon UD ~135000, glass ~12000-40000, wood ~5000-14000.";
+            const DENS_FIB_TIP = "Fibre density in grams per cubic centimetre (g/cm³). Converts a cloth's areal weight (g/m²) into a cured ply thickness, and into mass. Glass ~2.55, carbon ~1.6, flax ~1.4.";
+            const DENS_WOOD_TIP = "Wood density in kilograms per cubic metre (kg/m³). Drives core mass and the rule-of-mixtures blend. Paulownia ~280, poplar ~420, ash ~650, maple ~670.";
+            const GSM_TIP = "Default areal weight of the cloth in grams per square metre (g/m²). Just the starting value for a new layer; you set the real weight per layer in the layup.";
+            const info = txt => <span title={txt} style={{ cursor: "help", color: C.heading, fontSize: 11, marginLeft: 2 }}>{"\u24D8"}</span>;
             const nInp = (v, on) => <input type="number" defaultValue={v} onChange={e => { const x = parseFloat(e.target.value); if (isNaN(x)) return; on(x); _saveConstOverrides(); setConstV(z => z + 1); }} style={{ width: 66, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />;
-            const grp = (t, s) => <div style={{ color: C.heading, fontSize: 10, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", margin: "11px 0 5" }}>{t} <span style={{ color: C.labelDim, fontWeight: 400 }}>{s}</span></div>;
+            const grp = (t, units) => <div style={{ color: C.heading, fontSize: 10, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", margin: "11px 0 5" }}>{t} <span style={{ color: C.labelDim, fontWeight: 400 }}>{units}</span></div>;
             const nameSpan = t => <span style={{ ...gL, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t}</span>;
             const row = (k, cells) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>{cells}</div>;
             return (<div key={constResetKey}>
-              {grp("FABRICS", "E MPa · density g/cm³")}
+              {grp("FABRICS", <>E (MPa){info(E_TIP)} · density (g/cm³){info(DENS_FIB_TIP)}</>)}
               {Object.keys(FIBERS).map(k => row(k, [nameSpan(FIBERS[k].name), nInp(FIBERS[k].E, v => { FIBERS[k].E = v; }), nInp(FIBERS[k].dens, v => { FIBERS[k].dens = v; })]))}
-              {grp("WOODS / CORE", "E MPa · density kg/m³")}
+              {grp("WOODS / CORE", <>E (MPa){info(E_TIP)} · density (kg/m³){info(DENS_WOOD_TIP)}</>)}
               {Object.keys(WOODS).map(k => row(k, [nameSpan(WOODS[k].name), nInp(WOODS[k].E, v => { WOODS[k].E = v; }), nInp(WOODS[k].density, v => { WOODS[k].density = v; })]))}
-              {grp("METAL / LAMINATE", "E MPa")}
+              {grp("METAL / LAMINATE", <>E (MPa){info(E_TIP)}</>)}
               {Object.keys(METALS).filter(k => k !== "none").map(k => row(k, [nameSpan(METALS[k].name), nInp(METALS[k].E, v => { METALS[k].E = v; })]))}
-              <div style={{ ...gL, marginTop: 8 }}>Steel edge, base and topsheet moduli are fixed for now — ask if you want them here too.</div>
-              <button onClick={() => { _resetConsts(); setConstResetKey(z => z + 1); setConstV(z => z + 1); }} style={{ ...secondaryBtn, width: "100%", marginTop: 10, color: C.labelDim }}>Reset all constants to defaults</button>
+              {grp("STRUCTURE", <>E (MPa){info(E_TIP)}</>)}
+              {Object.keys(SCALARS).map(k => row(k, [nameSpan(SCALARS[k].name), nInp(SCALARS[k].E, v => { SCALARS[k].E = v; })]))}
+              <button onClick={() => { _resetConsts(); setConstResetKey(z => z + 1); setConstV(z => z + 1); }} style={{ ...secondaryBtn, width: "100%", marginTop: 12, color: C.labelDim }}>Reset all constants to defaults</button>
             </div>);
           })()}
         </AccordionSection>
