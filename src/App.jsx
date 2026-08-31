@@ -145,17 +145,17 @@ const CARBON_THICK=0.3,EDGE_W=2,EDGE_H=1.8,BASE_THICK=1.2,TOPSHEET_THICK=0.5;
 const SCALARS = { edge: { name: "Steel edge", E: 200000 }, base: { name: "Base (P-tex)", E: 800 }, topsheet: { name: "Topsheet", E: 1500 }, vds: { name: "VDS rubber", E: 40 } };
 // Shaped reinforcement inserts can be cut from many materials, not just metal. thick mm, density kg/m³.
 const INSERT_MATERIALS = {
-  titanal:    { name: "Titanal",       thick: 0.4,  density: 2830 },
-  titanalH:   { name: "Titanal 0.6",   thick: 0.6,  density: 2830 },
-  carbonUD:   { name: "Carbon UD",     thick: 0.4,  density: 1600 },
-  carbonBiax: { name: "Carbon Biax",   thick: 0.4,  density: 1600 },
-  carbonTriax:{ name: "Carbon Triax",  thick: 0.55, density: 1600 },
-  glassUD:    { name: "Glass UD",      thick: 0.4,  density: 2550 },
-  glassBiax:  { name: "Glass Biax",    thick: 0.4,  density: 2550 },
-  glassTriax: { name: "Glass Triax",   thick: 0.5,  density: 2550 },
-  pu:         { name: "PU",            thick: 2.0,  density: 300 },
-  hardwood:   { name: "Hardwood",      thick: 2.0,  density: 670 },
-  abs:        { name: "ABS",            thick: 1.5,  density: 1050 },
+  titanal:    { name: "Titanal",       thick: 0.4,  density: 2830, E: 71700 },
+  titanalH:   { name: "Titanal 0.6",   thick: 0.6,  density: 2830, E: 71700 },
+  carbonUD:   { name: "Carbon UD",     thick: 0.4,  density: 1600, E: 135000 },
+  carbonBiax: { name: "Carbon Biax",   thick: 0.4,  density: 1600, E: 24000 },
+  carbonTriax:{ name: "Carbon Triax",  thick: 0.55, density: 1600, E: 58000 },
+  glassUD:    { name: "Glass UD",      thick: 0.4,  density: 2550, E: 40000 },
+  glassBiax:  { name: "Glass Biax",    thick: 0.4,  density: 2550, E: 12000 },
+  glassTriax: { name: "Glass Triax",   thick: 0.5,  density: 2550, E: 25000 },
+  pu:         { name: "PU",            thick: 2.0,  density: 300,  E: 55 },
+  hardwood:   { name: "Hardwood",      thick: 2.0,  density: 670,  E: 12000 },
+  abs:        { name: "ABS",            thick: 1.5,  density: 1050, E: 2300 },
 };
 // ── Language scaffolding ────────────────────────────────────────────────────────────────────────────────
 // t(id, english) returns the active language's string, falling back to English. Only a small starter set is
@@ -657,7 +657,27 @@ function getCoreThickAt(profile, pos) {
   }
   return _coreSplineCache.fn(pos);
 }
-function computeEIAtStation(skiWidth,coreThick,layup){
+// A shaped insert reinforces the ski only over its own length range and width, so at each flex station we
+// turn the inserts covering that station into thin layers (their material modulus, their width there, above
+// or below the core) that the transformed-section calc then accounts for.
+function insertLayersAt(ski, pos) {
+  const out = [];
+  if (!Array.isArray(ski.inserts) || !ski.inserts.length) return out;
+  for (const ins of ski.inserts) {
+    const a = ins.posStart != null ? ins.posStart : 0.32, b0 = ins.posEnd != null ? ins.posEnd : 0.68;
+    const s = Math.min(a, b0), e = Math.max(a, b0);
+    if (pos < s || pos > e || e <= s) continue;
+    const im = INSERT_MATERIALS[ins.material] || INSERT_MATERIALS.titanal;
+    const t = ins.thick != null ? ins.thick : im.thick, E = im.E || 40000;
+    const f = (pos - s) / (e - s);
+    const wT = ins.wTail != null ? ins.wTail : 36, wW = ins.wWaist != null ? ins.wWaist : 56, wTp = ins.wTip != null ? ins.wTip : 36;
+    let w; if (f <= 0.5) { const u = f / 0.5, sm = u * u * (3 - 2 * u); w = wT + sm * (wW - wT); } else { const u = (f - 0.5) / 0.5, sm = u * u * (3 - 2 * u); w = wW + sm * (wTp - wW); }
+    const bw = ins.type === "frame" ? Math.min(w, 2 * (ins.borderW != null ? ins.borderW : 12)) : w;
+    if (bw > 0 && t > 0 && E > 0) out.push({ E, b: bw, t, above: ins.layer !== "below" });
+  }
+  return out;
+}
+function computeEIAtStation(skiWidth,coreThick,layup,insertLayers){
   let layers;
   if (layup.stack && layup.stack.length) {
     layers = stackToLayers(layup.stack, skiWidth, coreThick);
@@ -684,6 +704,14 @@ function computeEIAtStation(skiWidth,coreThick,layup){
   const swp = sidewallProps(layup.sidewall);
   if (swp && swp.E > 0 && swp.thick > 0) {
     for (const l of layers) if (l.role === "core" && l.b > 2 * swp.thick) l.E = (l.E * (l.b - 2 * swp.thick) + swp.E * 2 * swp.thick) / l.b;
+  }
+  // Shaped inserts: drop each one in right against the core, above or below, at its width for this station.
+  if (insertLayers && insertLayers.length) {
+    const ci = layers.findIndex(l => l.role === "core");
+    if (ci >= 0) for (const il of insertLayers) {
+      const lay = { E: il.E, b: il.b, t: il.t, role: "insert" };
+      if (il.above) layers.splice(ci + 1, 0, lay); else layers.splice(ci, 0, lay);
+    }
   }
   let yBot=0;const yc=[];
   for(const l of layers){yc.push(yBot+l.t/2);yBot+=l.t;}
@@ -816,7 +844,7 @@ function computeFlexProfile(ski){
   const N=250,stations=[];
   for(let i=0;i<=N;i++){
     const pos=i/N,w=getWidthAtPos(ski,pos),ct=getCoreThickAt(ski.coreProfile,pos);
-    const ei=computeEIAtStation(w,ct,ski.layup)*cal;
+    const ei=computeEIAtStation(w,ct,ski.layup,insertLayersAt(ski,pos))*cal;
     stations.push({pos,xmm:pos*ski.length,width:w,coreThick:ct,ei,kCant:3*ei/(1e6)});
   }
   const span=ski.length-ski.tipLength-ski.tailLength,tailStart=ski.tailLength;
@@ -824,7 +852,7 @@ function computeFlexProfile(ski){
   for(let i=0;i<=N;i++){
     const x=i*dx,m=(x<=span/2)?x/2:(span-x)/2;
     const pos=(tailStart+x)/ski.length;
-    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup)*cal;
+    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos))*cal;
     const f=ei>0?(m*m)/ei:0;integral+=(i===0||i===N?0.5:1.0)*f*dx;
   }
   const k3pt=integral>0?1/integral:0,midIdx=Math.round(N*0.5);
