@@ -584,7 +584,9 @@ function readAutosave(mode = "ski") {
     if (!raw) return null;
     const ski = JSON.parse(raw);
     const meta = metaRaw ? JSON.parse(metaRaw) : {};
-    return { ski, meta };
+    let study = null;
+    try { const sr = localStorage.getItem("bcs_study"); if (sr) { const sp = JSON.parse(sr); if (Array.isArray(sp.variants) && sp.variants.length) study = sp; } } catch (e) {}
+    return { ski, meta, study };
   } catch (e) {
     return null;
   }
@@ -7068,8 +7070,9 @@ export default function App() {
   const [studyVariants, setStudyVariants] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) { const p = JSON.parse(r); if (Array.isArray(p.variants)) return p.variants; } } catch (e) {} return []; });
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyNotes, setStudyNotes] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) return JSON.parse(r).notes || ""; } catch (e) {} return ""; });
+  const [studyTitle, setStudyTitle] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) return JSON.parse(r).title || ""; } catch (e) {} return ""; });
   const [activeVariant, setActiveVariant] = useState(null);   // id of the variant currently loaded for editing
-  useEffect(() => { try { localStorage.setItem("bcs_study", JSON.stringify({ variants: studyVariants, notes: studyNotes })); } catch (e) {} }, [studyVariants, studyNotes]);
+  useEffect(() => { try { localStorage.setItem("bcs_study", JSON.stringify({ variants: studyVariants, notes: studyNotes, title: studyTitle })); } catch (e) {} }, [studyVariants, studyNotes, studyTitle]);
   const captureVariant = () => setStudyVariants(vs => {
     if (vs.length >= 4) return vs;
     const snap = JSON.parse(JSON.stringify(ski));
@@ -7089,7 +7092,7 @@ export default function App() {
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div>${bName ? `<div style="font-size:11px;color:#888">${esc(bName)}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} Design Study</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -7532,7 +7535,7 @@ export default function App() {
   const handleSave = useCallback(() => {
     const isBoard = ski.mode === "snowboard";
     const isUnnamed = !ski.designName || ski.designName === "Untitled Design" || ski.designName === "Untitled Board";
-    const study = { variants: studyVariants, notes: studyNotes };
+    const study = { variants: studyVariants, notes: studyNotes, title: studyTitle };
     if (isUnnamed) {
       const name = window.prompt("Name this design before saving:", isBoard ? "My Snowboard" : "My Ski Design");
       if (!name) return;
@@ -7542,7 +7545,7 @@ export default function App() {
     } else {
       saveDesignToFile(ski, study);
     }
-  }, [ski, studyVariants, studyNotes]);
+  }, [ski, studyVariants, studyNotes, studyTitle]);
 
   const handleLoadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -7554,7 +7557,7 @@ export default function App() {
     const result = await loadDesignFromFile(file);
     if (result.ok) {
       setSki(result.ski);
-      if (result.study && Array.isArray(result.study.variants)) { setStudyVariants(result.study.variants); setStudyNotes(result.study.notes || ""); setActiveVariant(null); }
+      if (result.study && Array.isArray(result.study.variants)) { setStudyVariants(result.study.variants); setStudyNotes(result.study.notes || ""); setStudyTitle(result.study.title || ""); setActiveVariant(null); }
       setLoadMessage({ type: result.warning ? "warn" : "ok", text: result.warning || `Loaded "${result.ski.designName}"${result.study && result.study.variants.length ? ` + ${result.study.variants.length} study variant${result.study.variants.length > 1 ? "s" : ""}` : ""}` });
       setTimeout(() => setLoadMessage(null), 4000);
     } else {
@@ -7608,6 +7611,7 @@ export default function App() {
 
   const acceptRecover = useCallback(() => {
     if (recoverBanner?.ski) setSki(recoverBanner.ski);
+    if (recoverBanner?.study && Array.isArray(recoverBanner.study.variants)) { setStudyVariants(recoverBanner.study.variants); setStudyNotes(recoverBanner.study.notes || ""); setStudyTitle(recoverBanner.study.title || ""); setActiveVariant(null); }
     setRecoverBanner(null);
   }, [recoverBanner]);
 
@@ -8199,7 +8203,7 @@ export default function App() {
           }}>
             <div style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.2, fontWeight: 700, marginBottom: 6 }}>UNSAVED SESSION</div>
             <div style={{ color: C.value, fontSize: 12, lineHeight: 1.4, marginBottom: 8 }}>
-              "{recoverBanner.meta?.designName || "Untitled"}" was left in progress.
+              "{recoverBanner.meta?.designName || "Untitled"}" was left in progress.{recoverBanner.study && recoverBanner.study.variants && recoverBanner.study.variants.length ? ` (+ ${recoverBanner.study.variants.length} study variant${recoverBanner.study.variants.length > 1 ? "s" : ""})` : ""}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={acceptRecover} style={{ ...primaryBtn, flex: 1 }}>Recover</button>
@@ -9482,11 +9486,12 @@ export default function App() {
         <div onClick={() => setStudyOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: 10, marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block" }} />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>DESIGN STUDY</div>
-                  <div style={{ fontSize: 11, color: "#888" }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
+                <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block", flexShrink: 0 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap", flexShrink: 0 }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"} Design Study</div>
+                  <div style={{ width: 1, height: 22, background: "#ccc", flexShrink: 0 }} />
+                  <input value={studyTitle} onChange={e => setStudyTitle(e.target.value)} placeholder="Client or ski name (optional)" style={{ border: "none", outline: "none", fontSize: 15, color: "#333", fontFamily: "inherit", minWidth: 0, flex: 1, background: "transparent" }} />
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
