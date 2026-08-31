@@ -6914,6 +6914,51 @@ const CAM_LEN_KEYS = [
   "sidewallThick", "edgeOverlap",
 ];
 
+const STUDY_COLORS = ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"];
+// Overlaid flex curves (cantilever stiffness vs length) for the captured variants, as an SVG string used both
+// on screen and in the printed report.
+function studyChartSVG(variants, W, H) {
+  const pad = 46, plotW = W - pad - 16, plotH = H - pad - 34;
+  let maxX = 1, maxK = 1;
+  for (const v of variants) for (const s of v.stations) { if (s.x > maxX) maxX = s.x; if (s.k > maxK) maxK = s.k; }
+  maxK *= 1.1;
+  const X = x => pad + (x / maxX) * plotW, Y = k => (pad - 12) + plotH - (k / maxK) * plotH;
+  let g = `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
+  // axes
+  g += `<line x1="${pad}" y1="${pad - 12}" x2="${pad}" y2="${pad - 12 + plotH}" stroke="#bbb" stroke-width="1"/>`;
+  g += `<line x1="${pad}" y1="${pad - 12 + plotH}" x2="${pad + plotW}" y2="${pad - 12 + plotH}" stroke="#bbb" stroke-width="1"/>`;
+  for (let f = 0; f <= 1.001; f += 0.25) { const yy = (pad - 12) + plotH - f * plotH; g += `<line x1="${pad}" y1="${yy.toFixed(1)}" x2="${pad + plotW}" y2="${yy.toFixed(1)}" stroke="#eee" stroke-width="1"/><text x="${pad - 5}" y="${(yy + 3).toFixed(1)}" font-size="9" fill="#888" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
+  g += `<text x="${(pad + plotW / 2).toFixed(0)}" y="${H - 6}" font-size="10" fill="#555" font-family="monospace" text-anchor="middle">position (mm, tail \u2192 tip)</text>`;
+  g += `<text x="12" y="${(pad - 20).toFixed(0)}" font-size="9" fill="#555" font-family="monospace">N/mm</text>`;
+  variants.forEach((v, i) => {
+    if (!v.stations.length) return;
+    const pts = v.stations.map(s => `${X(s.x).toFixed(1)},${Y(s.k).toFixed(1)}`).join(" ");
+    g += `<polyline points="${pts}" fill="none" stroke="${STUDY_COLORS[i]}" stroke-width="2"/>`;
+    g += `<rect x="${pad + 4 + i * 150}" y="${(pad - 26).toFixed(0)}" width="10" height="10" fill="${STUDY_COLORS[i]}"/><text x="${pad + 18 + i * 150}" y="${(pad - 17).toFixed(0)}" font-size="9.5" fill="#333" font-family="monospace">${String(v.name).slice(0, 16)}</text>`;
+  });
+  return g;
+}
+function studyTableHTML(variants) {
+  const num = (x, d, u) => (x == null || !isFinite(x)) ? "&mdash;" : (d != null ? x.toFixed(d) : x) + (u || "");
+  const rowsDef = [
+    ["Length", v => num(v.length, 0, " mm")],
+    ["Tip / Waist / Tail", v => `${num(v.tip, 0)} / ${num(v.waist, 0)} / ${num(v.tail, 0)} mm`],
+    ["Sidecut radius", v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
+    ["Core tip / waist / tail", v => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm`],
+    ["Core", v => v.core || "&mdash;"],
+    ["Layup", v => v.layup || "&mdash;"],
+    ["3-pt bend", v => num(v.k3pt, 2, " N/mm")],
+    ["Peak EI", v => v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;"],
+    ["Weight (est)", v => num(v.weight, 2, " kg")],
+  ];
+  let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
+  variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">${String(v.name).slice(0, 20)}</td>`; });
+  h += `</tr>`;
+  for (const [label, fn] of rowsDef) { h += `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;color:#666">${label}</td>`; variants.forEach(v => { h += `<td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;color:#111">${fn(v)}</td>`; }); h += `</tr>`; }
+  h += `</table>`;
+  return h;
+}
+
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
   // One cohesive stylesheet for the whole UI: consistent hover/active feedback on every button, a focus
@@ -6971,6 +7016,45 @@ export default function App() {
   const [constResetKey, setConstResetKey] = useState(0);   // re-mounts the constant inputs after a reset
   const [langV, setLangV] = useState(0);   // bumps on language change to re-render translated strings
   const flex = useMemo(() => computeFlexProfile(ski), [ski, constV]);
+  // Design Study: capture up to four full designs side by side to compare flex, weight and core, then export
+  // one report — the trade-study workflow (titanal vs carbon, etc.) instead of one build card per design.
+  const [studyVariants, setStudyVariants] = useState([]);
+  const [studyOpen, setStudyOpen] = useState(false);
+  const [studyNotes, setStudyNotes] = useState("");
+  const captureVariant = () => setStudyVariants(vs => {
+    if (vs.length >= 4) return vs;
+    const snap = JSON.parse(JSON.stringify(ski));
+    let fp = { stations: [], k3pt: 0, peakEI: 0, underfootK: 0 }, bomV = {}, derV = {};
+    try { fp = computeFlexProfile(snap); } catch (e) {}
+    try { bomV = computeBOM(snap); } catch (e) {}
+    try { derV = computeDerived(snap); } catch (e) {}
+    const cp = snap.coreProfile || [], cAt = f => { try { return getCoreThickAt(cp, f); } catch (e) { return 0; } };
+    const runS = (snap.tailLength || 0) / snap.length, runE = (snap.length - (snap.tipLength || 0)) / snap.length;
+    const stack = (snap.layup && snap.layup.stack) || [];
+    const coreL = stack.find(l => l.kind === "core");
+    const lay = stack.filter(l => ["fabric", "uni", "metal", "veneer", "vds"].includes(l.kind)).map(l =>
+      l.kind === "metal" ? ((METALS[l.mat] || {}).name || "metal") : l.kind === "veneer" ? (((VENEERS[l.mat] || {}).name || "wood") + " veneer") : l.kind === "vds" ? "VDS" : ((FIBERS[l.mat] || {}).name || l.mat)).join(", ");
+    const nm = (snap.designName && !/^Untitled/.test(snap.designName)) ? snap.designName : "Variant " + (vs.length + 1);
+    return [...vs, {
+      id: "v" + Date.now(), name: nm, mode: snap.mode || "ski",
+      length: snap.length, tip: snap.tipWidth, waist: snap.waistWidth, tail: snap.tailWidth,
+      radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
+      coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
+      k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0,
+      core: coreL ? ((CORE_MATERIALS[(coreWoods(coreL)[0] || {}).mat] || {}).name || "wood") : "",
+      layup: lay,
+      stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
+    }];
+  });
+  const printStudy = () => {
+    const W = 760, H = 340, chart = studyChartSVG(studyVariants, W, H), table = studyTableHTML(studyVariants);
+    const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
+    const win = window.open("", "_blank"); if (!win) return;
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
+    win.document.close();
+    setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
+  };
   const bom = useMemo(() => computeBOM(ski), [ski]);
   // Editable per-unit material prices (USD) for the cost estimate. Persisted to localStorage.
   const [bomPrices, setBomPrices] = useState(() => {
@@ -9163,6 +9247,29 @@ export default function App() {
           </div>
         </AccordionSection>
 
+        <AccordionSection isOpen={!!sectionsOpen.designStudy} onToggle={() => toggleSection("designStudy")} title="Design Study (compare)">
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+            Capture the current design as a variant, tweak it, capture again — up to four — then compare their flex, weight and core side by side and export one report. Built for trade studies (titanal vs carbon, and so on).
+          </div>
+          <button onClick={captureVariant} disabled={studyVariants.length >= 4} style={{ ...primaryBtn, marginBottom: 8, opacity: studyVariants.length >= 4 ? 0.5 : 1 }}>
+            {studyVariants.length >= 4 ? "4 variants captured (max)" : "Capture current design"}
+          </button>
+          {studyVariants.map((v, i) => (
+            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, padding: "5px 8px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"][i], flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0, color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</span>
+              <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>{v.weight ? v.weight.toFixed(2) + "kg" : ""}</span>
+              <button onClick={() => setStudyVariants(vs => vs.filter(x => x.id !== v.id))} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
+            </div>
+          ))}
+          {studyVariants.length >= 2 && (
+            <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Open comparison report</button>
+          )}
+          {studyVariants.length < 2 && studyVariants.length > 0 && (
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Capture at least two to compare.</div>
+          )}
+        </AccordionSection>
+
         {groupHeader(SIDEBAR_GROUPS[5])}
         <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title="Material Suppliers">
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -9322,6 +9429,25 @@ export default function App() {
         trigger={feedbackTrigger}
       />
       {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
+      {studyOpen && studyVariants.length >= 2 && (
+        <div onClick={() => setStudyOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "2px solid #333", paddingBottom: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>DESIGN STUDY</div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button onClick={printStudy} style={{ background: "#c8935a", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 5, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Print / Save PDF</button>
+                <button onClick={() => setStudyOpen(false)} style={{ background: "transparent", border: "1px solid #ccc", color: "#333", padding: "8px 12px", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>Close</button>
+              </div>
+            </div>
+            <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
+            <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>NOTES</div>
+              <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
+            </div>
+          </div>
+        </div>
+      )}
       {showDb && <SkiDatabaseModal kind={ski.mode === "snowboard" ? "snowboard" : "ski"} onClose={() => setShowDb(false)} onApply={applySkiFromDb} onGhost={setGhostFromDb} />}
 
       {camOpen && (
