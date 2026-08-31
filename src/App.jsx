@@ -429,7 +429,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "0.6";
 
-function saveDesignToFile(ski) {
+function saveDesignToFile(ski, study) {
   const envelope = {
     format: BCSKI_FORMAT,
     formatVersion: BCSKI_FORMAT_VERSION,
@@ -437,6 +437,7 @@ function saveDesignToFile(ski) {
     exportedAt: new Date().toISOString(),
     designName: ski.designName || "Untitled Design",
     ski: ski,
+    study: (study && study.variants && study.variants.length) ? study : null,
   };
   const json = JSON.stringify(envelope, null, 2);
   const safeName = (ski.designName || "untitled").replace(/[^a-z0-9-]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "");
@@ -474,6 +475,7 @@ function parseDesignFile(jsonText) {
   if (!parsed.ski || typeof parsed.ski !== "object") {
     return { ok: false, error: "File is missing ski data." };
   }
+  const study = (parsed.study && Array.isArray(parsed.study.variants)) ? parsed.study : null;
   // Migration hook for future format versions:
   let ski = parsed.ski;
   const newerFile = parsed.formatVersion > BCSKI_FORMAT_VERSION;
@@ -530,11 +532,11 @@ function parseDesignFile(jsonText) {
 
   if (newerFile) {
     // Newer file than this app knows about. Loaded above with defaults backfilled; warn the caller.
-    return { ok: true, ski, warning: `This design was saved by a newer version of the designer. It loaded, but a field or two may not be recognized — update the app if something looks off.` };
+    return { ok: true, ski, study, warning: `This design was saved by a newer version of the designer. It loaded, but a field or two may not be recognized — update the app if something looks off.` };
   }
   // Ensure designName exists (older files may not have it)
   if (!ski.designName) ski.designName = parsed.designName || "Loaded Design";
-  return { ok: true, ski };
+  return { ok: true, ski, study };
 }
 
 function loadDesignFromFile(file) {
@@ -7063,10 +7065,11 @@ export default function App() {
   const flex = useMemo(() => computeFlexProfile(ski), [ski, constV]);
   // Design Study: capture up to four full designs side by side to compare flex, weight and core, then export
   // one report — the trade-study workflow (titanal vs carbon, etc.) instead of one build card per design.
-  const [studyVariants, setStudyVariants] = useState([]);
+  const [studyVariants, setStudyVariants] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) { const p = JSON.parse(r); if (Array.isArray(p.variants)) return p.variants; } } catch (e) {} return []; });
   const [studyOpen, setStudyOpen] = useState(false);
-  const [studyNotes, setStudyNotes] = useState("");
+  const [studyNotes, setStudyNotes] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) return JSON.parse(r).notes || ""; } catch (e) {} return ""; });
   const [activeVariant, setActiveVariant] = useState(null);   // id of the variant currently loaded for editing
+  useEffect(() => { try { localStorage.setItem("bcs_study", JSON.stringify({ variants: studyVariants, notes: studyNotes })); } catch (e) {} }, [studyVariants, studyNotes]);
   const captureVariant = () => setStudyVariants(vs => {
     if (vs.length >= 4) return vs;
     const snap = JSON.parse(JSON.stringify(ski));
@@ -7081,8 +7084,11 @@ export default function App() {
     const W = 760, H = 340, chart = studyChartSVG(studyVariants, W, H), table = studyTableHTML(studyVariants);
     const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
+    const bName = (builderBrand.name || "").trim();
+    const logoImg = builderBrand.logoSrc ? `<img src="${builderBrand.logoSrc}" style="height:46px;width:auto;display:block"/>` : "";
+    const cap = `<div style="font-size:11px;color:#666;line-height:1.55;margin:8px 2px 0">Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div>`;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="font-size:11px;color:#666;line-height:1.55;margin:8px 2px 0">Each colored line is one design. The higher the line, the stiffer the ski is at that point. Soft tips help the ski start turns and float in soft snow; a stiffer middle underfoot gives power and edge grip. Where the lines separate, those designs ride differently at that part of the ski.</div><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div>${bName ? `<div style="font-size:11px;color:#888">${esc(bName)}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg>${cap}<div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -7525,16 +7531,17 @@ export default function App() {
   const handleSave = useCallback(() => {
     const isBoard = ski.mode === "snowboard";
     const isUnnamed = !ski.designName || ski.designName === "Untitled Design" || ski.designName === "Untitled Board";
+    const study = { variants: studyVariants, notes: studyNotes };
     if (isUnnamed) {
       const name = window.prompt("Name this design before saving:", isBoard ? "My Snowboard" : "My Ski Design");
       if (!name) return;
       const named = { ...ski, designName: name };
       setSki(named);
-      saveDesignToFile(named);
+      saveDesignToFile(named, study);
     } else {
-      saveDesignToFile(ski);
+      saveDesignToFile(ski, study);
     }
-  }, [ski]);
+  }, [ski, studyVariants, studyNotes]);
 
   const handleLoadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -7546,7 +7553,8 @@ export default function App() {
     const result = await loadDesignFromFile(file);
     if (result.ok) {
       setSki(result.ski);
-      setLoadMessage({ type: result.warning ? "warn" : "ok", text: result.warning || `Loaded "${result.ski.designName}"` });
+      if (result.study && Array.isArray(result.study.variants)) { setStudyVariants(result.study.variants); setStudyNotes(result.study.notes || ""); setActiveVariant(null); }
+      setLoadMessage({ type: result.warning ? "warn" : "ok", text: result.warning || `Loaded "${result.ski.designName}"${result.study && result.study.variants.length ? ` + ${result.study.variants.length} study variant${result.study.variants.length > 1 ? "s" : ""}` : ""}` });
       setTimeout(() => setLoadMessage(null), 4000);
     } else {
       setLoadMessage({ type: "error", text: result.error });
@@ -9472,8 +9480,14 @@ export default function App() {
       {studyOpen && studyVariants.length >= 2 && (
         <div onClick={() => setStudyOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "2px solid #333", paddingBottom: 8, marginBottom: 16 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>DESIGN STUDY</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: 10, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                {builderBrand.logoSrc && <img src={builderBrand.logoSrc} alt="" style={{ height: 44, width: "auto", display: "block" }} />}
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 2 }}>DESIGN STUDY</div>
+                  {(builderBrand.name || "").trim() && <div style={{ fontSize: 11, color: "#888" }}>{builderBrand.name.trim()}</div>}
+                </div>
+              </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <button onClick={printStudy} style={{ background: "#c8935a", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 5, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Print / Save PDF</button>
                 <button onClick={() => setStudyOpen(false)} style={{ background: "transparent", border: "1px solid #ccc", color: "#333", padding: "8px 12px", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>Close</button>
@@ -9486,6 +9500,9 @@ export default function App() {
             <div style={{ marginTop: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>NOTES</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginTop: 18, textAlign: "center", fontSize: 9, color: "#bbb" }}>
+              Made with the Black Chapel Studios ski designer · <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ color: "#bbb" }}>blackchapelstudios.com</a>
             </div>
           </div>
         </div>
