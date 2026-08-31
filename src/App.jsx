@@ -6914,6 +6914,29 @@ const CAM_LEN_KEYS = [
   "sidewallThick", "edgeOverlap",
 ];
 
+// Compute the comparable metrics + flex curve for one design snapshot. Used to capture a new study variant
+// and to update an existing one after edits.
+function computeVariantMetrics(snap) {
+  let fp = { stations: [], k3pt: 0, peakEI: 0, underfootK: 0 }, bomV = {}, derV = {};
+  try { fp = computeFlexProfile(snap); } catch (e) {}
+  try { bomV = computeBOM(snap); } catch (e) {}
+  try { derV = computeDerived(snap); } catch (e) {}
+  const cp = snap.coreProfile || [], cAt = f => { try { return getCoreThickAt(cp, f); } catch (e) { return 0; } };
+  const runS = (snap.tailLength || 0) / snap.length, runE = (snap.length - (snap.tipLength || 0)) / snap.length;
+  const stack = (snap.layup && snap.layup.stack) || [];
+  const coreL = stack.find(l => l.kind === "core");
+  const lay = stack.filter(l => ["fabric", "uni", "metal", "veneer", "vds"].includes(l.kind)).map(l =>
+    l.kind === "metal" ? ((METALS[l.mat] || {}).name || "metal") : l.kind === "veneer" ? (((VENEERS[l.mat] || {}).name || "wood") + " veneer") : l.kind === "vds" ? "VDS" : ((FIBERS[l.mat] || {}).name || l.mat)).join(", ");
+  return {
+    length: snap.length, tip: snap.tipWidth, waist: snap.waistWidth, tail: snap.tailWidth,
+    radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
+    coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
+    k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0,
+    core: coreL ? ((CORE_MATERIALS[(coreWoods(coreL)[0] || {}).mat] || {}).name || "wood") : "",
+    layup: lay,
+    stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
+  };
+}
 const STUDY_COLORS = ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"];
 // Overlaid flex curves (cantilever stiffness vs length) for the captured variants, as an SVG string used both
 // on screen and in the printed report.
@@ -6940,22 +6963,34 @@ function studyChartSVG(variants, W, H) {
 }
 function studyTableHTML(variants) {
   const num = (x, d, u) => (x == null || !isFinite(x)) ? "&mdash;" : (d != null ? x.toFixed(d) : x) + (u || "");
+  const first = variants[0] || {};
+  // Change vs the first (reference) variant, shown in a muted tag so trade-offs read at a glance.
+  const dlt = (v, ref, d, eps) => { if (v == null || ref == null || !isFinite(v) || !isFinite(ref)) return ""; const dd = v - ref; if (Math.abs(dd) < (eps || 0.05)) return ""; return ` <span style="color:#9a7a3a;font-size:9px;font-weight:700">${dd > 0 ? "+" : ""}${dd.toFixed(d)}</span>`; };
   const rowsDef = [
     ["Length", v => num(v.length, 0, " mm")],
     ["Tip / Waist / Tail", v => `${num(v.tip, 0)} / ${num(v.waist, 0)} / ${num(v.tail, 0)} mm`],
     ["Sidecut radius", v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
-    ["Core tip / waist / tail", v => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm`],
+    ["Core tip / waist / tail", (v, i) => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm` + (i ? dlt(v.coreWaist, first.coreWaist, 1, 0.05) : "")],
     ["Core", v => v.core || "&mdash;"],
     ["Layup", v => v.layup || "&mdash;"],
-    ["3-pt bend", v => num(v.k3pt, 2, " N/mm")],
-    ["Peak EI", v => v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;"],
-    ["Weight (est)", v => num(v.weight, 2, " kg")],
+    ["3-pt bend", (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
+    ["Peak EI", (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
+    ["Weight (est)", (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
-  variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">${String(v.name).slice(0, 20)}</td>`; });
+  variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">${String(v.name).slice(0, 20)}${i === 0 ? " (ref)" : ""}</td>`; });
   h += `</tr>`;
-  for (const [label, fn] of rowsDef) { h += `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;color:#666">${label}</td>`; variants.forEach(v => { h += `<td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;color:#111">${fn(v)}</td>`; }); h += `</tr>`; }
+  for (const [label, fn] of rowsDef) { h += `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;color:#666">${label}</td>`; variants.forEach((v, i) => { h += `<td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;color:#111">${fn(v, i)}</td>`; }); h += `</tr>`; }
   h += `</table>`;
+  return h;
+}
+function studyLayupHTML(variants) {
+  let h = `<div style="font-weight:700;font-size:12px;color:#333;margin:20px 0 8px">LAYUP</div>`;
+  variants.forEach((v, i) => {
+    let ls = { svg: "", height: 80 };
+    try { ls = buildLayerStackSVG(v.ski, { w: 460 }); } catch (e) {}
+    h += `<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:${STUDY_COLORS[i]};margin-bottom:3px;font-family:monospace">${String(v.name).slice(0, 24)}</div><svg viewBox="0 0 460 ${Math.max(50, ls.height).toFixed(0)}" width="100%" style="max-width:460px;background:#f6f4ef;border:1px solid #eee;border-radius:4px">${ls.svg}</svg></div>`;
+  });
   return h;
 }
 
@@ -7021,37 +7056,23 @@ export default function App() {
   const [studyVariants, setStudyVariants] = useState([]);
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyNotes, setStudyNotes] = useState("");
+  const [activeVariant, setActiveVariant] = useState(null);   // id of the variant currently loaded for editing
   const captureVariant = () => setStudyVariants(vs => {
     if (vs.length >= 4) return vs;
     const snap = JSON.parse(JSON.stringify(ski));
-    let fp = { stations: [], k3pt: 0, peakEI: 0, underfootK: 0 }, bomV = {}, derV = {};
-    try { fp = computeFlexProfile(snap); } catch (e) {}
-    try { bomV = computeBOM(snap); } catch (e) {}
-    try { derV = computeDerived(snap); } catch (e) {}
-    const cp = snap.coreProfile || [], cAt = f => { try { return getCoreThickAt(cp, f); } catch (e) { return 0; } };
-    const runS = (snap.tailLength || 0) / snap.length, runE = (snap.length - (snap.tipLength || 0)) / snap.length;
-    const stack = (snap.layup && snap.layup.stack) || [];
-    const coreL = stack.find(l => l.kind === "core");
-    const lay = stack.filter(l => ["fabric", "uni", "metal", "veneer", "vds"].includes(l.kind)).map(l =>
-      l.kind === "metal" ? ((METALS[l.mat] || {}).name || "metal") : l.kind === "veneer" ? (((VENEERS[l.mat] || {}).name || "wood") + " veneer") : l.kind === "vds" ? "VDS" : ((FIBERS[l.mat] || {}).name || l.mat)).join(", ");
     const nm = (snap.designName && !/^Untitled/.test(snap.designName)) ? snap.designName : "Variant " + (vs.length + 1);
-    return [...vs, {
-      id: "v" + Date.now(), name: nm, mode: snap.mode || "ski",
-      length: snap.length, tip: snap.tipWidth, waist: snap.waistWidth, tail: snap.tailWidth,
-      radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
-      coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
-      k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0,
-      core: coreL ? ((CORE_MATERIALS[(coreWoods(coreL)[0] || {}).mat] || {}).name || "wood") : "",
-      layup: lay,
-      stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
-    }];
+    const id = "v" + Date.now();
+    setActiveVariant(id);
+    return [...vs, { id, name: nm, mode: snap.mode || "ski", ski: snap, ...computeVariantMetrics(snap) }];
   });
+  const updateVariant = (id) => setStudyVariants(vs => vs.map(v => v.id === id ? { ...v, name: (ski.designName && !/^Untitled/.test(ski.designName)) ? ski.designName : v.name, mode: ski.mode || "ski", ski: JSON.parse(JSON.stringify(ski)), ...computeVariantMetrics(ski) } : v));
+  const loadVariant = (v) => { setSki(JSON.parse(JSON.stringify(v.ski))); setActiveVariant(v.id); };
   const printStudy = () => {
     const W = 760, H = 340, chart = studyChartSVG(studyVariants, W, H), table = studyTableHTML(studyVariants);
     const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px"><div style="font-size:20px;font-weight:700;letter-spacing:2px">DESIGN STUDY</div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="margin-top:22px;font-size:9px;color:#aaa">Generated with the Black Chapel Studios ski designer</div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -9254,14 +9275,23 @@ export default function App() {
           <button onClick={captureVariant} disabled={studyVariants.length >= 4} style={{ ...primaryBtn, marginBottom: 8, opacity: studyVariants.length >= 4 ? 0.5 : 1 }}>
             {studyVariants.length >= 4 ? "4 variants captured (max)" : "Capture current design"}
           </button>
-          {studyVariants.map((v, i) => (
-            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, padding: "5px 8px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: ["#c8935a", "#3a78d8", "#0a8a5f", "#e8552a"][i], flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 0, color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</span>
+          {studyVariants.map((v, i) => {
+            const isActive = activeVariant === v.id;
+            return (
+            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, padding: "5px 7px", background: isActive ? `${C.heading}1e` : C.inputBg, border: `1px solid ${isActive ? C.heading : C.inputBorder}`, borderRadius: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: STUDY_COLORS[i], flexShrink: 0 }} />
+              <button onClick={() => loadVariant(v)} title="Load this variant into the editor" style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: "none", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", padding: 0 }}>{v.name}</button>
               <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>{v.weight ? v.weight.toFixed(2) + "kg" : ""}</span>
-              <button onClick={() => setStudyVariants(vs => vs.filter(x => x.id !== v.id))} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
+              <button onClick={() => updateVariant(v.id)} title="Overwrite this variant with the current design" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 3, fontSize: 9, fontWeight: 700, padding: "2px 5px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>UPDATE</button>
+              <button onClick={() => { setStudyVariants(vs => vs.filter(x => x.id !== v.id)); if (isActive) setActiveVariant(null); }} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>
             </div>
-          ))}
+            );
+          })}
+          {studyVariants.length > 0 && (
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              Click a variant's name to load it back into the editor. Make changes, then Update to save them to that variant — nothing is locked in.
+            </div>
+          )}
           {studyVariants.length >= 2 && (
             <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Open comparison report</button>
           )}
@@ -9441,6 +9471,7 @@ export default function App() {
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
+            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>NOTES</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
