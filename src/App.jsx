@@ -163,10 +163,10 @@ const INSERT_MATERIALS = {
 // by builders in each language before it goes in here. Everything not yet translated shows in English.
 const I18N = {
   en: {},
-  es: { "designer.ski": "Dise\u00F1ador de esqu\u00EDs", "designer.board": "Dise\u00F1ador de tablas", "goto.board": "Ir al dise\u00F1ador de tablas", "goto.ski": "Ir al dise\u00F1ador de esqu\u00EDs", "sec.gettingStarted": "Primeros pasos" },
-  fr: { "designer.ski": "Concepteur de skis", "designer.board": "Concepteur de snowboards", "goto.board": "Aller au concepteur de snowboards", "goto.ski": "Aller au concepteur de skis", "sec.gettingStarted": "Pour commencer" },
-  ru: { "designer.ski": "\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440 \u043B\u044B\u0436", "designer.board": "\u041A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440 \u0441\u043D\u043E\u0443\u0431\u043E\u0440\u0434\u043E\u0432", "goto.board": "\u041A \u0441\u043D\u043E\u0443\u0431\u043E\u0440\u0434\u0430\u043C", "goto.ski": "\u041A \u043B\u044B\u0436\u0430\u043C", "sec.gettingStarted": "\u041D\u0430\u0447\u0430\u043B\u043E \u0440\u0430\u0431\u043E\u0442\u044B" },
-  ja: { "designer.ski": "\u30B9\u30AD\u30FC\u30C7\u30B6\u30A4\u30CA\u30FC", "designer.board": "\u30B9\u30CE\u30FC\u30DC\u30FC\u30C9\u30C7\u30B6\u30A4\u30CA\u30FC", "goto.board": "\u30B9\u30CE\u30FC\u30DC\u30FC\u30C9\u3078", "goto.ski": "\u30B9\u30AD\u30FC\u3078", "sec.gettingStarted": "\u306F\u3058\u3081\u306B" },
+  es: { "btn.close": "Cerrar", "btn.load": "Cargar", "btn.new": "Nuevo", "btn.newDesign": "Nuevo dise\u00f1o", "btn.save": "Guardar", "designer.board": "Dise\u00f1ador de tablas", "designer.ski": "Dise\u00f1ador de esqu\u00eds", "goto.board": "Ir al dise\u00f1ador de tablas", "goto.ski": "Ir al dise\u00f1ador de esqu\u00eds", "study.capture": "Capturar dise\u00f1o actual", "study.captureMax": "4 variantes (m\u00e1x.)", "study.layup": "LAMINADO", "study.notes": "NOTAS", "study.openReport": "Abrir informe comparativo", "study.print": "Imprimir / Guardar PDF", "study.title": "Estudio de dise\u00f1o", "chart.flexProfile": "Perfil de flexi\u00f3n", "chart.position": "posici\u00f3n (mm)", "chart.softer": "M\u00e1s blando", "chart.stiffer": "M\u00e1s r\u00edgido", "chart.subtitle": "Rigidez a lo largo del esqu\u00ed", "chart.tail": "COLA", "chart.tip": "PALA", "chart.underfoot": "CENTRO", "tbl.bend": "flexi\u00f3n en tres puntos", "tbl.core": "N\u00facleo", "tbl.coreThick": "Punta del n\u00facleo / Pat\u00edn / Cola", "tbl.dims": "Esp\u00e1tula / Pat\u00edn / Cola", "tbl.layup": "Laminado", "tbl.length": "Longitud", "tbl.peakEI": "EI m\u00e1ximo", "tbl.radius": "radio de corte lateral", "tbl.weight": "Peso (est.)", "sec.advanced": "Avanzado \u2014 Constantes de materiales", "sec.bom": "Lista de materiales", "sec.buildCard": "Ficha de construcci\u00f3n", "sec.cnc": "Exportar CNC", "sec.designStudy": "Estudio de dise\u00f1o (comparar)", "sec.dimensions": "Dimensiones (mm)", "sec.edgesCore": "Cantos y n\u00facleo", "sec.flex": "An\u00e1lisis de flexi\u00f3n", "sec.gettingStarted": "Primeros pasos", "sec.layup": "Laminado / Materiales", "sec.metalInserts": "Insertos met\u00e1licos (flex)", "sec.presets": "Plantillas", "sec.print": "Imprimir / Plantillas", "sec.sideProfile": "Perfil lateral", "sec.splitboard": "Table Splitboard", "sec.stance": "Postura e insertos", "sec.suppliers": "Proveedores de materiales", "sec.symmetry": "Simetr\u00eda", "sec.topsheetArt": "Arte del Topsheet", "sec.views": "Vistas" },
+  fr: { "designer.ski": "Concepteur de skis", "designer.board": "Concepteur de snowboards", "goto.board": "Aller au concepteur de snowboards", "goto.ski": "Aller au concepteur de skis", "sec.gettingStarted": "Pour commencer", "study.title": "\u00c9tude de conception", "chart.flexProfile": "Profil de flexion", "chart.subtitle": "Rigidit\u00e9 sur la longueur du ski", "chart.stiffer": "Plus rigide", "chart.softer": "Plus souple", "chart.tail": "TALON", "chart.underfoot": "PATIN", "chart.tip": "SPATULE", "chart.position": "position (mm)", "tbl.length": "Longueur", "tbl.dims": "Spatule / Patin / Talon", "tbl.core": "Noyau", "tbl.layup": "Stratifi\u00e9", "tbl.weight": "Poids (est.)", "study.layup": "STRATIFI\u00c9", "study.notes": "NOTES", "sec.presets": "Pr\u00e9r\u00e9glages", "sec.dimensions": "Dimensions (mm)", "sec.sideProfile": "Profil lat\u00e9ral", "sec.symmetry": "Sym\u00e9trie", "sec.stance": "Position & inserts", "sec.edgesCore": "Carres & noyau", "sec.layup": "Stratifi\u00e9 / Mat\u00e9riaux", "sec.metalInserts": "Inserts m\u00e9talliques (flex)", "sec.flex": "Analyse de flexion", "sec.print": "Imprimer / Gabarits", "sec.cnc": "Export CNC", "sec.buildCard": "Fiche de construction", "sec.designStudy": "\u00c9tude de conception (comparer)", "sec.bom": "Nomenclature", "sec.advanced": "Avanc\u00e9 \u2014 Constantes de mat\u00e9riaux", "sec.suppliers": "Fournisseurs de mat\u00e9riaux", "sec.views": "Vues", "btn.save": "Enregistrer", "btn.load": "Charger", "btn.new": "Nouveau", "btn.newDesign": "Nouveau design", "btn.close": "Fermer", "study.capture": "Capturer le design actuel", "study.captureMax": "4 variantes (max)", "study.openReport": "Ouvrir le rapport comparatif", "study.print": "Imprimer / Enregistrer PDF" },
+  ru: { "designer.ski": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u043b\u044b\u0436", "designer.board": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u043e\u0432", "goto.board": "\u041a \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u0430\u043c", "goto.ski": "\u041a \u043b\u044b\u0436\u0430\u043c", "sec.gettingStarted": "\u041d\u0430\u0447\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u044b", "study.title": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430", "chart.flexProfile": "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "chart.subtitle": "\u0416\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c \u043f\u043e \u0434\u043b\u0438\u043d\u0435 \u043b\u044b\u0436\u0438", "chart.stiffer": "\u0416\u0451\u0441\u0442\u0447\u0435", "chart.softer": "\u041c\u044f\u0433\u0447\u0435", "chart.tail": "\u041f\u042f\u0422\u041a\u0410", "chart.underfoot": "\u0426\u0415\u041d\u0422\u0420", "chart.tip": "\u041d\u041e\u0421\u041e\u041a", "chart.position": "\u043f\u043e\u0437\u0438\u0446\u0438\u044f (\u043c\u043c)", "tbl.length": "\u0414\u043b\u0438\u043d\u0430", "tbl.dims": "\u041d\u043e\u0441\u043e\u043a / \u0422\u0430\u043b\u0438\u044f / \u041f\u044f\u0442\u043a\u0430", "tbl.core": "\u0421\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "tbl.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442", "tbl.weight": "\u0412\u0435\u0441 (\u043e\u0446.)", "study.layup": "\u041b\u0410\u041c\u0418\u041d\u0410\u0422", "study.notes": "\u0417\u0410\u041c\u0415\u0422\u041a\u0418", "sec.presets": "\u041f\u0440\u0435\u0441\u0435\u0442\u044b", "sec.dimensions": "\u0420\u0430\u0437\u043c\u0435\u0440\u044b (\u043c\u043c)", "sec.sideProfile": "\u0411\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c", "sec.symmetry": "\u0421\u0438\u043c\u043c\u0435\u0442\u0440\u0438\u044f", "sec.stance": "\u0421\u0442\u043e\u0439\u043a\u0430 \u0438 \u0432\u0441\u0442\u0430\u0432\u043a\u0438", "sec.edgesCore": "\u041a\u0430\u043d\u0442\u044b \u0438 \u0441\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "sec.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442 / \u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u044b", "sec.metalInserts": "\u041c\u0435\u0442\u0430\u043b\u043b\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0432\u0441\u0442\u0430\u0432\u043a\u0438 (\u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c)", "sec.flex": "\u0410\u043d\u0430\u043b\u0438\u0437 \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "sec.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0428\u0430\u0431\u043b\u043e\u043d\u044b", "sec.cnc": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 \u0427\u041f\u0423", "sec.buildCard": "\u041a\u0430\u0440\u0442\u0430 \u0441\u0431\u043e\u0440\u043a\u0438", "sec.designStudy": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430 (\u0441\u0440\u0430\u0432\u043d\u0438\u0442\u044c)", "sec.bom": "\u0421\u043f\u0435\u0446\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.advanced": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u043d\u044b\u0435 \u2014 \u041a\u043e\u043d\u0441\u0442\u0430\u043d\u0442\u044b \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.suppliers": "\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0438 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.views": "\u0412\u0438\u0434\u044b", "btn.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "btn.load": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c", "btn.new": "\u041d\u043e\u0432\u044b\u0439", "btn.newDesign": "\u041d\u043e\u0432\u044b\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "btn.close": "\u0417\u0430\u043a\u0440\u044b\u0442\u044c", "study.capture": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "study.captureMax": "4 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u0430 (\u043c\u0430\u043a\u0441.)", "study.openReport": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043e\u0442\u0447\u0451\u0442 \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u044f", "study.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c PDF" },
+  ja: { "designer.ski": "\u30b9\u30ad\u30fc\u30c7\u30b6\u30a4\u30ca\u30fc", "designer.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u30c7\u30b6\u30a4\u30ca\u30fc", "goto.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u3078", "goto.ski": "\u30b9\u30ad\u30fc\u3078", "sec.gettingStarted": "\u306f\u3058\u3081\u306b", "study.title": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3", "chart.flexProfile": "\u30d5\u30ec\u30c3\u30af\u30b9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "chart.subtitle": "\u30b9\u30ad\u30fc\u5168\u9577\u306e\u525b\u6027", "chart.stiffer": "\u786c\u3044", "chart.softer": "\u67d4\u3089\u304b\u3044", "chart.tail": "\u30c6\u30fc\u30eb", "chart.underfoot": "\u8db3\u4e0b", "chart.tip": "\u30c8\u30c3\u30d7", "chart.position": "\u4f4d\u7f6e (mm)", "tbl.length": "\u9577\u3055", "tbl.dims": "\u30c8\u30c3\u30d7 / \u30a6\u30a8\u30b9\u30c8 / \u30c6\u30fc\u30eb", "tbl.core": "\u30b3\u30a2", "tbl.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "tbl.weight": "\u91cd\u91cf (\u63a8\u5b9a)", "study.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "study.notes": "\u30e1\u30e2", "sec.presets": "\u30d7\u30ea\u30bb\u30c3\u30c8", "sec.dimensions": "\u5bf8\u6cd5 (mm)", "sec.sideProfile": "\u30b5\u30a4\u30c9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "sec.symmetry": "\u5bfe\u79f0", "sec.stance": "\u30b9\u30bf\u30f3\u30b9\u3068\u30a4\u30f3\u30b5\u30fc\u30c8", "sec.edgesCore": "\u30a8\u30c3\u30b8\u3068\u30b3\u30a2", "sec.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7 / \u6750\u6599", "sec.metalInserts": "\u30e1\u30bf\u30eb\u30a4\u30f3\u30b5\u30fc\u30c8 (\u30d5\u30ec\u30c3\u30af\u30b9)", "sec.flex": "\u30d5\u30ec\u30c3\u30af\u30b9\u89e3\u6790", "sec.print": "\u5370\u5237 / \u30c6\u30f3\u30d7\u30ec\u30fc\u30c8", "sec.cnc": "CNC\u66f8\u304d\u51fa\u3057", "sec.buildCard": "\u30d3\u30eb\u30c9\u30ab\u30fc\u30c9", "sec.designStudy": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3 (\u6bd4\u8f03)", "sec.bom": "\u90e8\u54c1\u8868", "sec.advanced": "\u8a73\u7d30 \u2014 \u6750\u6599\u5b9a\u6570", "sec.suppliers": "\u6750\u6599\u30b5\u30d7\u30e9\u30a4\u30e4\u30fc", "sec.views": "\u30d3\u30e5\u30fc", "btn.save": "\u4fdd\u5b58", "btn.load": "\u8aad\u307f\u8fbc\u307f", "btn.new": "\u65b0\u898f", "btn.newDesign": "\u65b0\u898f\u30c7\u30b6\u30a4\u30f3", "btn.close": "\u9589\u3058\u308b", "study.capture": "\u73fe\u5728\u306e\u30c7\u30b6\u30a4\u30f3\u3092\u53d6\u308a\u8fbc\u3080", "study.captureMax": "4\u30d0\u30ea\u30a2\u30f3\u30c8 (\u6700\u5927)", "study.openReport": "\u6bd4\u8f03\u30ec\u30dd\u30fc\u30c8\u3092\u958b\u304f", "study.print": "\u5370\u5237 / PDF\u4fdd\u5b58" },
 };
 const LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["ru", "RU"], ["ja", "JA"]];
 let _LANG = "en";
@@ -1494,7 +1494,7 @@ function printTiledPlan(ski, paper, opts) {
     + `.cover{padding:16mm;page-break-after:always}.cover h1{font-size:20px;letter-spacing:1px;margin:0 0 10px}.cover p{font-size:13px;line-height:1.5;max-width:640px}`
     + `.np{position:sticky;top:0;z-index:5;display:block;width:100%;padding:12px;font-size:15px;font-weight:700;cursor:pointer;border:none;background:#e8552a;color:#fff;font-family:inherit}`
     + `@media screen{.pg,.cover{border:1px solid #ccc;margin:10px auto;background:#fff}}@media print{.np{display:none}}`
-    + `</style></head><body><button class="np" onclick="window.print()">Print / Save PDF</button>${cover}${pages}</body></html>`;
+    + `</style></head><body><button class="np" onclick="window.print()">{t("study.print", "Print / Save PDF")}</button>${cover}${pages}</body></html>`;
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
 }
@@ -5717,7 +5717,7 @@ function FeedbackModal({ isOpen, onClose, trigger }) {
               background: C.heading, border: "none", color: C.bgDeep,
               padding: "10px 28px", borderRadius: 4, cursor: "pointer", fontSize: 13,
               fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
-            }}>Close</button>
+            }}>{t("btn.close", "Close")}</button>
           </div>
         )}
       </div>
@@ -6953,21 +6953,21 @@ function studyChartSVG(variants, W, H) {
   maxK *= 1.12;
   const X = x => padL + (x / maxX) * plotW, Y = k => padT + plotH - (k / maxK) * plotH, F = "'Segoe UI',system-ui,sans-serif";
   let g = `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
-  g += `<text x="${padL}" y="19" font-size="15" font-weight="700" fill="#222" font-family="${F}">Flex profile</text>`;
-  g += `<text x="${padL}" y="34" font-size="10.5" fill="#777" font-family="${F}">Stiffness along the length of the ski</text>`;
+  g += `<text x="${padL}" y="19" font-size="15" font-weight="700" fill="#222" font-family="${F}">${t("chart.flexProfile", "Flex profile")}</text>`;
+  g += `<text x="${padL}" y="34" font-size="10.5" fill="#777" font-family="${F}">${t("chart.subtitle", "Stiffness along the length of the ski")}</text>`;
   g += `<rect x="${X(maxX * 0.40).toFixed(1)}" y="${padT}" width="${(plotW * 0.20).toFixed(1)}" height="${plotH}" fill="#f4efe3"/>`;
   g += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
   g += `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#bbb" stroke-width="1"/>`;
   for (let f = 0; f <= 1.001; f += 0.25) { const yy = padT + plotH - f * plotH; g += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${padL + plotW}" y2="${yy.toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 7}" y="${(yy + 3).toFixed(1)}" font-size="8.5" fill="#bbb" font-family="monospace" text-anchor="end">${(f * maxK).toFixed(1)}</text>`; }
   // y axis: unit at top, consistent Stiffer/Softer labels along the axis (no overlap)
   g += `<text x="${padL - 7}" y="${padT - 5}" font-size="8.5" fill="#aaa" font-family="monospace" text-anchor="end">N/mm</text>`;
-  g += `<text x="16" y="${padT + 46}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + 46})" text-anchor="end">Stiffer</text>`;
-  g += `<text x="16" y="${padT + plotH - 6}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + plotH - 6})" text-anchor="start">Softer</text>`;
+  g += `<text x="16" y="${padT + 46}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + 46})" text-anchor="end">${t("chart.stiffer", "Stiffer")}</text>`;
+  g += `<text x="16" y="${padT + plotH - 6}" font-size="10" fill="#666" font-family="${F}" transform="rotate(-90 16 ${padT + plotH - 6})" text-anchor="start">${t("chart.softer", "Softer")}</text>`;
   // x axis: mm scale + region labels + unit
   for (let f = 0; f <= 1.001; f += 0.25) { const xx = X(maxX * f); g += `<text x="${xx.toFixed(1)}" y="${(padT + plotH + 13).toFixed(1)}" font-size="8.5" fill="#aaa" font-family="monospace" text-anchor="middle">${Math.round(maxX * f)}</text>`; }
   const xlab = (fx, txt, bold) => `<text x="${X(maxX * fx).toFixed(1)}" y="${(padT + plotH + 29).toFixed(1)}" font-size="${bold ? 11 : 10}" font-weight="${bold ? 700 : 400}" fill="${bold ? "#444" : "#888"}" font-family="${F}" text-anchor="middle">${txt}</text>`;
-  g += xlab(0.06, "TAIL") + xlab(0.5, "UNDERFOOT", true) + xlab(0.94, "TIP");
-  g += `<text x="${(padL + plotW / 2).toFixed(0)}" y="${(padT + plotH + 45).toFixed(1)}" font-size="9" fill="#aaa" font-family="${F}" text-anchor="middle">position (mm)</text>`;
+  g += xlab(0.06, t("chart.tail", "TAIL")) + xlab(0.5, t("chart.underfoot", "UNDERFOOT"), true) + xlab(0.94, t("chart.tip", "TIP"));
+  g += `<text x="${(padL + plotW / 2).toFixed(0)}" y="${(padT + plotH + 45).toFixed(1)}" font-size="9" fill="#aaa" font-family="${F}" text-anchor="middle">${t("chart.position", "position (mm)")}</text>`;
   variants.forEach((v, i) => {
     if (!v.stations.length) return;
     const pts = v.stations.map(s => `${X(s.x).toFixed(1)},${Y(s.k).toFixed(1)}`).join(" ");
@@ -6982,15 +6982,15 @@ function studyTableHTML(variants) {
   // Change vs the first (reference) variant, shown in a muted tag so trade-offs read at a glance.
   const dlt = (v, ref, d, eps) => { if (v == null || ref == null || !isFinite(v) || !isFinite(ref)) return ""; const dd = v - ref; if (Math.abs(dd) < (eps || 0.05)) return ""; return ` <span style="color:#9a7a3a;font-size:9px;font-weight:700">${dd > 0 ? "+" : ""}${dd.toFixed(d)}</span>`; };
   const rowsDef = [
-    ["Length", v => num(v.length, 0, " mm")],
-    ["Tip / Waist / Tail", v => `${num(v.tip, 0)} / ${num(v.waist, 0)} / ${num(v.tail, 0)} mm`],
-    ["Sidecut radius", v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
-    ["Core tip / waist / tail", (v, i) => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm` + (i ? dlt(v.coreWaist, first.coreWaist, 1, 0.05) : "")],
-    ["Core", v => v.core || "&mdash;"],
-    ["Layup", v => v.layup || "&mdash;"],
-    ["3-pt bend", (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
-    ["Peak EI", (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
-    ["Weight (est)", (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
+    [t("tbl.length", "Length"), v => num(v.length, 0, " mm")],
+    [t("tbl.dims", "Tip / Waist / Tail"), v => `${num(v.tip, 0)} / ${num(v.waist, 0)} / ${num(v.tail, 0)} mm`],
+    [t("tbl.radius", "Sidecut radius"), v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
+    [t("tbl.coreThick", "Core tip / waist / tail"), (v, i) => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm` + (i ? dlt(v.coreWaist, first.coreWaist, 1, 0.05) : "")],
+    [t("tbl.core", "Core"), v => v.core || "&mdash;"],
+    [t("tbl.layup", "Layup"), v => v.layup || "&mdash;"],
+    [t("tbl.bend", "3-pt bend"), (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
+    [t("tbl.peakEI", "Peak EI"), (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
+    [t("tbl.weight", "Weight (est)"), (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
   variants.forEach((v, i) => { h += `<td style="padding:5px 8px;border-bottom:2px solid #333;color:${STUDY_COLORS[i]};font-weight:700;text-align:right">#${i + 1} ${String(v.name).slice(0, 18)}${i === 0 ? " (ref)" : ""}</td>`; });
@@ -7000,7 +7000,7 @@ function studyTableHTML(variants) {
   return h;
 }
 function studyLayupHTML(variants) {
-  let h = `<div style="font-weight:700;font-size:12px;color:#333;margin:20px 0 8px">LAYUP</div>`;
+  let h = `<div style="font-weight:700;font-size:12px;color:#333;margin:20px 0 8px">${t("study.layup", "LAYUP")}</div>`;
   variants.forEach((v, i) => {
     let ls = { svg: "", height: 80 };
     try { ls = buildLayerStackSVG(v.ski, { w: 460 }); } catch (e) {}
@@ -7087,13 +7087,13 @@ export default function App() {
   const printStudy = () => {
     const W = 760, H = 340, chart = studyChartSVG(studyVariants, W, H), table = studyTableHTML(studyVariants);
     const esc = s => String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
-    const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">NOTES</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
+    const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">${t("study.notes", "NOTES")}</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
     const bName = (builderBrand.name || "").trim() || "Black Chapel Studios";
     const logoSrc = builderBrand.logoSrc || ((typeof window !== "undefined" ? window.location.origin : "") + "/blackchapel-logo.png");
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} Design Study</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -7477,7 +7477,7 @@ export default function App() {
     if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
     const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin — every move is positive).`, `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">Print / Save PDF</button></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">{t("study.print", "Print / Save PDF")}</button></body></html>`;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); } else downloadFile(html, `setup-${camOpt.op}-${ski.length}mm.html`, "text/html");
   }, [camResult, camOpt, camMachine, ski]);
@@ -8078,9 +8078,9 @@ export default function App() {
                 );
               })}
             </div>
-            <button onClick={handleSave} style={headerBtn}>Save</button>
-            <button onClick={handleLoadClick} style={headerBtn}>Load</button>
-            <button onClick={handleNewDesign} style={headerBtn}>New</button>
+            <button onClick={handleSave} style={headerBtn}>{t("btn.save", "Save")}</button>
+            <button onClick={handleLoadClick} style={headerBtn}>{t("btn.load", "Load")}</button>
+            <button onClick={handleNewDesign} style={headerBtn}>{t("btn.new", "New")}</button>
             <button onClick={openFeedback} style={headerBtnPrimary}>Send Feedback</button>
           </div>
         )}
@@ -8334,10 +8334,10 @@ export default function App() {
           {isCompact && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
-                <button onClick={handleSave} style={{ ...primaryBtn }}>Save</button>
-                <button onClick={handleLoadClick} style={{ ...secondaryBtn }}>Load</button>
+                <button onClick={handleSave} style={{ ...primaryBtn }}>{t("btn.save", "Save")}</button>
+                <button onClick={handleLoadClick} style={{ ...secondaryBtn }}>{t("btn.load", "Load")}</button>
               </div>
-              <button onClick={handleNewDesign} style={{ ...secondaryBtn, width: "100%", color: C.labelDim }}>New Design</button>
+              <button onClick={handleNewDesign} style={{ ...secondaryBtn, width: "100%", color: C.labelDim }}>{t("btn.newDesign", "New Design")}</button>
             </>
           )}
           <button onClick={handleCopyShareLink} style={{ ...secondaryBtn, width: "100%", marginTop: 10 }}>Copy Share Link</button>
@@ -8359,7 +8359,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title="Views"
+        <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title={t("sec.views", "Views")}
           accent={
             <InfoBubble C={C} width={250}>
               <b style={{ color: C.heading }}>Editing the shape</b><br />
@@ -8389,7 +8389,7 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[1])}
-        <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title="Presets">
+        <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title={t("sec.presets", "Presets")}>
           <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 8 }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
           {refGhost && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
@@ -8411,7 +8411,7 @@ export default function App() {
         </AccordionSection>
 
         {(ski.mode || "ski") === "snowboard" && (
-          <AccordionSection isOpen={sectionsOpen.splitboard !== false} onToggle={() => toggleSection("splitboard")} title="Splitboard">
+          <AccordionSection isOpen={sectionsOpen.splitboard !== false} onToggle={() => toggleSection("splitboard")} title={t("sec.splitboard", "Splitboard")}>
             <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
               A solid board, or one split down the centerline into two touring skis for skinning uphill? This is the first call — it changes the edges, the hardware, and how you cut.
             </div>
@@ -8452,7 +8452,7 @@ export default function App() {
           </AccordionSection>
         )}
 
-        <AccordionSection isOpen={sectionsOpen.dimensions} onToggle={() => toggleSection("dimensions")} title="Dimensions (mm)">
+        <AccordionSection isOpen={sectionsOpen.dimensions} onToggle={() => toggleSection("dimensions")} title={t("sec.dimensions", "Dimensions (mm)")}>
           {(() => {
             const board = (ski.mode || "ski") === "snowboard";
             const wMax = board ? 340 : 200;      // widths: boards run ~250-300mm
@@ -8575,7 +8575,7 @@ export default function App() {
         </AccordionSection>
 
         {(ski.mode || "ski") === "snowboard" && (
-          <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title="Stance & Inserts">
+          <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title={t("sec.stance", "Stance & Inserts")}>
             {inputField("Stance W", "stanceWidth", 400, 720)}
             {inputField("Setback", "setback", -40, 80)}
             <div style={{ marginBottom: 8, marginTop: 2 }}>
@@ -8626,7 +8626,7 @@ export default function App() {
           </AccordionSection>
         )}
 
-        <AccordionSection isOpen={sectionsOpen.sideProfile} onToggle={() => toggleSection("sideProfile")} title="Side Profile">
+        <AccordionSection isOpen={sectionsOpen.sideProfile} onToggle={() => toggleSection("sideProfile")} title={t("sec.sideProfile", "Side Profile")}>
           <RockerProfileField ski={ski} setSki={setSki} C={C} />
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
@@ -8641,14 +8641,14 @@ export default function App() {
         </AccordionSection>
 
         {ski.mode !== "snowboard" && (
-          <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title="Symmetry">
+          <AccordionSection isOpen={sectionsOpen.symmetry} onToggle={() => toggleSection("symmetry")} title={t("sec.symmetry", "Symmetry")}>
             {toggleBtn("Tip Symmetric", "tipSymmetric")}
             {toggleBtn("Tail Symmetric", "tailSymmetric")}
           </AccordionSection>
         )}
 
         <AccordionSection isOpen={sectionsOpen.coreFill !== false} onToggle={() => toggleSection("coreFill")}
-          title="Edges & Core">
+          title={t("sec.edgesCore", "Edges & Core")}>
           <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>EDGES</div>
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
           <div style={{ marginBottom: 9 }}>
@@ -8771,7 +8771,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title="Layup / Materials">
+        <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title={t("sec.layup", "Layup / Materials")}>
           {(() => {
             const stack = ski.layup.stack;
             if (!stack) return null;
@@ -8894,7 +8894,7 @@ export default function App() {
           })()}
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.inserts !== false} onToggle={() => toggleSection("inserts")} title="Metal Inserts (flex)">
+        <AccordionSection isOpen={sectionsOpen.inserts !== false} onToggle={() => toggleSection("inserts")} title={t("sec.metalInserts", "Metal Inserts (flex)")}>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             Shaped metal or carbon reinforcement placed on the plan view. Add as many as you want, each with its own shape, material, and layer. They export as cut files and add to the weight.
           </div>
@@ -8948,7 +8948,7 @@ export default function App() {
 
         {groupHeader(SIDEBAR_GROUPS[2])}
         <AccordionSection isOpen={sectionsOpen.topsheet} onToggle={() => toggleSection("topsheet")}
-          title="Topsheet Art"
+          title={t("sec.topsheetArt", "Topsheet Art")}
           accent={topsheet.src
             ? <span style={{ background: C.heading + "30", color: C.heading, border: `1px solid ${C.heading}66`, borderRadius: 3, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>ON</span>
             : null}>
@@ -9055,7 +9055,7 @@ export default function App() {
 
         {groupHeader(SIDEBAR_GROUPS[3])}
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
-          title="Flex Analysis"
+          title={t("sec.flex", "Flex Analysis")}
           accent={
             <span style={{
               background: rating.color + "30", color: rating.color,
@@ -9110,7 +9110,7 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.materials} onToggle={() => toggleSection("materials")}
-          title="Bill of Materials"
+          title={t("sec.bom", "Bill of Materials")}
           accent={<span style={{ color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>
             ${(() => {
               const qv = { wood: bom.coreVolL, glass: bom.glassM2, metal: bom.metalM2, carbon: bom.carbonM2, edge: bom.edgeLenM, base: bom.baseM2, topsheet: bom.topsheetM2, epoxy: bom.epoxyKg, insert: bom.inserts };
@@ -9167,7 +9167,7 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[4])}
-        <AccordionSection isOpen={sectionsOpen.printExport !== false} onToggle={() => toggleSection("printExport")} title="Print / Templates">
+        <AccordionSection isOpen={sectionsOpen.printExport !== false} onToggle={() => toggleSection("printExport")} title={t("sec.print", "Print / Templates")}>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
             Full-size plan tiled across A4 or Letter pages. Print at actual size, tape the sheets together, and cut a jig or template by hand. Includes the outline, centerline, core outline, and a 100 mm scale-check square so you can confirm the print scale.
           </div>
@@ -9178,7 +9178,7 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title="CNC Export">
+        <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title={t("sec.cnc", "CNC Export")}>
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
@@ -9247,7 +9247,7 @@ export default function App() {
           <button onClick={() => setCamOpen(true)} style={{ ...primaryBtn }}>⛶  Open CAM Workspace</button>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title="Build Card">
+        <AccordionSection isOpen={sectionsOpen.buildCard} onToggle={() => toggleSection("buildCard")} title={t("sec.buildCard", "Build Card")}>
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 10, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             A one-page spec sheet for customers or your bench: dimensions, sidecut, flex, layup, and core mass. Add your own name and logo to white-label it.
           </div>
@@ -9292,12 +9292,12 @@ export default function App() {
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={!!sectionsOpen.designStudy} onToggle={() => toggleSection("designStudy")} title="Design Study (compare)">
+        <AccordionSection isOpen={!!sectionsOpen.designStudy} onToggle={() => toggleSection("designStudy")} title={t("sec.designStudy", "Design Study (compare)")}>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             Capture the current design as a variant, tweak it, capture again — up to four — then compare their flex, weight and core side by side and export one report. Built for trade studies (titanal vs carbon, and so on).
           </div>
           <button onClick={captureVariant} disabled={studyVariants.length >= 4} style={{ ...primaryBtn, marginBottom: 8, opacity: studyVariants.length >= 4 ? 0.5 : 1 }}>
-            {studyVariants.length >= 4 ? "4 variants captured (max)" : "Capture current design"}
+            {studyVariants.length >= 4 ? t("study.captureMax", "4 variants captured (max)") : t("study.capture", "Capture current design")}
           </button>
           {studyVariants.map((v, i) => {
             const isActive = activeVariant === v.id;
@@ -9317,7 +9317,7 @@ export default function App() {
             </div>
           )}
           {studyVariants.length >= 2 && (
-            <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Open comparison report</button>
+            <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>{t("study.openReport", "Open comparison report")}</button>
           )}
           {studyVariants.length < 2 && studyVariants.length > 0 && (
             <div style={{ color: C.labelDim, fontSize: 10, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Capture at least two to compare.</div>
@@ -9325,7 +9325,7 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[5])}
-        <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title="Material Suppliers">
+        <AccordionSection isOpen={sectionsOpen.suppliers} onToggle={() => toggleSection("suppliers")} title={t("sec.suppliers", "Material Suppliers")}>
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             DIY ski &amp; snowboard build materials — wood cores, P-tex bases, steel edges, glass / carbon / flax fabric, epoxy, inserts. Nearest to you first.
           </div>
@@ -9359,7 +9359,7 @@ export default function App() {
           }}>Send Feedback</button>
         </AccordionSection>
 
-        <AccordionSection isOpen={!!sectionsOpen.advConst} onToggle={() => toggleSection("advConst")} title="Advanced — Material Constants">
+        <AccordionSection isOpen={!!sectionsOpen.advConst} onToggle={() => toggleSection("advConst")} title={t("sec.advanced", "Advanced — Material Constants")}>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 4, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
             The moduli and densities behind every calculation. Edits are saved on this browser only and feed the whole tool (flex, weight, thickness). Most builders should leave these alone — they're here to dial the model to your own materials.
           </div>
@@ -9492,21 +9492,21 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
                 <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block", flexShrink: 0 }} />
                 <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap", flexShrink: 0 }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"} Design Study</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap", flexShrink: 0 }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"} {t("study.title", "Design Study")}</div>
                   <div style={{ width: 1, height: 22, background: "#ccc", flexShrink: 0 }} />
                   <input value={studyTitle} onChange={e => setStudyTitle(e.target.value)} placeholder="Client or ski name (optional)" style={{ border: "none", outline: "none", fontSize: 15, color: "#333", fontFamily: "inherit", minWidth: 0, flex: 1, background: "transparent" }} />
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button onClick={printStudy} style={{ background: "#c8935a", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 5, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Print / Save PDF</button>
-                <button onClick={() => setStudyOpen(false)} style={{ background: "transparent", border: "1px solid #ccc", color: "#333", padding: "8px 12px", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>Close</button>
+                <button onClick={printStudy} style={{ background: "#c8935a", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 5, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{t("study.print", "Print / Save PDF")}</button>
+                <button onClick={() => setStudyOpen(false)} style={{ background: "transparent", border: "1px solid #ccc", color: "#333", padding: "8px 12px", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>{t("btn.close", "Close")}</button>
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
             <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>NOTES</div>
+              <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>{t("study.notes", "NOTES")}</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
             </div>
             <div style={{ marginTop: 18, textAlign: "center", fontSize: 9, color: "#bbb" }}>
@@ -9951,7 +9951,7 @@ export default function App() {
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button onClick={() => exportSpecSheet("png")} style={{ background: C.heading, border: "none", color: C.bgDeep, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download PNG</button>
               <button onClick={() => exportSpecSheet("svg")} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Download SVG</button>
-              <button onClick={() => setPreviewSvg(null)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Close</button>
+              <button onClick={() => setPreviewSvg(null)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{t("btn.close", "Close")}</button>
             </div>
           </div>
         </div>
