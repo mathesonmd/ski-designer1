@@ -2628,32 +2628,24 @@ function applyVCutToCore(ski) {
   return loop;
 }
 
-// Tip/tail filler pieces (the "tipspacer" stock). Each is the core-inset planform from the contact out to
-// the end, closed on the inboard side by the SAME keyed seam the core carries — so the filler's tab drops
-// straight into the core's notch. Only produced for ends set to interlock (no V-cut). x = length, y = lateral.
+// Tip/tail filler pieces (the "tipspacer" stock) + their oversized rectangular blanks. Produced for
+// interlock ends (offset band wrapping the notch) AND V-cut ends (tip zone from the V edge out to the
+// outline). x = length, y = lateral.
 function fillerLoops(ski) {
   const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const tipContactX = L - ski.tipLength, tailContactX = ski.tailLength;
   const iTip = !!ski.interlockTip && !ski.vcutTip, iTail = !!ski.interlockTail && !ski.vcutTail;
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
   const R = Math.max(2, Math.min(ski.interlockR || 10, Math.max(1, (tipContactX - tailContactX) / 2) * 0.5));
   const overlap = Math.max(6, coreInset + 4);   // oversized-blank overrun past the ski edge (trimmed after cure)
+  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
+  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
+  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
+  const hwInsetAt = (x) => Math.max(0.5, getWidthAtPos(ski, x / L) / 2 - coreInset);  // inset core rail at a station
   const out = {};
-  let outline, inset;
+  let outline;
   try { outline = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x })); } catch (e) { return out; }   // {x:length, y:lateral}
-  try { inset = offsetPolygonInward(getFullOutlinePoints(ski), coreInset).map(p => ({ x: p.y, y: p.x })); } catch (e) { inset = null; }
-  if (!inset || inset.length < 6) return out;
-  inset = spliceInterlockNotches(inset, tipContactX, tailContactX, iTip, iTail, R);
 
-  // Band for one end = ski outline (outer) from the contact around the end back to the contact, then the
-  // rounded inset core (inner, with its notch) reversed to close. The inset tip pulls in by the offset, so
-  // the band naturally wraps the whole rounded end — that's the tip/tail filler.
-  const band = (contactX, isTip) => {
-    const keep = (p) => isTip ? (p.x >= contactX) : (p.x <= contactX);
-    const outer = outline.filter(keep);
-    const innerPts = inset.filter(keep);
-    if (outer.length < 2 || innerPts.length < 2) return null;
-    return [...outer, ...innerPts.slice().reverse()];
-  };
   // Oversized rectangular blank (what you actually cut, glue on, and trim back after cure).
   const blank = (contactX, isTip) => {
     let maxHW = 0.5; outline.forEach(p => { if ((isTip ? p.x >= contactX : p.x <= contactX)) maxHW = Math.max(maxHW, Math.abs(p.y)); });
@@ -2661,8 +2653,48 @@ function fillerLoops(ski) {
     const xOut = isTip ? xEdge + overlap : xEdge - overlap, yH = maxHW + overlap;
     return [{ x: xIn, y: yH }, { x: xOut, y: yH }, { x: xOut, y: -yH }, { x: xIn, y: -yH }, { x: xIn, y: yH }];
   };
+
+  // Ski-outline cap for one end, ordered contact-right → around the end → contact-left (so the V edge closes
+  // it cleanly). Pulled from computeOutline so tip and tail both open at the contact.
+  let RL; try { RL = computeOutline(ski); } catch (e) { RL = null; }
+  const cap = (contactX, isTip) => {
+    if (!RL) return null;
+    const keep = (p) => isTip ? (p.y >= contactX) : (p.y <= contactX);
+    const rr = RL.right.filter(keep), ll = RL.left.filter(keep);
+    if (rr.length < 2 || ll.length < 2) return null;
+    const rightPart = isTip ? rr : rr.slice().reverse();
+    const leftPart = isTip ? ll.slice().reverse() : ll;
+    return [...rightPart, ...leftPart].map(p => ({ x: p.y, y: p.x }));
+  };
+
+  // Interlock band: offset band between the rounded inset core (with its notch) and the ski outline.
+  let inset = null;
+  if (iTip || iTail) {
+    try { inset = offsetPolygonInward(getFullOutlinePoints(ski), coreInset).map(p => ({ x: p.y, y: p.x })); } catch (e) { inset = null; }
+    if (inset && inset.length >= 6) inset = spliceInterlockNotches(inset, tipContactX, tailContactX, iTip, iTail, R);
+    else inset = null;
+  }
+  const band = (contactX, isTip) => {
+    if (!inset) return null;
+    const keep = (p) => isTip ? (p.x >= contactX) : (p.x <= contactX);
+    const outer = outline.filter(keep), innerPts = inset.filter(keep);
+    if (outer.length < 2 || innerPts.length < 2) return null;
+    return [...outer, ...innerPts.slice().reverse()];
+  };
+
+  // V-cut filler: outline cap (outer) closed on the inboard side by the core's V edge (rail → apex → rail),
+  // so it's the exact mating tip/tail piece — spear (apex past the contact) or notch (apex inward).
+  const vFiller = (contactX, isTip, ext) => {
+    const outer = cap(contactX, isTip);
+    if (!outer) return null;
+    const hwc = hwInsetAt(contactX), apexX = isTip ? contactX + ext : contactX - ext;
+    return [...outer, { x: contactX, y: -hwc }, { x: apexX, y: 0 }, { x: contactX, y: hwc }];
+  };
+
   if (iTip) { const b = band(tipContactX, true); if (b) out.tip = b; out.tipBlank = blank(tipContactX, true); }
+  else if (vTip) { const f = vFiller(tipContactX, true, tipExt); if (f) { out.tip = f; out.tipBlank = blank(tipContactX, true); } }
   if (iTail) { const b = band(tailContactX, false); if (b) out.tail = b; out.tailBlank = blank(tailContactX, false); }
+  else if (vTail) { const f = vFiller(tailContactX, false, tailExt); if (f) { out.tail = f; out.tailBlank = blank(tailContactX, false); } }
   return out;
 }
 
