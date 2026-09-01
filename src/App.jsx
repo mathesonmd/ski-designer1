@@ -163,7 +163,7 @@ const INSERT_MATERIALS = {
 // by builders in each language before it goes in here. Everything not yet translated shows in English.
 const I18N = {
   en: {},
-  es: { "btn.close": "Cerrar", "btn.load": "Cargar", "btn.new": "Nuevo", "btn.newDesign": "Nuevo dise\u00f1o", "btn.save": "Guardar", "designer.board": "Dise\u00f1ador de tablas", "designer.ski": "Dise\u00f1ador de esqu\u00eds", "goto.board": "Ir al dise\u00f1ador de tablas", "goto.ski": "Ir al dise\u00f1ador de esqu\u00eds", "study.capture": "Capturar dise\u00f1o actual", "study.captureMax": "4 variantes (m\u00e1x.)", "study.layup": "LAMINADO", "study.notes": "NOTAS", "study.openReport": "Abrir informe comparativo", "study.print": "Imprimir / Guardar PDF", "study.title": "Estudio de dise\u00f1o", "chart.flexProfile": "Perfil de flexi\u00f3n", "chart.position": "posici\u00f3n (mm)", "chart.softer": "M\u00e1s blando", "chart.stiffer": "M\u00e1s r\u00edgido", "chart.subtitle": "Rigidez a lo largo del esqu\u00ed", "chart.tail": "COLA", "chart.tip": "ESP\u00c1TULA", "chart.underfoot": "CENTRO", "tbl.bend": "flexi\u00f3n en tres puntos", "tbl.core": "N\u00facleo", "tbl.coreThick": "Punta del n\u00facleo / Pat\u00edn / Cola", "tbl.dims": "Esp\u00e1tula / Pat\u00edn / Cola", "tbl.layup": "Laminado", "tbl.length": "Longitud", "tbl.peakEI": "EI m\u00e1ximo", "tbl.radius": "radio de corte lateral", "tbl.weight": "Peso (est.)", "sec.advanced": "Avanzado \u2014 Constantes de materiales", "sec.bom": "Lista de materiales", "sec.buildCard": "Ficha de construcci\u00f3n", "sec.cnc": "Exportar CNC", "sec.designStudy": "Estudio de dise\u00f1o (comparar)", "sec.dimensions": "Dimensiones (mm)", "sec.edgesCore": "Cantos y n\u00facleo", "sec.flex": "An\u00e1lisis de flexi\u00f3n", "sec.gettingStarted": "Primeros pasos", "sec.layup": "Laminado / Materiales", "sec.metalInserts": "Insertos met\u00e1licos (flex)", "sec.presets": "Plantillas", "sec.print": "Imprimir / Plantillas", "sec.sideProfile": "Perfil lateral", "sec.splitboard": "Tabla Splitboard", "sec.stance": "Postura e insertos", "sec.suppliers": "Proveedores de materiales", "sec.symmetry": "Simetr\u00eda", "sec.topsheetArt": "Arte del Topsheet", "sec.views": "Vistas", "study.desc": "Captura el dise\u00f1o actual como variante, aj\u00fastalo, captura de nuevo \u2014 hasta cuatro \u2014 y compara su flexi\u00f3n, peso y n\u00facleo lado a lado, exportando un solo informe. Pensado para estudios comparativos (titanal vs carbono, etc.).", "study.update": "ACTUALIZAR", "study.help": "Haz clic en el nombre de una variante para cargarla en el editor. Haz cambios y luego pulsa Actualizar para guardarlos en esa variante \u2014 nada queda bloqueado.", "study.captureTwo": "Captura al menos dos para comparar.", "adv.desc": "Los m\u00f3dulos y densidades detr\u00e1s de cada c\u00e1lculo. Los cambios se guardan solo en este navegador y afectan a toda la herramienta (flexi\u00f3n, peso, grosor). La mayor\u00eda deber\u00eda dejarlos como est\u00e1n \u2014 est\u00e1n aqu\u00ed para ajustar el modelo a tus propios materiales." },
+  es: { "btn.close": "Cerrar", "btn.load": "Cargar", "btn.new": "Nuevo", "btn.newDesign": "Nuevo dise\u00f1o", "btn.save": "Guardar", "designer.board": "Dise\u00f1ador de tablas", "designer.ski": "Dise\u00f1ador de esqu\u00eds", "goto.board": "Ir al dise\u00f1ador de tablas", "goto.ski": "Ir al dise\u00f1ador de esqu\u00eds", "study.capture": "Capturar dise\u00f1o actual", "study.captureMax": "4 variantes (m\u00e1x.)", "study.layup": "LAMINADO", "study.notes": "NOTAS", "study.openReport": "Abrir informe comparativo", "study.print": "Imprimir / Guardar PDF", "study.title": "Estudio de dise\u00f1o", "chart.flexProfile": "Perfil de flexi\u00f3n", "chart.position": "posici\u00f3n (mm)", "chart.softer": "M\u00e1s blando", "chart.stiffer": "M\u00e1s r\u00edgido", "chart.subtitle": "Rigidez a lo largo del esqu\u00ed", "chart.tail": "COLA", "chart.tip": "ESP\u00c1TULA", "chart.underfoot": "CENTRO", "tbl.bend": "flexi\u00f3n en tres puntos", "tbl.core": "N\u00facleo", "tbl.coreThick": "Punta del n\u00facleo / Pat\u00edn / Cola", "tbl.dims": "Esp\u00e1tula / Pat\u00edn / Cola", "tbl.layup": "Laminado", "tbl.length": "Longitud", "tbl.peakEI": "EI m\u00e1ximo", "tbl.radius": "radio de corte lateral", "tbl.weight": "Peso (est.)", "sec.advanced": "Avanzado \u2014 Constantes de materiales", "sec.bom": "Lista de materiales", "sec.buildCard": "Ficha de construcci\u00f3n", "sec.cnc": "Exportar CNC", "sec.designStudy": "Estudio de dise\u00f1o (comparar)", "sec.dimensions": "Dimensiones (mm)", "sec.edgesCore": "Cantos y n\u00facleo", "sec.flex": "An\u00e1lisis de flexi\u00f3n", "sec.gettingStarted": "Primeros pasos", "sec.layup": "Laminado / Materiales", "sec.metalInserts": "Insertos met\u00e1licos (flex)", "sec.presets": "Plantillas", "sec.print": "Imprimir / Plantillas", "sec.sideProfile": "Perfil lateral", "sec.splitboard": "Tabla Splitboard", "sec.stance": "Postura e insertos", "sec.suppliers": "Proveedores de materiales", "sec.symmetry": "Simetr\u00eda", "sec.topsheetArt": "Arte del Topsheet", "sec.views": "Vistas", "study.desc": "Captura el dise\u00f1o actual como variante, aj\u00fastalo, captura de nuevo \u2014 hasta cuatro \u2014 y compara su flexi\u00f3n, peso y n\u00facleo lado a lado, exportando un solo informe. Pensado para estudios comparativos (titanal vs carbono, etc.).", "study.update": "ACTUALIZAR", "study.help": "Haz clic en el nombre de una variante para cargarla en el editor. Haz cambios y luego pulsa Actualizar para guardarlos en esa variante \u2014 nada queda bloqueado.", "study.captureTwo": "Captura al menos dos para comparar.", "adv.desc": "Los m\u00f3dulos y densidades detr\u00e1s de cada c\u00e1lculo. Los cambios se guardan solo en este navegador y afectan a toda la herramienta (flexi\u00f3n, peso, grosor). La mayor\u00eda deber\u00eda dejarlos como est\u00e1n \u2014 est\u00e1n aqu\u00ed para ajustar el modelo a tus propios materiales.", "grp.g1.label": "PREPARAR", "grp.g1.caption": "Empieza un dise\u00f1o o abre uno guardado, y elige c\u00f3mo verlo.", "grp.g2.label": "DISE\u00d1O", "grp.g2.caption": "Da forma al esqu\u00ed \u2014 dimensiones, rocker y camber, n\u00facleo y laminado.", "grp.g3.label": "GR\u00c1FICOS", "grp.g3.caption": "Aplica una imagen al topsheet, previsualiza el par y m\u00edralo en 3D.", "grp.g4.label": "ANALIZAR", "grp.g4.caption": "Revisa el perfil de flexi\u00f3n y una estimaci\u00f3n de materiales y coste.", "grp.g5.label": "EXPORTAR", "grp.g5.caption": "Archivos de corte CNC (DXF/SVG/STL) y una ficha de construcci\u00f3n con tu marca.", "grp.g6.label": "M\u00c1S", "grp.g6.caption": "Proveedores, calculadoras externas y un lugar para enviar comentarios.", "sec.file": "Archivo", "file.designName": "Nombre del dise\u00f1o", "file.untitled": "Dise\u00f1o sin t\u00edtulo", "file.shareLink": "Copiar enlace para compartir", "file.shareNote": "Un enlace que reabre este dise\u00f1o exacto en cualquier navegador. Los gr\u00e1ficos no se incluyen.", "file.saveNote1": "Guarda en un archivo", "file.saveNote2": "en tu ordenador. Los archivos se pueden volver a abrir en cualquier momento y dispositivo. El autoguardado mantiene una copia sin guardar en tu navegador.", "view.editTitle": "Editar la forma", "view.edit1": "Arrastra los nodos redondos en la vista de planta para remodelar y ajustar dimensiones.", "view.edit2": "Arrastra los tiradores de tangente (rombos) en los paneles de zoom de esp\u00e1tula/cola para un control b\u00e9zier fino.", "view.edit3": "Arrastra los tiradores cuadrados de ancho en los contactos para fijar el ancho de esp\u00e1tula/cola.", "view.edit4": "Despl\u00e1zate para hacer zoom, arrastra el espacio vac\u00edo para mover; doble clic para restablecer.", "view.plan": "Planta", "view.analysis": "An\u00e1lisis", "view.prof": "Perfil", "view.core": "N\u00facleo", "view.flex": "Flex", "view.layup": "Capas", "view.pairOn": "Vista en par: S\u00cd", "view.pairOff": "Vista en par: NO", "gs.buildFirstSki": "Construye tu primer esqu\u00ed", "gs.buildFirstBoard": "Construye tu primera tabla", "gs.intro": "Ve de arriba abajo por los paneles de la izquierda. Cada paso de abajo corresponde a un panel.", "gs.t.preset": "Elige una plantilla", "gs.sb1b": "Abre Plantillas y elige una tabla de inicio \u2014 True Twin, Dir. Twin o Directional \u2014 o explora la base de datos como referencia. Rellena dimensiones razonables para ajustar.", "gs.t.dims": "Fija las dimensiones", "gs.sb2b": "En Dimensiones, fija la longitud total y el ancho de esp\u00e1tula / pat\u00edn / cola. La vista de planta se actualiza en vivo.", "gs.t.tipTailSb": "Forma de esp\u00e1tula y cola", "gs.sb3b": "En el panel de Snowboard elige Sim\u00e9trica (true twin, ambos extremos iguales) o Asim\u00e9trica (direccional). Da forma a la esp\u00e1tula arrastrando los nodos en la vista de planta; en una twin la cola la sigue. En una tabla ambos lados siempre se reflejan.", "gs.t.stance": "Postura, insertos y tipo de tabla", "gs.sb4b": "Fija el ancho de postura, el retroceso y el patr\u00f3n de insertos (2x4 / 4x4 / canal). Elige S\u00f3lida o Splitboard \u2014 Splitboard a\u00f1ade los dos cantos interiores a los materiales, dibuja el montaje del herraje (fijaciones, brackets de traves\u00eda, ganchos de esp\u00e1tula/cola) en el plano y muestra una lista de construcci\u00f3n.", "gs.t.sideProfile": "Perfil lateral", "gs.sb5b": "Fija el camber y la elevaci\u00f3n de esp\u00e1tula / cola \u2014 la l\u00ednea de rocker que sigue tu molde de prensa. El camber multizona est\u00e1 para tablas de triple camber.", "gs.t.layupFlex": "Laminado y flexi\u00f3n", "gs.layupFlexB": "En Laminado / Materiales, la pila de capas es tu construcci\u00f3n de arriba abajo \u2014 cambia el material de cualquier capa desde su desplegable, reordena las telas, fija sus gramajes, mezcla el n\u00facleo o a\u00f1ade insertos de espuma y metal. El panel de Flexi\u00f3n se actualiza en vivo; cal\u00edbralo con una flexi\u00f3n de prueba real si la tienes.", "gs.t.printCut": "Imprimir o cortar", "gs.printCutB": "\u00bfSin CNC? Imprimir / Plantillas da un plano + perfil a escala 1:1 en mosaico para construir una plantilla a mano. Con CNC, usa Exportar CNC (DXF / SVG / STL) o el espacio CAM para el G-code.", "gs.sk1b": "Abre Plantillas y elige una forma de inicio (All-Mtn es un primer esqu\u00ed seguro), o explora la base de datos como referencia. Rellena dimensiones razonables para ajustar.", "gs.sk2b": "En Dimensiones, fija la longitud total, el ancho de esp\u00e1tula / pat\u00edn / cola, la longitud de esp\u00e1tula / cola y el radio de corte. La vista de planta se actualiza en vivo.", "gs.t.tipTailSki": "Da forma a esp\u00e1tula y cola", "gs.sk3b": "Arrastra los nodos redondos en la vista de planta para mover contactos y anchos; arrastra los tiradores en forma de rombo en los paneles de zoom de esp\u00e1tula / cola para afinar la curva. Despl\u00e1zate para zoom, arrastra para mover.", "gs.sk4b": "Fija el camber y la elevaci\u00f3n de esp\u00e1tula / cola \u2014 la l\u00ednea de rocker que sigue tu molde de prensa. Tambi\u00e9n hay camber multizona y un canto serrado.", "gs.t.checkFlex": "Revisa la flexi\u00f3n", "gs.sk6b": "Lee la valoraci\u00f3n de flexi\u00f3n. Ajusta el grosor del n\u00facleo, el ancho o los materiales hasta que ruede bien para el esquiador.", "gs.matchSki": "Reproducir un esqu\u00ed publicado", "gs.matchBoard": "Reproducir una tabla publicada", "gs.matchIntro": "Dos interruptores te permiten reproducir un esqu\u00ed real a partir de su ficha t\u00e9cnica \u2014 porque en un esqu\u00ed real el radio de corte lateral y el perfil de rocker describen geometr\u00edas distintas, y no se pueden igualar ambos con un solo juego de n\u00fameros.", "gs.sidecutLabel": "El radio de corte \"ajusta\" (Dimensiones):", "gs.sidecutDesc": "elige qu\u00e9 cede cuando escribes un radio.", "gs.waist": "Pat\u00edn", "gs.waistDesc": "\u2014 mantiene los contactos y mueve el pat\u00edn. Bueno para dise\u00f1ar desde cero.", "gs.tipTailLbl": "Esp\u00e1tula/Cola", "gs.tipTailD1": "\u2014 mantiene todos los anchos (incl. pat\u00edn) y mueve los puntos de contacto para alcanzar el radio. \u00dasalo para conservar a la vez un pat\u00edn", "gs.and": "y", "gs.tipTailD2": "un radio publicados.", "gs.rockerLabel": "Enlace de rocker (Perfil lateral):", "gs.rockerDesc": "controla si el arranque del rocker sigue los puntos de contacto.", "gs.linked": "Enlazado", "gs.linkedDesc": "\u2014 el rocker empieza en el contacto (estilo Snocad). Editar el % de rocker mueve los contactos y el radio. Sencillo.", "gs.unlinked": "Sin enlazar", "gs.unlinkedDesc": "\u2014 el arranque del rocker es independiente y queda por dentro del contacto. Editar el % de rocker cambia solo el perfil lateral; los contactos y el radio no se mueven.", "gs.recipe": "Receta para reproducir una ficha: introduce la longitud + 3 anchos, pon \u00abR ajusta\u00bb \u2192 Esp\u00e1tula/Cola y escribe el radio, luego pon rocker \u2192 Sin enlazar e introduce el % de rocker publicado. Todos los n\u00fameros se mantienen a la vez.", "gs.saveOften": "Guarda a menudo.", "gs.saveOften1": "Usa Guardar en la cabecera (o el panel Archivo) para conservar un archivo", "gs.saveOften2": ". No se pierde nada si cierras la pesta\u00f1a \u2014 el autoguardado mantiene una copia en tu navegador.", "gs.next": "\u00bfQu\u00e9 viene despu\u00e9s?", "gs.next1": "Corta el contorno y talla el afinado del n\u00facleo \u2014 con CNC desde el espacio CAM o las exportaciones DXF/STL, o a mano desde la impresi\u00f3n 1:1 en mosaico \u2014 y luego pr\u00e9nsalo en un molde que siga tu perfil lateral.", "gs.nextSplit": "Para una splitboard, corta la tabla acabada por la l\u00ednea central y monta el herraje de split seg\u00fan el montaje mostrado en el plano.", "gs.next2": "Consulta Herramientas externas para notas de corte y prensado.", "presets.browseBoard": "Explorar base de datos de tablas", "presets.browseSki": "Explorar base de datos de esqu\u00eds", "presets.ghost": "Fantasma (solo dimensiones):", "presets.clear": "borrar", "presets.template": "O empieza desde una plantilla:", "dim.length": "Longitud", "dim.noseW": "A. pala", "dim.tipW": "A. esp\u00e1tula", "dim.waist": "Pat\u00edn", "dim.tailW": "A. cola", "dim.noseLen": "L. pala", "dim.tipLen": "L. esp\u00e1tula", "dim.tailLen": "L. cola", "dim.waistPos": "Pos. pat\u00edn", "dim.bumps": "Ondas (n\u00ba)", "dim.bumpDepth": "Prof. onda (mm)", "dim.span": "tramo", "dim.fullLength": "longitud total", "dim.waistHelpFull": "0.5 = centro geom\u00e9trico del esqu\u00ed (fracci\u00f3n de la longitud total).", "dim.waistHelpSpan": "0.5 = punto medio entre los contactos (fracci\u00f3n del canto efectivo).", "dim.serrated": "CANTO SERRADO (ondulado)", "state.on": " \u00b7 S\u00cd", "dim.serratedHelp": "Una onda en el corte lateral entre los contactos para m\u00e1s agarre, difuminada hasta fundirse con el canto efectivo en cada extremo. C\u00f3rtala con la fresadora; una cuchilla de arrastre redondea cualquier onda m\u00e1s ajustada que el desfase de su hoja.", "dim.asymmetric": "ASIM\u00c9TRICO", "state.advanced": " (avanzado)", "dim.diffRadii": "Radios de corte distintos", "dim.diffEdges": "Cantos efectivos distintos", "dim.waistOut": "Pat\u00edn \u25b2 EXTERIOR", "dim.waistIn": "Pat\u00edn \u25bc INTERIOR", "dim.outEdge": "\u25b2 canto EXTERIOR", "dim.eff": "efect.", "dim.inEdge": "\u25bc canto INTERIOR", "dim.asymHelp": "\u25b2 exterior = canto +x, \u25bc interior = canto \u2212x. Ambos modos de corte de base (envolvente completo y por contacto) siguen cada canto de forma independiente, por lo que los recortes tambi\u00e9n son asim\u00e9tricos." },
   fr: { "designer.ski": "Concepteur de skis", "designer.board": "Concepteur de snowboards", "goto.board": "Aller au concepteur de snowboards", "goto.ski": "Aller au concepteur de skis", "sec.gettingStarted": "Pour commencer", "study.title": "\u00c9tude de conception", "chart.flexProfile": "Profil de flexion", "chart.subtitle": "Rigidit\u00e9 sur la longueur du ski", "chart.stiffer": "Plus rigide", "chart.softer": "Plus souple", "chart.tail": "TALON", "chart.underfoot": "PATIN", "chart.tip": "SPATULE", "chart.position": "position (mm)", "tbl.length": "Longueur", "tbl.dims": "Spatule / Patin / Talon", "tbl.core": "Noyau", "tbl.layup": "Stratifi\u00e9", "tbl.weight": "Poids (est.)", "study.layup": "STRATIFI\u00c9", "study.notes": "NOTES", "sec.presets": "Pr\u00e9r\u00e9glages", "sec.dimensions": "Dimensions (mm)", "sec.sideProfile": "Profil lat\u00e9ral", "sec.symmetry": "Sym\u00e9trie", "sec.stance": "Position & inserts", "sec.edgesCore": "Carres & noyau", "sec.layup": "Stratifi\u00e9 / Mat\u00e9riaux", "sec.metalInserts": "Inserts m\u00e9talliques (flex)", "sec.flex": "Analyse de flexion", "sec.print": "Imprimer / Gabarits", "sec.cnc": "Export CNC", "sec.buildCard": "Fiche de construction", "sec.designStudy": "\u00c9tude de conception (comparer)", "sec.bom": "Nomenclature", "sec.advanced": "Avanc\u00e9 \u2014 Constantes de mat\u00e9riaux", "sec.suppliers": "Fournisseurs de mat\u00e9riaux", "sec.views": "Vues", "btn.save": "Enregistrer", "btn.load": "Charger", "btn.new": "Nouveau", "btn.newDesign": "Nouveau design", "btn.close": "Fermer", "study.capture": "Capturer le design actuel", "study.captureMax": "4 variantes (max)", "study.openReport": "Ouvrir le rapport comparatif", "study.print": "Imprimer / Enregistrer PDF" },
   ru: { "designer.ski": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u043b\u044b\u0436", "designer.board": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u043e\u0432", "goto.board": "\u041a \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u0430\u043c", "goto.ski": "\u041a \u043b\u044b\u0436\u0430\u043c", "sec.gettingStarted": "\u041d\u0430\u0447\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u044b", "study.title": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430", "chart.flexProfile": "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "chart.subtitle": "\u0416\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c \u043f\u043e \u0434\u043b\u0438\u043d\u0435 \u043b\u044b\u0436\u0438", "chart.stiffer": "\u0416\u0451\u0441\u0442\u0447\u0435", "chart.softer": "\u041c\u044f\u0433\u0447\u0435", "chart.tail": "\u041f\u042f\u0422\u041a\u0410", "chart.underfoot": "\u0426\u0415\u041d\u0422\u0420", "chart.tip": "\u041d\u041e\u0421\u041e\u041a", "chart.position": "\u043f\u043e\u0437\u0438\u0446\u0438\u044f (\u043c\u043c)", "tbl.length": "\u0414\u043b\u0438\u043d\u0430", "tbl.dims": "\u041d\u043e\u0441\u043e\u043a / \u0422\u0430\u043b\u0438\u044f / \u041f\u044f\u0442\u043a\u0430", "tbl.core": "\u0421\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "tbl.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442", "tbl.weight": "\u0412\u0435\u0441 (\u043e\u0446.)", "study.layup": "\u041b\u0410\u041c\u0418\u041d\u0410\u0422", "study.notes": "\u0417\u0410\u041c\u0415\u0422\u041a\u0418", "sec.presets": "\u041f\u0440\u0435\u0441\u0435\u0442\u044b", "sec.dimensions": "\u0420\u0430\u0437\u043c\u0435\u0440\u044b (\u043c\u043c)", "sec.sideProfile": "\u0411\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c", "sec.symmetry": "\u0421\u0438\u043c\u043c\u0435\u0442\u0440\u0438\u044f", "sec.stance": "\u0421\u0442\u043e\u0439\u043a\u0430 \u0438 \u0432\u0441\u0442\u0430\u0432\u043a\u0438", "sec.edgesCore": "\u041a\u0430\u043d\u0442\u044b \u0438 \u0441\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "sec.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442 / \u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u044b", "sec.metalInserts": "\u041c\u0435\u0442\u0430\u043b\u043b\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0432\u0441\u0442\u0430\u0432\u043a\u0438 (\u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c)", "sec.flex": "\u0410\u043d\u0430\u043b\u0438\u0437 \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "sec.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0428\u0430\u0431\u043b\u043e\u043d\u044b", "sec.cnc": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 \u0427\u041f\u0423", "sec.buildCard": "\u041a\u0430\u0440\u0442\u0430 \u0441\u0431\u043e\u0440\u043a\u0438", "sec.designStudy": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430 (\u0441\u0440\u0430\u0432\u043d\u0438\u0442\u044c)", "sec.bom": "\u0421\u043f\u0435\u0446\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.advanced": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u043d\u044b\u0435 \u2014 \u041a\u043e\u043d\u0441\u0442\u0430\u043d\u0442\u044b \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.suppliers": "\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0438 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.views": "\u0412\u0438\u0434\u044b", "btn.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "btn.load": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c", "btn.new": "\u041d\u043e\u0432\u044b\u0439", "btn.newDesign": "\u041d\u043e\u0432\u044b\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "btn.close": "\u0417\u0430\u043a\u0440\u044b\u0442\u044c", "study.capture": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "study.captureMax": "4 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u0430 (\u043c\u0430\u043a\u0441.)", "study.openReport": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043e\u0442\u0447\u0451\u0442 \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u044f", "study.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c PDF" },
   ja: { "designer.ski": "\u30b9\u30ad\u30fc\u30c7\u30b6\u30a4\u30ca\u30fc", "designer.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u30c7\u30b6\u30a4\u30ca\u30fc", "goto.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u3078", "goto.ski": "\u30b9\u30ad\u30fc\u3078", "sec.gettingStarted": "\u306f\u3058\u3081\u306b", "study.title": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3", "chart.flexProfile": "\u30d5\u30ec\u30c3\u30af\u30b9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "chart.subtitle": "\u30b9\u30ad\u30fc\u5168\u9577\u306e\u525b\u6027", "chart.stiffer": "\u786c\u3044", "chart.softer": "\u67d4\u3089\u304b\u3044", "chart.tail": "\u30c6\u30fc\u30eb", "chart.underfoot": "\u8db3\u4e0b", "chart.tip": "\u30c8\u30c3\u30d7", "chart.position": "\u4f4d\u7f6e (mm)", "tbl.length": "\u9577\u3055", "tbl.dims": "\u30c8\u30c3\u30d7 / \u30a6\u30a8\u30b9\u30c8 / \u30c6\u30fc\u30eb", "tbl.core": "\u30b3\u30a2", "tbl.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "tbl.weight": "\u91cd\u91cf (\u63a8\u5b9a)", "study.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "study.notes": "\u30e1\u30e2", "sec.presets": "\u30d7\u30ea\u30bb\u30c3\u30c8", "sec.dimensions": "\u5bf8\u6cd5 (mm)", "sec.sideProfile": "\u30b5\u30a4\u30c9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "sec.symmetry": "\u5bfe\u79f0", "sec.stance": "\u30b9\u30bf\u30f3\u30b9\u3068\u30a4\u30f3\u30b5\u30fc\u30c8", "sec.edgesCore": "\u30a8\u30c3\u30b8\u3068\u30b3\u30a2", "sec.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7 / \u6750\u6599", "sec.metalInserts": "\u30e1\u30bf\u30eb\u30a4\u30f3\u30b5\u30fc\u30c8 (\u30d5\u30ec\u30c3\u30af\u30b9)", "sec.flex": "\u30d5\u30ec\u30c3\u30af\u30b9\u89e3\u6790", "sec.print": "\u5370\u5237 / \u30c6\u30f3\u30d7\u30ec\u30fc\u30c8", "sec.cnc": "CNC\u66f8\u304d\u51fa\u3057", "sec.buildCard": "\u30d3\u30eb\u30c9\u30ab\u30fc\u30c9", "sec.designStudy": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3 (\u6bd4\u8f03)", "sec.bom": "\u90e8\u54c1\u8868", "sec.advanced": "\u8a73\u7d30 \u2014 \u6750\u6599\u5b9a\u6570", "sec.suppliers": "\u6750\u6599\u30b5\u30d7\u30e9\u30a4\u30e4\u30fc", "sec.views": "\u30d3\u30e5\u30fc", "btn.save": "\u4fdd\u5b58", "btn.load": "\u8aad\u307f\u8fbc\u307f", "btn.new": "\u65b0\u898f", "btn.newDesign": "\u65b0\u898f\u30c7\u30b6\u30a4\u30f3", "btn.close": "\u9589\u3058\u308b", "study.capture": "\u73fe\u5728\u306e\u30c7\u30b6\u30a4\u30f3\u3092\u53d6\u308a\u8fbc\u3080", "study.captureMax": "4\u30d0\u30ea\u30a2\u30f3\u30c8 (\u6700\u5927)", "study.openReport": "\u6bd4\u8f03\u30ec\u30dd\u30fc\u30c8\u3092\u958b\u304f", "study.print": "\u5370\u5237 / PDF\u4fdd\u5b58" },
@@ -7923,9 +7923,9 @@ export default function App() {
         <button onClick={() => toggleGroup(keys)} title={allOpen ? "Collapse this group" : "Expand this group"}
           style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", padding: 0, cursor: "pointer" }}>
           <span style={{ color: C.heading, fontSize: 9, lineHeight: 1, width: 8, textAlign: "center" }}>{allOpen ? "\u25BC" : "\u25B6"}</span>
-          <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{group.num} · {group.label}</span>
+          <span style={{ color: C.heading, fontSize: 10, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, whiteSpace: "nowrap" }}>{group.num} · {t("grp." + group.id + ".label", group.label)}</span>
         </button>
-        {group.caption && <InfoBubble C={C} width={230}>{group.caption}</InfoBubble>}
+        {group.caption && <InfoBubble C={C} width={230}>{t("grp." + group.id + ".caption", group.caption)}</InfoBubble>}
         <div style={{ flex: 1, height: 1, background: C.panelBorder }} />
       </div>
     );
@@ -8247,27 +8247,27 @@ export default function App() {
         <AccordionSection isOpen={sectionsOpen.gettingStarted} onToggle={() => toggleSection("gettingStarted")} title={t("sec.gettingStarted", "Getting Started")}>
           <div style={{ color: C.value, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>
-              Build your first {(ski.mode || "ski") === "snowboard" ? "snowboard" : "ski"}
+              {(ski.mode || "ski") === "snowboard" ? t("gs.buildFirstBoard", "Build your first snowboard") : t("gs.buildFirstSki", "Build your first ski")}
             </div>
             <p style={{ margin: "0 0 12px" }}>
-              Work top to bottom through the panels on the left. Each step below matches a panel.
+              {t("gs.intro", "Work top to bottom through the panels on the left. Each step below matches a panel.")}
             </p>
             {((ski.mode || "ski") === "snowboard" ? [
-              ["1", "Pick a Preset", "Open Presets and choose a starting board — True Twin, Dir. Twin, or Directional — or Browse the Database for a reference. It fills in sensible dimensions to tweak."],
-              ["2", "Set Dimensions", "In Dimensions, set overall length and tip / waist / tail width. The plan view updates live."],
-              ["3", "Tip & tail shape", "In the Snowboard panel pick Symmetric (true twin, both ends match) or Asymmetric (directional). Shape the nose by dragging the nodes on the plan view; on a twin the tail follows. Both sides always mirror on a board."],
-              ["4", "Stance, inserts & board type", "Set stance width, setback, and the insert pattern (2x4 / 4x4 / channel). Choose Solid or Splitboard — Splitboard adds the two inner edges to the materials, plots the hardware layout (bindings, touring brackets, tip/tail hooks) on the plan, and shows a build checklist."],
-              ["5", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber is there for triple-camber boards."],
-              ["6", "Layup & Flex", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
-              ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
+              ["1", t("gs.t.preset", "Pick a Preset"), t("gs.sb1b", "Open Presets and choose a starting board — True Twin, Dir. Twin, or Directional — or Browse the Database for a reference. It fills in sensible dimensions to tweak.")],
+              ["2", t("gs.t.dims", "Set Dimensions"), t("gs.sb2b", "In Dimensions, set overall length and tip / waist / tail width. The plan view updates live.")],
+              ["3", t("gs.t.tipTailSb", "Tip & tail shape"), t("gs.sb3b", "In the Snowboard panel pick Symmetric (true twin, both ends match) or Asymmetric (directional). Shape the nose by dragging the nodes on the plan view; on a twin the tail follows. Both sides always mirror on a board.")],
+              ["4", t("gs.t.stance", "Stance, inserts & board type"), t("gs.sb4b", "Set stance width, setback, and the insert pattern (2x4 / 4x4 / channel). Choose Solid or Splitboard — Splitboard adds the two inner edges to the materials, plots the hardware layout (bindings, touring brackets, tip/tail hooks) on the plan, and shows a build checklist.")],
+              ["5", t("gs.t.sideProfile", "Side Profile"), t("gs.sb5b", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber is there for triple-camber boards.")],
+              ["6", t("gs.t.layupFlex", "Layup & Flex"), t("gs.layupFlexB", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one.")],
+              ["7", t("gs.t.printCut", "Print or cut"), t("gs.printCutB", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code.")],
             ] : [
-              ["1", "Pick a Preset", "Open Presets and choose a starting shape (All-Mtn is a safe first ski), or Browse the Database for a reference. It fills in sensible dimensions to tweak."],
-              ["2", "Set Dimensions", "In Dimensions, set overall length, tip / waist / tail width, tip / tail length, and sidecut. The plan view updates live."],
-              ["3", "Shape the tip & tail", "Drag the round nodes on the plan view to move contacts and widths; drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan."],
-              ["4", "Side Profile", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber and a serrated edge are available too."],
-              ["5", "Layup & Flex", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one."],
-              ["6", "Check the Flex", "Read the flex rating. Adjust core thickness, width, or materials until it rides right for the skier."],
-              ["7", "Print or cut", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code."],
+              ["1", t("gs.t.preset", "Pick a Preset"), t("gs.sk1b", "Open Presets and choose a starting shape (All-Mtn is a safe first ski), or Browse the Database for a reference. It fills in sensible dimensions to tweak.")],
+              ["2", t("gs.t.dims", "Set Dimensions"), t("gs.sk2b", "In Dimensions, set overall length, tip / waist / tail width, tip / tail length, and sidecut. The plan view updates live.")],
+              ["3", t("gs.t.tipTailSki", "Shape the tip & tail"), t("gs.sk3b", "Drag the round nodes on the plan view to move contacts and widths; drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan.")],
+              ["4", t("gs.t.sideProfile", "Side Profile"), t("gs.sk4b", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber and a serrated edge are available too.")],
+              ["5", t("gs.t.layupFlex", "Layup & Flex"), t("gs.layupFlexB", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one.")],
+              ["6", t("gs.t.checkFlex", "Check the Flex"), t("gs.sk6b", "Read the flex rating. Adjust core thickness, width, or materials until it rides right for the skier.")],
+              ["7", t("gs.t.printCut", "Print or cut"), t("gs.printCutB", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code.")],
             ]).map(([n, title, body]) => (
               <div key={n} style={{ display: "flex", gap: 10, marginBottom: 11 }}>
                 <div style={{
@@ -8284,47 +8284,39 @@ export default function App() {
             ))}
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 4, paddingTop: 10 }}>
               <div style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 0.5, marginBottom: 6, textTransform: "uppercase" }}>
-                Matching a published {(ski.mode || "ski") === "snowboard" ? "board" : "ski"}
+                {(ski.mode || "ski") === "snowboard" ? t("gs.matchBoard", "Matching a published board") : t("gs.matchSki", "Matching a published ski")}
               </div>
               <div style={{ color: C.label, fontSize: 12, lineHeight: 1.55 }}>
-                Two toggles let you reproduce a real ski from its spec sheet — because on a real ski the
-                sidecut radius and the rocker profile describe different geometry, and can't both be
-                matched with a single set of numbers.
+                {t("gs.matchIntro", "Two toggles let you reproduce a real ski from its spec sheet — because on a real ski the sidecut radius and the rocker profile describe different geometry, and can't both be matched with a single set of numbers.")}
                 <div style={{ marginTop: 8 }}>
-                  <b style={{ color: C.heading }}>Sidecut R "adjusts" (Dimensions):</b> pick what flexes
-                  when you type a radius.
-                  <br />• <b>Waist</b> — holds the contacts, moves the waist. Good for designing from scratch.
-                  <br />• <b>Tip/Tail</b> — holds every width (incl. waist), moves the contact points to hit
-                  the radius. Use this to keep a published waist <i>and</i> radius at the same time.
+                  <b style={{ color: C.heading }}>{t("gs.sidecutLabel", 'Sidecut R "adjusts" (Dimensions):')}</b> {t("gs.sidecutDesc", "pick what flexes when you type a radius.")}
+                  <br />• <b>{t("gs.waist", "Waist")}</b> {t("gs.waistDesc", "— holds the contacts, moves the waist. Good for designing from scratch.")}
+                  <br />• <b>{t("gs.tipTailLbl", "Tip/Tail")}</b> {t("gs.tipTailD1", "— holds every width (incl. waist), moves the contact points to hit the radius. Use this to keep a published waist")} <i>{t("gs.and", "and")}</i> {t("gs.tipTailD2", "radius at the same time.")}
                 </div>
                 <div style={{ marginTop: 8 }}>
-                  <b style={{ color: C.heading }}>Rocker link (Side Profile):</b> controls whether the
-                  rocker takeoff follows the contact points.
-                  <br />• <b>🔗 Linked</b> — rocker begins at the contact (Snocad-style). Editing rocker %
-                  moves the contacts and the radius. Simple.
-                  <br />• <b>⛓ Unlinked</b> — rocker takeoff is independent and sits inboard of the contact.
-                  Editing rocker % changes only the side profile; contacts and radius stay put.
+                  <b style={{ color: C.heading }}>{t("gs.rockerLabel", "Rocker link (Side Profile):")}</b> {t("gs.rockerDesc", "controls whether the rocker takeoff follows the contact points.")}
+                  <br />• <b>🔗 {t("gs.linked", "Linked")}</b> {t("gs.linkedDesc", "— rocker begins at the contact (Snocad-style). Editing rocker % moves the contacts and the radius. Simple.")}
+                  <br />• <b>⛓ {t("gs.unlinked", "Unlinked")}</b> {t("gs.unlinkedDesc", "— rocker takeoff is independent and sits inboard of the contact. Editing rocker % changes only the side profile; contacts and radius stay put.")}
                 </div>
                 <div style={{ marginTop: 8, color: C.labelDim, fontStyle: "italic" }}>
-                  Spec-match recipe: enter length + 3 widths, set R adjusts → Tip/Tail and type the radius,
-                  then set rocker → Unlinked and enter the published rocker %. All the numbers hold at once.
+                  {t("gs.recipe", "Spec-match recipe: enter length + 3 widths, set R adjusts → Tip/Tail and type the radius, then set rocker → Unlinked and enter the published rocker %. All the numbers hold at once.")}
                 </div>
               </div>
             </div>
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 10, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
-              <b style={{ color: C.heading }}>Save often.</b> Use Save in the header (or File panel) to keep a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.<br /><br />
-              <b style={{ color: C.heading }}>What comes next?</b> Cut the outline and carve the core taper — on a CNC from the CAM workspace or the DXF/STL exports, or by hand from the 1:1 tiled print — then press it in a mold that follows your side profile.{(ski.mode || "ski") === "snowboard" ? " For a splitboard, rip the finished board down the centerline and mount the split hardware to the layout shown on the plan." : ""} See External Tools for cutting and press notes.
+              <b style={{ color: C.heading }}>{t("gs.saveOften", "Save often.")}</b> {t("gs.saveOften1", "Use Save in the header (or File panel) to keep a")} <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> {t("gs.saveOften2", "file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.")}<br /><br />
+              <b style={{ color: C.heading }}>{t("gs.next", "What comes next?")}</b> {t("gs.next1", "Cut the outline and carve the core taper — on a CNC from the CAM workspace or the DXF/STL exports, or by hand from the 1:1 tiled print — then press it in a mold that follows your side profile.")}{(ski.mode || "ski") === "snowboard" ? " " + t("gs.nextSplit", "For a splitboard, rip the finished board down the centerline and mount the split hardware to the layout shown on the plan.") : ""} {t("gs.next2", "See External Tools for cutting and press notes.")}
             </div>
           </div>
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.file} onToggle={() => toggleSection("file")} title="File">
+        <AccordionSection isOpen={sectionsOpen.file} onToggle={() => toggleSection("file")} title={t("sec.file", "File")}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Design Name</div>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{t("file.designName", "Design Name")}</div>
             <input
               type="text" value={ski.designName || ""}
               onChange={e => setSki(s => ({ ...s, designName: e.target.value }))}
-              placeholder="Untitled Design"
+              placeholder={t("file.untitled", "Untitled Design")}
               style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "7px 9px", color: C.value, fontSize: 13, fontFamily: "'Segoe UI', sans-serif", outline: "none", boxSizing: "border-box" }}
               onFocus={e => e.target.style.borderColor = C.inputFocus}
               onBlur={e => e.target.style.borderColor = C.inputBorder}
@@ -8340,7 +8332,7 @@ export default function App() {
               <button onClick={handleNewDesign} style={{ ...secondaryBtn, width: "100%", color: C.labelDim }}>{t("btn.newDesign", "New Design")}</button>
             </>
           )}
-          <button onClick={handleCopyShareLink} style={{ ...secondaryBtn, width: "100%", marginTop: 10 }}>Copy Share Link</button>
+          <button onClick={handleCopyShareLink} style={{ ...secondaryBtn, width: "100%", marginTop: 10 }}>{t("file.shareLink", "Copy Share Link")}</button>
           {shareMsg && (
             <div style={{ marginTop: 6, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace",
               color: shareMsg.type === "error" ? C.torch : shareMsg.type === "warn" ? C.heading : "#9FB8A8" }}>
@@ -8352,53 +8344,53 @@ export default function App() {
               style={{ width: "100%", marginTop: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px", color: C.value, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} />
           )}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            A link that reopens this exact design in any browser. Artwork isn't included.
+            {t("file.shareNote", "A link that reopens this exact design in any browser. Artwork isn't included.")}
           </div>
           <div style={{ color: C.value, fontSize: 12, lineHeight: 1.5, marginTop: 10 }}>
-            Save to a <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.
+            {t("file.saveNote1", "Save to a")} <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace", borderBottom: `1px solid ${C.heading}` }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> {t("file.saveNote2", "file on your computer. Files load back at any time, on any device. Auto-save keeps an unsaved copy in your browser.")}
           </div>
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.views} onToggle={() => toggleSection("views")} title={t("sec.views", "Views")}
           accent={
             <InfoBubble C={C} width={250}>
-              <b style={{ color: C.heading }}>Editing the shape</b><br />
-              • Drag the round nodes on the plan view to reshape and adjust dimensions.<br />
-              • Drag the diamond tangent handles in the tip/tail zoom panels for fine bezier control.<br />
-              • Drag the square width handles at the contacts to set tip/tail width.<br />
-              • Scroll to zoom, drag empty space to pan; double-click to reset.
+              <b style={{ color: C.heading }}>{t("view.editTitle", "Editing the shape")}</b><br />
+              • {t("view.edit1", "Drag the round nodes on the plan view to reshape and adjust dimensions.")}<br />
+              • {t("view.edit2", "Drag the diamond tangent handles in the tip/tail zoom panels for fine bezier control.")}<br />
+              • {t("view.edit3", "Drag the square width handles at the contacts to set tip/tail width.")}<br />
+              • {t("view.edit4", "Scroll to zoom, drag empty space to pan; double-click to reset.")}
             </InfoBubble>
           }>
           <div style={{ display: "flex", gap: 4 }}>
             {isCompact ? (
               <>
-                {viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}
+                {viewBtn(t("view.plan", "Plan"), "plan")}{viewBtn(t("view.analysis", "Analysis"), "analysis")}
               </>
             ) : (
               <>
-                {viewToggle("Plan", "plan")}{viewToggle("Prof", "profile")}{viewToggle("Core", "core")}{viewToggle("Flex", "flex")}{viewToggle("Layup", "layers")}{allViewsBtn()}
+                {viewToggle(t("view.plan", "Plan"), "plan")}{viewToggle(t("view.prof", "Prof"), "profile")}{viewToggle(t("view.core", "Core"), "core")}{viewToggle(t("view.flex", "Flex"), "flex")}{viewToggle(t("view.layup", "Layup"), "layers")}{allViewsBtn()}
               </>
             )}
           </div>
           {ski.mode !== "snowboard" && (
             <button onClick={() => setPairView(v => !v)}
               style={{ ...secondaryBtn, width: "100%", marginTop: 8, ...(pairView ? { background: btnGrad, color: C.bgDeep, border: "none", boxShadow: btnShadow } : {}) }}>
-              {pairView ? "Pair View: ON" : "Pair View: OFF"}
+              {pairView ? t("view.pairOn", "Pair View: ON") : t("view.pairOff", "Pair View: OFF")}
             </button>
           )}
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[1])}
         <AccordionSection isOpen={sectionsOpen.presets} onToggle={() => toggleSection("presets")} title={t("sec.presets", "Presets")}>
-          <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 8 }}>{ski.mode === "snowboard" ? "Browse Snowboard Database" : "Browse Ski Database"}</button>
+          <button onClick={() => setShowDb(true)} style={{ ...primaryBtn, marginBottom: 8 }}>{ski.mode === "snowboard" ? t("presets.browseBoard", "Browse Snowboard Database") : t("presets.browseSki", "Browse Ski Database")}</button>
           {refGhost && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "6px 10px", background: C.inputBg, border: `1px dashed ${C.heading}`, borderRadius: 4 }}>
-              <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Ghost (dims only): {refGhost._label}</span>
+              <span style={{ color: C.heading, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>{t("presets.ghost", "Ghost (dims only):")} {refGhost._label}</span>
               <div style={{ flex: 1 }} />
-              <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>clear ✕</button>
+              <button onClick={() => setRefGhost(null)} style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{t("presets.clear", "clear")} ✕</button>
             </div>
           )}
-          <div style={{ color: C.labelDim, fontSize: 10, margin: "0 0 7", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Or start from a template:</div>
+          <div style={{ color: C.labelDim, fontSize: 10, margin: "0 0 7", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>{t("presets.template", "Or start from a template:")}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {((ski.mode || "ski") === "snowboard" ? SNOWBOARD_PRESETS : PRESETS).map(p => (
               <button key={p.name} onClick={() => setSki({ ...p, designName: p.name, layup: ski.layup })}
@@ -8460,17 +8452,17 @@ export default function App() {
             const lenMin = board ? 1000 : 1200, lenMax = 2200;
             return (
               <>
-                {inputField("Length", "length", lenMin, lenMax)}
-                {inputField(board ? "Nose W" : "Tip W", "tipWidth", 60, wMax)}
-                {!ski.asymSidecut && inputField("Waist", "waistWidth", waistMin, waistMax)}
-                {inputField("Tail W", "tailWidth", 60, wMax)}
+                {inputField(t("dim.length", "Length"), "length", lenMin, lenMax)}
+                {inputField(board ? t("dim.noseW", "Nose W") : t("dim.tipW", "Tip W"), "tipWidth", 60, wMax)}
+                {!ski.asymSidecut && inputField(t("dim.waist", "Waist"), "waistWidth", waistMin, waistMax)}
+                {inputField(t("dim.tailW", "Tail W"), "tailWidth", 60, wMax)}
                 {!ski.asymSidecut && <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />}
-                {!ski.asymContact && inputField(board ? "Nose Len" : "Tip Len", "tipLength", 80, 500)}
-                {!ski.asymContact && inputField("Tail Len", "tailLength", 60, 400)}
+                {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", 80, 500)}
+                {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
-                {inputField("Waist Pos", "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
+                {inputField(t("dim.waistPos", "Waist Pos"), "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
                 <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
-                  {[["span", false], ["full length", true]].map(([lbl, val]) => {
+                  {[[t("dim.span", "span"), false], [t("dim.fullLength", "full length"), true]].map(([lbl, val]) => {
                     const active = !!ski.waistFullLength === val;
                     return (
                       <button key={lbl} onClick={() => setSki(s => {
@@ -8494,25 +8486,25 @@ export default function App() {
                 </div>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                   {ski.waistFullLength
-                    ? "0.5 = geometric center of the ski (fraction of full length)."
-                    : "0.5 = midway between the contact points (fraction of running edge)."}
+                    ? t("dim.waistHelpFull", "0.5 = geometric center of the ski (fraction of full length).")
+                    : t("dim.waistHelpSpan", "0.5 = midway between the contact points (fraction of running edge).")}
                 </div>
                 <div style={{ border: `1px solid ${ski.serratedEdge ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6, padding: "8px 10px" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: ski.serratedEdge ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
-                    <input type="checkbox" checked={!!ski.serratedEdge} onChange={e => setSki(s => ({ ...s, serratedEdge: e.target.checked }))} /> SERRATED EDGE (wavy){ski.serratedEdge ? " · ON" : ""}
+                    <input type="checkbox" checked={!!ski.serratedEdge} onChange={e => setSki(s => ({ ...s, serratedEdge: e.target.checked }))} /> {t("dim.serrated", "SERRATED EDGE (wavy)")}{ski.serratedEdge ? t("state.on", " · ON") : ""}
                   </label>
                   {ski.serratedEdge && (<>
-                    <div style={{ marginTop: 8 }}>{inputField("Bumps (count)", "serrationCount", 2, 24, 1)}</div>
-                    {inputField("Bump depth (mm)", "serrationDepth", 0.5, 6, 0.5)}
+                    <div style={{ marginTop: 8 }}>{inputField(t("dim.bumps", "Bumps (count)"), "serrationCount", 2, 24, 1)}</div>
+                    {inputField(t("dim.bumpDepth", "Bump depth (mm)"), "serrationDepth", 0.5, 6, 0.5)}
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      A wave on the sidecut between the contacts for extra grip, tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.
+                      {t("dim.serratedHelp", "A wave on the sidecut between the contacts for extra grip, tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.")}
                     </div>
                   </>)}
                 </div>
                 {/* ── Asymmetric (advanced) — all left/right asymmetry contained here so symmetric skis are untouched ── */}
                 <div style={{ border: `1px solid ${(ski.asymSidecut || ski.asymContact) ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6 }}>
                   <button onClick={() => setAsymOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", cursor: "pointer", padding: "8px 10px", color: (ski.asymSidecut || ski.asymContact) ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
-                    <span>ASYMMETRIC{(ski.asymSidecut || ski.asymContact) ? " · ON" : " (advanced)"}</span>
+                    <span>{t("dim.asymmetric", "ASYMMETRIC")}{(ski.asymSidecut || ski.asymContact) ? t("state.on", " · ON") : t("state.advanced", " (advanced)")}</span>
                     <span style={{ fontSize: 14 }}>{asymOpen ? "\u2212" : "+"}</span>
                   </button>
                   {asymOpen && (() => {
@@ -8538,32 +8530,32 @@ export default function App() {
                           {swBtn(ski.asymSidecut, () => setSki(s => s.asymSidecut
                             ? { ...s, asymSidecut: false, waistWidth: Math.round(((s.waistOutside ?? s.waistWidth) + (s.waistInside ?? s.waistWidth)) / 2) }
                             : { ...s, asymSidecut: true, waistOutside: s.waistWidth, waistInside: s.waistWidth }))}
-                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Different sidecut radii</span>
+                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{t("dim.diffRadii", "Different sidecut radii")}</span>
                         </div>
-                        {ski.asymSidecut && [["waistOutside", "Waist \u25B2 OUTSIDE", derived.radiusOutside], ["waistInside", "Waist \u25BC INSIDE", derived.radiusInside]].map(([p, l, r]) => numRow(p, l, "R " + (isFinite(r) ? r.toFixed(1) + " m" : "flat")))}
+                        {ski.asymSidecut && [["waistOutside", t("dim.waistOut", "Waist \u25B2 OUTSIDE"), derived.radiusOutside], ["waistInside", t("dim.waistIn", "Waist \u25BC INSIDE"), derived.radiusInside]].map(([p, l, r]) => numRow(p, l, "R " + (isFinite(r) ? r.toFixed(1) + " m" : "flat")))}
                         {/* Different effective edges (contact lengths) */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 6px" }}>
                           {swBtn(ski.asymContact, () => setSki(s => s.asymContact
                             ? { ...s, asymContact: false }
                             : { ...s, asymContact: true, tipLengthOutside: s.tipLength, tipLengthInside: s.tipLength, tailLengthOutside: s.tailLength, tailLengthInside: s.tailLength }))}
-                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Different effective edges</span>
+                          <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{t("dim.diffEdges", "Different effective edges")}</span>
                         </div>
                         {ski.asymContact && (
                           <>
                             <div style={{ color: C.heading, fontSize: 10, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, display: "flex", justifyContent: "space-between" }}>
-                              <span>▲ OUTSIDE edge</span><span>eff {derived.effectiveEdgeOutside} mm</span>
+                              <span>{t("dim.outEdge", "▲ OUTSIDE edge")}</span><span>{t("dim.eff", "eff")} {derived.effectiveEdgeOutside} mm</span>
                             </div>
-                            {numRow("tipLengthOutside", "Tip Len", null)}
-                            {numRow("tailLengthOutside", "Tail Len", null)}
+                            {numRow("tipLengthOutside", t("dim.tipLen", "Tip Len"), null)}
+                            {numRow("tailLengthOutside", t("dim.tailLen", "Tail Len"), null)}
                             <div style={{ color: C.heading, fontSize: 10, margin: "8px 0 4px", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, display: "flex", justifyContent: "space-between" }}>
-                              <span>▼ INSIDE edge</span><span>eff {derived.effectiveEdgeInside} mm</span>
+                              <span>{t("dim.inEdge", "▼ INSIDE edge")}</span><span>{t("dim.eff", "eff")} {derived.effectiveEdgeInside} mm</span>
                             </div>
-                            {numRow("tipLengthInside", "Tip Len", null)}
-                            {numRow("tailLengthInside", "Tail Len", null)}
+                            {numRow("tipLengthInside", t("dim.tipLen", "Tip Len"), null)}
+                            {numRow("tailLengthInside", t("dim.tailLen", "Tail Len"), null)}
                           </>
                         )}
                         <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
-                          ▲ outside = +x edge, ▼ inside = −x edge. Both base-cut modes (full-wrap and contact-wrap) follow each edge independently, so cutouts are asymmetric too.
+                          {t("dim.asymHelp", "▲ outside = +x edge, ▼ inside = −x edge. Both base-cut modes (full-wrap and contact-wrap) follow each edge independently, so cutouts are asymmetric too.")}
                         </div>
                       </div>
                     );
@@ -8992,7 +8984,7 @@ export default function App() {
             <>
               <button onClick={() => setPairView(v => !v)}
                 style={{ ...secondaryBtn, width: "100%", marginBottom: 6, ...(pairView ? { background: btnGrad, color: C.bgDeep, border: "none", boxShadow: btnShadow } : {}) }}>
-                {pairView ? "Pair View: ON" : "Pair View: OFF"}
+                {pairView ? t("view.pairOn", "Pair View: ON") : t("view.pairOff", "Pair View: OFF")}
               </button>
               <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                 Shows both skis as a mirrored pair. Topsheet art is projected across the pair, so asymmetric tips and split graphics render as a set.
@@ -9408,7 +9400,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ flexShrink: 0, display: "flex", gap: 4, padding: "7px 10px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel, alignItems: "center", overflowX: "auto" }}>
           <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5, marginRight: 4, flexShrink: 0 }}>VIEW</span>
-          {isCompact ? (<>{viewBtn("Plan", "plan")}{viewBtn("Analysis", "analysis")}</>) : (<>{viewToggle("Plan", "plan")}{viewToggle("Prof", "profile")}{viewToggle("Core", "core")}{viewToggle("Flex", "flex")}{viewToggle("Layup", "layers")}{allViewsBtn()}</>)}
+          {isCompact ? (<>{viewBtn(t("view.plan", "Plan"), "plan")}{viewBtn(t("view.analysis", "Analysis"), "analysis")}</>) : (<>{viewToggle(t("view.plan", "Plan"), "plan")}{viewToggle(t("view.prof", "Prof"), "profile")}{viewToggle(t("view.core", "Core"), "core")}{viewToggle(t("view.flex", "Flex"), "flex")}{viewToggle(t("view.layup", "Layup"), "layers")}{allViewsBtn()}</>)}
         </div>
         {effectiveActiveView === "analysis" && (
           <div style={{
