@@ -4368,21 +4368,28 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       });
     }
 
-    // ── V-cut core-fill preview ──────────────────────────────────
-    // Only shown when a tip/tail V-cut is enabled (keeps the view clean otherwise). Draws the core
-    // outline terminating in the V at the cut end(s), in brass, so you can see where the wood core
-    // ends and the fill triangle begins.
-    if (ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
+    // ── Core top-down (always shown when there's a sidewall inset, so it updates live as you change it;
+    // also for V-cut / interlock ends). Wood fill + grain reads the core against the plain sidewall gap. ──
+    if ((ski.coreInset || 0) > 0 || ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
       const loop = applyVCutToCore(ski);   // X=length space; swap to plan (skiX=y, skiY=x)
+      const traceCore = () => { ctx.beginPath(); loop.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); };
+      // Wood fill + lengthwise grain, clipped to the core. The sidewall offset is the plain gap between this
+      // and the outline (like snoCAD's solid-white sidewalls).
+      ctx.save(); traceCore(); ctx.fillStyle = "rgba(196,146,88,0.22)"; ctx.fill(); ctx.clip();
+      ctx.strokeStyle = "rgba(120,78,40,0.16)"; ctx.lineWidth = 0.8;
+      let _maxHW = 1; loop.forEach(p => { if (Math.abs(p.y) > _maxHW) _maxHW = Math.abs(p.y); });
+      const _nG = 11;
+      for (let g = 0; g < _nG; g++) {
+        const lat = -_maxHW + (2 * _maxHW) * (g / (_nG - 1));
+        ctx.beginPath();
+        for (let t = 0; t <= 1.0001; t += 0.02) { const s = toMain(lat + Math.sin(t * Math.PI * 3 + g) * 1.2, t * ski.length); if (t === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }
+        ctx.stroke();
+      }
+      ctx.restore();
       ctx.save();
       ctx.strokeStyle = C.coreStroke || "#c8935a";
       ctx.lineWidth = 1.6; ctx.setLineDash([5, 3]);
-      ctx.beginPath();
-      loop.forEach((p, i) => {
-        const s = toMain(p.y, p.x);   // p.x is along-length, p.y is lateral → toMain(lateral, along)
-        if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
-      });
-      ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+      traceCore(); ctx.stroke(); ctx.setLineDash([]);
       // Filler pieces (interlock ends): the keyed tip/tail stock, drawn in blue so the wood core (brass)
       // and the filler are visibly separate — they meet along the keyed seam.
       const fl = fillerLoops(ski);
