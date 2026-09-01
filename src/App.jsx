@@ -192,8 +192,8 @@ const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; 
 // ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
 // Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
 // applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
-const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SCALARS };
-const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SCALARS: ["E"] };
+const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SIDEWALLS: SIDEWALL_MATERIALS, SCALARS };
+const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SIDEWALLS: ["E", "density"], SCALARS: ["E"] };
 const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
 const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
 const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
@@ -208,6 +208,7 @@ const SIDEWALL_MATERIALS = {
   pu:   { name: "PU (polyurethane)", E: 1500, density: 1150 },
   uhmw: { name: "UHMW-PE", E: 1000, density: 940 },
   wood: { name: "Wood (hardwood)", E: 12000, density: 670 },
+  ironwood: { name: "Ironwood", E: 20000, density: 1100 },
   custom: { name: "Custom (enter E + density)", E: 2300, density: 1050 },
 };
 const sidewallProps = (sw) => { if (!sw || !sw.mat || sw.mat === "none") return null; const m = SIDEWALL_MATERIALS[sw.mat] || SIDEWALL_MATERIALS.abs; return { E: sw.E != null ? sw.E : m.E, density: sw.density != null ? sw.density : m.density, thick: sw.thick || 0 }; };
@@ -9382,6 +9383,8 @@ export default function App() {
               {Object.keys(VENEERS).map(k => row(k, [nameSpan(VENEERS[k].name), nInp(VENEERS[k].E, v => { VENEERS[k].E = v; }), nInp(VENEERS[k].density, v => { VENEERS[k].density = v; })]))}
               {grp("METAL / LAMINATE", <>E (MPa){info(E_TIP)}</>)}
               {Object.keys(METALS).filter(k => k !== "none").map(k => row(k, [nameSpan(METALS[k].name), nInp(METALS[k].E, v => { METALS[k].E = v; })]))}
+              {grp("SIDEWALLS", <>E (MPa){info(E_TIP)} · density (kg/m³){info(DENS_WOOD_TIP)}</>)}
+              {Object.keys(SIDEWALL_MATERIALS).filter(k => k !== "none" && k !== "custom").map(k => row(k, [nameSpan(SIDEWALL_MATERIALS[k].name), nInp(SIDEWALL_MATERIALS[k].E, v => { SIDEWALL_MATERIALS[k].E = v; }), nInp(SIDEWALL_MATERIALS[k].density, v => { SIDEWALL_MATERIALS[k].density = v; })]))}
               {grp("STRUCTURE", <>E (MPa){info(E_TIP)}</>)}
               {Object.keys(SCALARS).map(k => row(k, [nameSpan(SCALARS[k].name), nInp(SCALARS[k].E, v => { SCALARS[k].E = v; })]))}
               <button onClick={() => { _resetConsts(); setConstResetKey(z => z + 1); setConstV(z => z + 1); }} style={{ ...secondaryBtn, width: "100%", marginTop: 12, color: C.labelDim }}>Reset all constants to defaults</button>
