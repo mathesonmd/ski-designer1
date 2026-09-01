@@ -393,7 +393,7 @@ const DEFAULT_SKI={
   // contact point, two equal sides converge to an apex pointing toward the tip/tail end. The
   // triangular region beyond the V is fill material. Each end is independent (on/off + extension mm
   // past the contact toward the end).
-  coreEndExt:50,    // mm the core extends past each contact point when no V-cut (0 = ends at contact)
+  coreEndExt:0,     // mm the core extends past each contact point when no V-cut (0 = ends at contact)
   serratedEdge:false, serrationCount:7, serrationDepth:2,   // wavy / magnetraction-style edge between contacts
   inserts:[],   // shaped metal/carbon reinforcement (Mantra frame / Rustler strip)
   vcutTip:false, vcutTipExt:120,
@@ -416,8 +416,8 @@ const DEFAULT_SKI={
   edgeWrap:"full",  // "full" = edges wrap around tip/tail; "contact" = edges only tail-contact→tip-contact.
   edgeExtTip:0,     // mm. In contact mode, extend the edge past the TIP contact point toward the tip.
   edgeExtTail:0,    // mm. In contact mode, extend the edge past the TAIL contact point toward the tail.
-  coreInset:0,      // mm. Core top-profile width reduction per side for sidewall material. Default 0
-                    // (flush / cap-construction or wood sidewalls); users doing sidewalls set 5-10.
+  coreInset:5,      // mm. Core top-profile width reduction per side for sidewall material. Default 5 so the
+                    // sidewall gap is visible immediately; flush / cap builds set 0.
   tipNodesR:makeRoundedTip(),tipNodesL:makeRoundedTip(),
   tailNodesR:makeRoundedTail(),tailNodesL:makeRoundedTail(),
   tipSymmetric:true,tailSymmetric:true,
@@ -1239,7 +1239,7 @@ function sideProfileHeightAt(ski, xmm) {
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
-  const base={name,waistPosition:0.48,edgeInset:2.0,coreInset:0,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
+  const base={name,waistPosition:0.48,edgeInset:2.0,coreInset:5,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
     tipSymmetric:tipSym!==false,tailSymmetric:tailSym!==false,...profile,
     coreProfile:core||makeDefaultCore(),layup:layup||{...DEFAULT_LAYUP}};
   // Pin the core's contact/end nodes to THIS preset's contact positions (its tip/tail length differ).
@@ -3858,6 +3858,41 @@ function ToolpathPreviewModal({ gcode, stats, onClose }) {
   );
 }
 
+// Core + filler overlay for a top-down plan drawing, given a mapper from (lengthMM, lateralMM) → screen.
+// Draws the wood core (inset, tinted) with its dashed outline, plus any tip/tail filler pieces and their
+// oversized blanks — the same top-down design the plan view shows. Returns an SVG fragment (no outline).
+function topDownDesignSVG(ski, map, opts) {
+  const o = opts || {}, brass = o.brass || "#c8935a";
+  const pathOf = (pts, close) => pts.map((p, i) => `${i ? "L" : "M"}${map(p.x, p.y).x.toFixed(1)},${map(p.x, p.y).y.toFixed(1)}`).join(" ") + (close ? " Z" : "");
+  let s = "";
+  try {
+    const hasInset = (ski.coreInset || 0) > 0 || ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail;
+    if (hasInset) {
+      const core = applyVCutToCore(ski);
+      if (core && core.length > 2) s += `<path d="${pathOf(core, true)}" fill="rgba(196,146,88,0.32)" stroke="${brass}" stroke-width="1.1" stroke-dasharray="5,3"/>`;
+      const fl = fillerLoops(ski);
+      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (bl && bl.length > 2) s += `<path d="${pathOf(bl, true)}" fill="none" stroke="#8a8a8a" stroke-width="0.7" stroke-dasharray="4,3"/>`; });
+      [fl.tip, fl.tail].forEach(fp => { if (fp && fp.length > 2) s += `<path d="${pathOf(fp, true)}" fill="rgba(58,120,216,0.13)" stroke="#3a78d8" stroke-width="0.9"/>`; });
+    }
+  } catch (e) {}
+  return s;
+}
+
+// Self-contained plan-view thumbnail: ski outline + the top-down design overlay, auto-fit to W×H.
+function planPreviewSVG(ski, W, H) {
+  let outline = []; try { outline = getFullOutlinePoints(ski); } catch (e) {}
+  if (!outline.length) return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>`;
+  const pad = 8, maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
+  const sc = Math.min((W - 2 * pad) / ski.length, (H - 2 * pad) / (2 * maxLat));
+  const ox = (W - ski.length * sc) / 2, oy = H / 2;
+  const mp = p => ({ x: ox + p.y * sc, y: oy - p.x * sc });
+  const sil = outline.map((p, i) => `${i ? "L" : "M"}${mp(p).x.toFixed(1)},${mp(p).y.toFixed(1)}`).join(" ") + " Z";
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">`
+    + `<path d="${sil}" fill="rgba(200,147,90,0.08)" stroke="#c8935a" stroke-width="1.4"/>`
+    + topDownDesignSVG(ski, (len, lat) => ({ x: ox + len * sc, y: oy - lat * sc }), { brass: "#c8935a" })
+    + `</svg>`;
+}
+
 function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const W = 1400, H = 900, pad = 50;
   const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
@@ -3946,6 +3981,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   <line x1="${pad}" y1="180" x2="${W - pad}" y2="180" stroke="${brass}" stroke-width="1.5"/>
   <g id="silhouette">
     <path d="${silPath}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>
+    ${topDownDesignSVG(ski, (len, lat) => ({ x: ox + len * sc, y: oy - lat * sc }), { brass })}
     <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 34).toFixed(0)}" font-size="20" fill="${dim}" font-family="monospace" text-anchor="middle">${ski.tipWidth} \u2013 ${ski.waistWidth} \u2013 ${ski.tailWidth} mm</text>
     <text x="${rx + rw / 2}" y="${(oy + maxLat * sc + 56).toFixed(0)}" font-size="15" fill="${dim}" font-family="monospace" text-anchor="middle">TIP \u00B7 WAIST \u00B7 TAIL</text>
   </g>
@@ -7169,6 +7205,17 @@ function studyLayupHTML(variants) {
   return h;
 }
 
+// Top-down plan thumbnails, one per variant — the same shape/core/sidewall/fill design the plan view shows.
+function studyPlansHTML(variants) {
+  if (!variants || !variants.length) return "";
+  const esc = s => String(s == null ? "" : s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  const cells = variants.map((v, i) => {
+    let svg = ""; try { svg = planPreviewSVG(v.ski, 320, 132); } catch (e) {}
+    return `<div style="flex:1;min-width:0"><div style="font-size:10.5px;font-weight:700;color:${STUDY_COLORS[i % STUDY_COLORS.length]};margin-bottom:3px;font-family:monospace">#${i + 1} ${esc(String(v.name).slice(0, 22))}</div><div style="background:#f6f4ef;border:1px solid #eee;border-radius:4px">${svg}</div></div>`;
+  }).join("");
+  return `<div style="margin-top:16px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:6px">TOP-DOWN DESIGN</div><div style="display:flex;gap:10px;flex-wrap:wrap">${cells}</div></div>`;
+}
+
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
   // One cohesive stylesheet for the whole UI: consistent hover/active feedback on every button, a focus
@@ -7253,7 +7300,7 @@ export default function App() {
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg>${studyPlansHTML(studyVariants)}<div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -8843,12 +8890,8 @@ export default function App() {
           </div>
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE</div>
-          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
-          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Narrows the wood core inside the edges (sidewall material) per side.
-          </div>
 
-          <div style={{ marginTop: 8, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
+          <div style={{ marginTop: 2, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 5 }}>
             {(ski.coreProfile || []).map((nd, i) => ({ nd, i })).reverse().map(({ nd, i }) => {
               const last = (ski.coreProfile || []).length - 1;
@@ -8865,6 +8908,16 @@ export default function App() {
           </div>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Tip is at the top, tail at the bottom. Type an exact value (e.g. 10.8) for any point — position is mm from the tail. Or drag the points in the Core view; double-click the line there to add one.
+          </div>
+
+          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Narrows the wood core inside the edges per side to leave room for sidewall material. Shown live in the plan view as the wood core inside the white sidewall gap.
+          </div>
+
+          {inputField("Core end ext past contact (mm)", "coreEndExt", 0, 300, 5)}
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            With no fill pattern, the core ends this far past each contact point (0 = ends exactly at the contact). Set it long enough to reach the ends and the core runs full length with rounded ends. A fill pattern below overrides this on that end.
           </div>
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>SIDEWALLS</div>
@@ -8894,25 +8947,25 @@ export default function App() {
                 )}
               </>)}
               <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                A strip of core height down each edge — now included in the flex (its modulus blended into the core). Thickness defaults to your Core Inset.
+                A strip of core height down each edge — included in the flex (its modulus blended into the core). Thickness defaults to your Core Inset, since the wall is trimmed flush to the same width during finishing.
               </div>
             </>);
           })()}
 
-          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>CORE FILL (V-CUT)</span>
+          <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE FILL PATTERNS</div>
+          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            How the wood core ends and mates its tip/tail filler. Each option gives a cut-ready filler template — finished piece plus an oversized blank — in the plan view, the Core / Combined DXF, and the 1:1 print. Pick one per end.
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>V-CUT</span>
             <InfoBubble C={C} width={260}>
               The wood core ends in a V at the enabled end. The extension sets the apex:
               a <b style={{ color: C.heading }}>positive</b> value pushes it <b style={{ color: C.heading }}>outward</b>
               past the contact (a spear pointing toward the tip/tail), a <b style={{ color: C.heading }}>negative</b>
               value pulls it <b style={{ color: C.heading }}>inward</b> toward the center (a swallowtail-style notch
-              between two prongs). The region left open is fill material. Shows in the Core view and exports to
-              the Core / Combined DXF and the Core STL.
+              between two prongs). The region left open is filled by the mating filler piece.
             </InfoBubble>
-          </div>
-          {inputField("Core end ext past contact (mm)", "coreEndExt", 0, 300, 5)}
-          <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            With no V-cut, the core ends this far past each contact point (0 = ends exactly at the contact). Most core blanks run ~50mm past — this keeps the core from reaching into the tips/tails. A V-cut below overrides this on that end.
           </div>
           {toggleBtn("Tip V-cut", "vcutTip")}
           {ski.vcutTip && inputField("Tip ext (mm) \u2014 + out / \u2212 in", "vcutTipExt", -Math.round((ski.length - ski.tipLength - ski.tailLength) / 2 * 0.9), Math.max(20, ski.tipLength))}
@@ -8923,9 +8976,9 @@ export default function App() {
           </div>
 
           <div style={{ marginTop: 8, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>INTERLOCK KEY (CLASSIC)</span>
+            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>INTERLOCK KEY</span>
             <InfoBubble C={C} width={260}>
-              The snoCAD-style keyed joint. The wood core ends at the contact and a rounded key of the chosen radius is cut into each rail; the tip/tail filler is cut with the matching tab so it locks in and can't slide. An alternative to the V-cut for that end (turn the V-cut off to use it). Shows in the Core view and the Core / Combined DXF.
+              The snoCAD-style keyed joint. The wood core runs full length (inset by the offset all the way around, so no wood is exposed) and a quarter-round notch is bitten inward at each contact; the tip/tail filler wraps into that notch so it locks in and can't slide. An alternative to the V-cut for that end (turn the V-cut off to use it). Shows in the plan view and the Core / Combined DXF.
             </InfoBubble>
           </div>
           {toggleBtn("Tip interlock key", "interlockTip")}
@@ -9670,6 +9723,7 @@ export default function App() {
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
+            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyPlansHTML(studyVariants) }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
             <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
