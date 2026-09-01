@@ -2519,6 +2519,20 @@ ${body}
 // TERMINATED in an isosceles V: base edge-to-edge at the contact, apex on the centerline extending
 // `ext` mm toward that end. Points beyond the contact are dropped (that triangular region is fill).
 // Returns a single closed loop of points. `coreInset` matches how the rails were built.
+// One keyed core end: a quarter-round tab at each rail. From the rail the core runs a short flat straight
+// along the sidewall line (tangent to the inset rail) out into the filler by r, a 90° arc turns it back to
+// the end line, and a flat run parallel to the end joins the two rails. dir = +1 (tip, tabs toward the tip) /
+// -1 (tail). Points go from +hwv to -hwv. The filler is cut with the exact same seam, so the tab seats in.
+function interlockSeamPts(xc, hwv, dir, ilR) {
+  const r = Math.max(2, Math.min(ilR || 10, hwv * 0.45)), NN = 8, out = [];
+  out.push({ x: xc, y: hwv });                                   // right rail @ contact
+  out.push({ x: xc + dir * r, y: hwv });                         // flat along rail (|| sidewall), into filler
+  for (let i = 1; i <= NN; i++) { const th = -(Math.PI / 2) * (i / NN); out.push({ x: xc + dir * r * Math.cos(th), y: hwv + r * Math.sin(th) }); }   // 90° arc → (xc, hwv-r)
+  out.push({ x: xc, y: -hwv + r });                              // flat along end line (|| end)
+  for (let i = 1; i <= NN; i++) { const th = (Math.PI / 2) * (1 - i / NN); out.push({ x: xc + dir * r * Math.cos(th), y: -hwv + r * Math.sin(th) }); }  // 90° arc → (xc + dir*r, -hwv)
+  out.push({ x: xc, y: -hwv });                                  // flat along rail back to left rail
+  return out;
+}
 function applyVCutToCore(ski) {
   const L = ski.length;
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
@@ -2538,14 +2552,6 @@ function applyVCutToCore(ski) {
   const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
   const xStart = (vTail || iTail) ? tailContactX : Math.max(0, tailContactX - endExt);
   const xEnd = (vTip || iTip) ? tipContactX : Math.min(L, tipContactX + endExt);
-  // Interlock seam across a core end: a rounded key (radius r) bulging toward the end (dir=+1 tip / -1 tail)
-  // at each rail, with a flat run between — the filler is cut with the matching notch so it can't slide.
-  const interlockSeam = (xc, hwv, dir) => {
-    const r = Math.max(2, Math.min(ilR, hwv * 0.6)), NN = 10, out = [];
-    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (hwv - r) + r * Math.sin(a) }); }
-    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (-hwv + r) + r * Math.sin(a) }); }
-    return out;
-  };
   const N = 200;
   const rightRail = [], leftRail = [];
   for (let i = 0; i <= N; i++) {
@@ -2564,7 +2570,7 @@ function applyVCutToCore(ski) {
     // from right contact → apex (pointing toward tip) → left contact
     loop.push({ x: tipContactX + tipExt, y: 0 });
   } else if (iTip) {
-    interlockSeam(tipContactX, hwAt(tipContactX), -1).forEach(p => loop.push(p));
+    interlockSeamPts(tipContactX, hwAt(tipContactX), 1, ilR).forEach(p => loop.push(p));
   }
   // Left rail tip→tail (reverse)
   for (let i = leftRail.length - 1; i >= 0; i--) loop.push(leftRail[i]);
@@ -2572,7 +2578,7 @@ function applyVCutToCore(ski) {
   if (vTail) {
     loop.push({ x: tailContactX - tailExt, y: 0 });
   } else if (iTail) {
-    interlockSeam(tailContactX, hwAt(tailContactX), 1).reverse().forEach(p => loop.push(p));
+    interlockSeamPts(tailContactX, hwAt(tailContactX), -1, ilR).reverse().forEach(p => loop.push(p));
   }
   return loop;
 }
@@ -2583,30 +2589,29 @@ function applyVCutToCore(ski) {
 function fillerLoops(ski) {
   const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const tipContactX = L - ski.tipLength, tailContactX = ski.tailLength;
-  const hwAt = (xmm) => Math.max(0.5, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+  const hwFull = (xmm) => Math.max(0.5, getWidthAtPos(ski, xmm / L) / 2);            // outline: sidewall ends at contact, so filler fills to here
+  const hwInset = (xmm) => Math.max(0.5, getWidthAtPos(ski, xmm / L) / 2 - coreInset); // wood-core rail: the keyed seam sits here
   const ilR = Math.max(2, ski.interlockR || 10);
-  const seam = (xc, hwv, dir) => {
-    const r = Math.max(2, Math.min(ilR, hwv * 0.6)), NN = 10, out = [];
-    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (hwv - r) + r * Math.sin(a) }); }
-    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (-hwv + r) + r * Math.sin(a) }); }
-    return out;
-  };
-  const railTo = (x0, x1) => { const N = 80, r = [], l = []; for (let i = 0; i <= N; i++) { const x = x0 + (x1 - x0) * (i / N); const h = hwAt(x); r.push({ x, y: h }); l.push({ x, y: -h }); } return { r, l }; };
+  const railTo = (x0, x1) => { const N = 80, r = [], l = []; for (let i = 0; i <= N; i++) { const x = x0 + (x1 - x0) * (i / N); const h = hwFull(x); r.push({ x, y: h }); l.push({ x, y: -h }); } return { r, l }; };
   const out = {};
   if (ski.interlockTip && !ski.vcutTip) {
-    const { r, l } = railTo(tipContactX, L);
+    const { r, l } = railTo(tipContactX, L), hi = hwInset(tipContactX);
     const loop = [];
-    r.forEach(p => loop.push(p));
-    for (let i = l.length - 1; i >= 0; i--) loop.push(l[i]);
-    seam(tipContactX, hwAt(tipContactX), -1).forEach(p => loop.push(p));
+    r.forEach(p => loop.push(p));                              // outline right rail contact → tip
+    for (let i = l.length - 1; i >= 0; i--) loop.push(l[i]);   // outline left rail tip → contact (ends at -full)
+    loop.push({ x: tipContactX, y: -hi });                     // step in where the sidewall ends
+    interlockSeamPts(tipContactX, hi, 1, ilR).reverse().forEach(p => loop.push(p));  // mating keyed seam (-hi → +hi)
+    loop.push({ x: tipContactX, y: hwFull(tipContactX) });     // step back out to the outline
     out.tip = loop;
   }
   if (ski.interlockTail && !ski.vcutTail) {
-    const { r, l } = railTo(tailContactX, 0);
+    const { r, l } = railTo(tailContactX, 0), hi = hwInset(tailContactX);
     const loop = [];
     r.forEach(p => loop.push(p));
     for (let i = l.length - 1; i >= 0; i--) loop.push(l[i]);
-    seam(tailContactX, hwAt(tailContactX), 1).reverse().forEach(p => loop.push(p));
+    loop.push({ x: tailContactX, y: -hi });
+    interlockSeamPts(tailContactX, hi, -1, ilR).reverse().forEach(p => loop.push(p));
+    loop.push({ x: tailContactX, y: hwFull(tailContactX) });
     out.tail = loop;
   }
   return out;
