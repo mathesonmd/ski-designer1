@@ -3903,19 +3903,24 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   let outline = [];
   try { outline = getFullOutlinePoints(ski); } catch (e) {}
   const rx = pad, ry = 210, rw = 540, rh = 300;
-  const maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
-  const pairSkis = !isBoard;                                  // skis draw as a mirrored pair; boards stay single
-  const sc = Math.min(rw / ski.length, (pairSkis ? rh * 0.42 : rh) / (2 * maxLat));
-  const ox = rx + (rw - ski.length * sc) / 2;
-  const rowsY = pairSkis ? [ry + rh * 0.30, ry + rh * 0.70] : [ry + rh / 2];
-  const rowMapPt = (r) => (p) => ({ x: ox + p.y * sc, y: rowsY[r] + (r === 1 ? -p.x : p.x) * sc });        // inside edges face each other (as worn)
-  const rowMapLL = (r) => (len, lat) => ({ x: ox + len * sc, y: rowsY[r] + (r === 1 ? -lat : lat) * sc });
-  const silhouetteSVG = rowsY.map((_, r) => {
+  // Same layout as the plan view's pair mode: ski A at plot -cOff, its mirror partner at +cOff, a 24mm gap
+  // between, inside edges facing (as worn). Boards stay single (cOff = 0).
+  const pairSkis = !isBoard;
+  const skiMaxW = Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) + 8;
+  const pairGapMM = 24;
+  const pairLatW = pairSkis ? (skiMaxW * 2 + pairGapMM) : skiMaxW;
+  const sc = Math.min(rw / ski.length, rh / pairLatW);
+  const ox = rx + (rw - ski.length * sc) / 2, cY = ry + rh / 2;
+  const cOff = pairSkis ? (skiMaxW + pairGapMM) / 2 : 0;
+  const rowLat = (r, lat) => (r === 1 ? (cOff - lat) : (lat - cOff));   // r0 = ski A, r1 = mirror partner
+  const rowMapPt = (r) => (p) => ({ x: ox + p.y * sc, y: cY + rowLat(r, p.x) * sc });
+  const rowMapLL = (r) => (len, lat) => ({ x: ox + len * sc, y: cY + rowLat(r, lat) * sc });
+  const silhouetteSVG = Array.from({ length: pairSkis ? 2 : 1 }, (_, r) => {
     const mpp = rowMapPt(r);
     const sil = outline.length ? outline.map((p, i) => `${i ? "L" : "M"}${mpp(p).x.toFixed(1)},${mpp(p).y.toFixed(1)}`).join(" ") + " Z" : "";
     return (sil ? `<path d="${sil}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>` : "") + topDownDesignSVG(ski, rowMapLL(r), { brass });
   }).join("");
-  const dimsY = rowsY[rowsY.length - 1] + maxLat * sc + 34;
+  const dimsY = cY + (pairLatW / 2) * sc + 30;
   // Layup cross-section, stacked below the silhouette in the left column.
   const stackTop = 590;
   const stack = buildLayerStackSVG(ski, { x: rx, y: stackTop + 6, w: rw, maxH: (H - 110) - (stackTop + 6) });
