@@ -3878,13 +3878,15 @@ function topDownDesignSVG(ski, map, opts) {
   return s;
 }
 
-// Self-contained plan-view thumbnail: ski outline + the top-down design overlay, auto-fit to W×H.
-function planPreviewSVG(ski, W, H) {
+// Self-contained plan-view thumbnail: ski outline + the top-down design overlay, fit to width W with the
+// height sized to the ski so a long skinny ski doesn't sit in a tall empty box.
+function planPreviewSVG(ski, W) {
   let outline = []; try { outline = getFullOutlinePoints(ski); } catch (e) {}
-  if (!outline.length) return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>`;
+  if (!outline.length) return `<svg viewBox="0 0 ${W} 20" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>`;
   const pad = 8, maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
-  const sc = Math.min((W - 2 * pad) / ski.length, (H - 2 * pad) / (2 * maxLat));
-  const ox = (W - ski.length * sc) / 2, oy = H / 2;
+  const sc = (W - 2 * pad) / ski.length;
+  const H = Math.round(2 * maxLat * sc + 2 * pad);
+  const ox = pad, oy = H / 2;
   const mp = p => ({ x: ox + p.y * sc, y: oy - p.x * sc });
   const sil = outline.map((p, i) => `${i ? "L" : "M"}${mp(p).x.toFixed(1)},${mp(p).y.toFixed(1)}`).join(" ") + " Z";
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">`
@@ -7207,25 +7209,24 @@ function studyTableHTML(variants) {
   h += `</table>`;
   return h;
 }
-function studyLayupHTML(variants) {
-  let h = `<div style="font-weight:700;font-size:12px;color:#333;margin:20px 0 8px">${t("study.layup", "LAYUP")}</div>`;
-  variants.forEach((v, i) => {
-    let ls = { svg: "", height: 80 };
-    try { ls = buildLayerStackSVG(v.ski, { w: 460 }); } catch (e) {}
-    h += `<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:${STUDY_COLORS[i]};margin-bottom:3px;font-family:monospace">#${i + 1} ${String(v.name).slice(0, 22)}</div><svg viewBox="0 0 460 ${Math.max(50, ls.height).toFixed(0)}" width="100%" style="max-width:460px;background:#f6f4ef;border:1px solid #eee;border-radius:4px">${ls.svg}</svg></div>`;
-  });
-  return h;
-}
-
-// Top-down plan thumbnails, one per variant — the same shape/core/sidewall/fill design the plan view shows.
-function studyPlansHTML(variants) {
+// One card per variant: top-down plan (horizontal), a gap, then the layup sandwich — stacked in a single
+// rectangle. Laid out two per row so variants sit side by side.
+function studyDesignHTML(variants) {
   if (!variants || !variants.length) return "";
   const esc = s => String(s == null ? "" : s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  const CW = 330;   // inner content width for both the plan and the layup, so they align
   const cells = variants.map((v, i) => {
-    let svg = ""; try { svg = planPreviewSVG(v.ski, 320, 132); } catch (e) {}
-    return `<div style="flex:1;min-width:0"><div style="font-size:10.5px;font-weight:700;color:${STUDY_COLORS[i % STUDY_COLORS.length]};margin-bottom:3px;font-family:monospace">#${i + 1} ${esc(String(v.name).slice(0, 22))}</div><div style="background:#f6f4ef;border:1px solid #eee;border-radius:4px">${svg}</div></div>`;
+    let plan = ""; try { plan = planPreviewSVG(v.ski, CW); } catch (e) {}
+    let ls = { svg: "", height: 60 }; try { ls = buildLayerStackSVG(v.ski, { w: CW }); } catch (e) {}
+    const c = STUDY_COLORS[i % STUDY_COLORS.length];
+    return `<div style="flex:1 1 calc(50% - 7px);min-width:300px;box-sizing:border-box;border:1px solid #e6e2da;border-radius:6px;padding:9px 10px;background:#fff">`
+      + `<div style="font-size:11px;font-weight:700;color:${c};margin-bottom:6px;font-family:monospace">#${i + 1} ${esc(String(v.name).slice(0, 26))}${i === 0 ? " (ref)" : ""}</div>`
+      + plan
+      + `<div style="height:9px"></div>`
+      + `<svg viewBox="0 0 ${CW} ${Math.max(46, ls.height).toFixed(0)}" width="100%" style="background:#f6f4ef;border:1px solid #eee;border-radius:4px">${ls.svg}</svg>`
+      + `</div>`;
   }).join("");
-  return `<div style="margin-top:16px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:6px">TOP-DOWN DESIGN</div><div style="display:flex;gap:10px;flex-wrap:wrap">${cells}</div></div>`;
+  return `<div style="margin-top:16px"><div style="display:flex;flex-wrap:wrap;gap:14px">${cells}</div></div>`;
 }
 
 export default function App() {
@@ -7312,7 +7313,7 @@ export default function App() {
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg>${studyPlansHTML(studyVariants)}<div style="margin-top:16px">${table}</div>${studyLayupHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -9735,9 +9736,8 @@ export default function App() {
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
-            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyPlansHTML(studyVariants) }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
-            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyLayupHTML(studyVariants) }} />
+            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyDesignHTML(studyVariants) }} />
             <div style={{ marginTop: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>{t("study.notes", "NOTES")}</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
