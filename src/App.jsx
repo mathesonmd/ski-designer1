@@ -1384,8 +1384,8 @@ function printTiledPlan(ski, paper, opts) {
   let coreD = "";
   // applyVCutToCore returns {x:length, y:lateral} — the opposite of getFullOutlinePoints — so swap it back.
   if (opts.core !== false) { try { coreD = pathOf(applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }))); } catch (e) {} }
-  let fillerD = "";
-  if (opts.core !== false) { try { const fl = fillerLoops(ski); const parts = []; if (fl.tip) parts.push(pathOf(fl.tip.map(p => ({ x: p.y, y: p.x })))); if (fl.tail) parts.push(pathOf(fl.tail.map(p => ({ x: p.y, y: p.x })))); fillerD = parts.join(" "); } catch (e) {} }
+  let fillerD = "", fillerBlankD = "";
+  if (opts.core !== false) { try { const fl = fillerLoops(ski); const parts = []; if (fl.tip) parts.push(pathOf(fl.tip.map(p => ({ x: p.y, y: p.x })))); if (fl.tail) parts.push(pathOf(fl.tail.map(p => ({ x: p.y, y: p.x })))); fillerD = parts.join(" "); const bparts = []; if (fl.tipBlank) bparts.push(pathOf(fl.tipBlank.map(p => ({ x: p.y, y: p.x })))); if (fl.tailBlank) bparts.push(pathOf(fl.tailBlank.map(p => ({ x: p.y, y: p.x })))); fillerBlankD = bparts.join(" "); } catch (e) {} }
   let baseD = "";
   // Base cut line (reflects the edge wrap and inset), in the same {x:lateral, y:length} frame as the outline.
   try {
@@ -1479,6 +1479,7 @@ function printTiledPlan(ski, paper, opts) {
       + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
       + (baseD ? `<path d="${baseD}" fill="none" stroke="#c88a3a" stroke-width="0.3" stroke-dasharray="2,2"/>` : "")
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
+      + (fillerBlankD ? `<path d="${fillerBlankD}" fill="none" stroke="#999" stroke-width="0.25" stroke-dasharray="3,2"/>` : "")
       + (fillerD ? `<path d="${fillerD}" fill="none" stroke="#c8935a" stroke-width="0.3" stroke-dasharray="1,1.5"/>` : "")
       + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
       + (profD ? profExtra + `<path d="${profD}" fill="none" stroke="#000" stroke-width="0.4"/>` : "")
@@ -2301,6 +2302,9 @@ function exportCorePlanDXF(ski){
 
   // Tip/tail filler pieces (interlock ends): their own closed outlines, keyed edge mating the core.
   { const fl = fillerLoops(ski);
+    // Oversized rectangular blanks on their own layer — cut these, glue on, trim to the outline after cure.
+    if (fl.tipBlank) dxf += dxfLwpolyline('FILLER_BLANK', fl.tipBlank.map(fp => P({ x: fp.y, y: fp.x })), true);
+    if (fl.tailBlank) dxf += dxfLwpolyline('FILLER_BLANK', fl.tailBlank.map(fp => P({ x: fp.y, y: fp.x })), true);
     if (fl.tip) { dxf += dxfLwpolyline('FILLER', fl.tip.map(fp => P({ x: fp.y, y: fp.x })), true); const lp = P({ x: 0, y: ski.length - ski.tipLength / 2 }); dxf += dxfText('TEXT', lp.x, lp.y, 6, "TIP FILLER"); }
     if (fl.tail) { dxf += dxfLwpolyline('FILLER', fl.tail.map(fp => P({ x: fp.y, y: fp.x })), true); const lp = P({ x: 0, y: ski.tailLength / 2 }); dxf += dxfText('TEXT', lp.x, lp.y, 6, "TAIL FILLER"); }
   }
@@ -2518,20 +2522,53 @@ ${body}
 // (arrays of {x,y}, x along ski 0→L, y = ±half-width). Where a V-cut is enabled, the core is
 // TERMINATED in an isosceles V: base edge-to-edge at the contact, apex on the centerline extending
 // `ext` mm toward that end. Points beyond the contact are dropped (that triangular region is fill).
-// Returns a single closed loop of points. `coreInset` matches how the rails were built.
-// One keyed core end: a quarter-round tab at each rail. From the rail the core runs a short flat straight
-// along the sidewall line (tangent to the inset rail) out into the filler by r, a 90° arc turns it back to
-// the end line, and a flat run parallel to the end joins the two rails. dir = +1 (tip, tabs toward the tip) /
-// -1 (tail). Points go from +hwv to -hwv. The filler is cut with the exact same seam, so the tab seats in.
-function interlockSeamPts(xc, hwv, dir, ilR) {
-  const r = Math.max(2, Math.min(ilR || 10, hwv * 0.45)), NN = 8, out = [];
-  out.push({ x: xc, y: hwv });                                   // right rail @ contact
-  out.push({ x: xc + dir * r, y: hwv });                         // flat along rail (|| sidewall), into filler
-  for (let i = 1; i <= NN; i++) { const th = -(Math.PI / 2) * (i / NN); out.push({ x: xc + dir * r * Math.cos(th), y: hwv + r * Math.sin(th) }); }   // 90° arc → (xc, hwv-r)
-  out.push({ x: xc, y: -hwv + r });                              // flat along end line (|| end)
-  for (let i = 1; i <= NN; i++) { const th = (Math.PI / 2) * (1 - i / NN); out.push({ x: xc + dir * r * Math.cos(th), y: -hwv + r * Math.sin(th) }); }  // 90° arc → (xc + dir*r, -hwv)
-  out.push({ x: xc, y: -hwv });                                  // flat along rail back to left rail
-  return out;
+// Insert an inward quarter-round notch into one rail (points in ascending X). `side` = +1 (right rail, y>0)
+// or -1 (left rail, y<0). `tipward` = +1 (notch sits on the tip side of the contact, x≥contactX) or -1 (tail
+// side, x≤contactX). The notch is flat across the end (vertical drop at the contact by R), a 90° arc, and the
+// rail itself as the tangent flat along the sidewall line — cut OUT of the core so the filler wraps in.
+function insNotchAsc(rail, contactX, R, tipward, side) {
+  if (!rail || rail.length < 2) return rail;
+  const lo = tipward > 0 ? contactX : contactX - R;
+  const hi = tipward > 0 ? contactX + R : contactX;
+  let hwc = 0;
+  for (let i = 0; i < rail.length - 1; i++) {
+    const a = rail[i], b = rail[i + 1];
+    if ((a.x - contactX) * (b.x - contactX) <= 0 && a.x !== b.x) { const t = (contactX - a.x) / (b.x - a.x); hwc = Math.abs(a.y + t * (b.y - a.y)); break; }
+  }
+  if (hwc <= 0) hwc = Math.abs(rail[Math.floor(rail.length / 2)].y);
+  const R2 = Math.min(R, hwc * 0.9);
+  const NN = 14, prof = [];
+  if (tipward > 0) {
+    prof.push({ x: contactX, y: side * hwc });                                                   // rail level
+    prof.push({ x: contactX, y: side * (hwc - R2) });                                            // flat across end (drop in by R)
+    for (let i = 1; i <= NN; i++) { const a = (Math.PI / 2) * (i / NN); prof.push({ x: contactX + R2 * Math.sin(a), y: side * (hwc - R2 * Math.cos(a)) }); }  // arc back to rail
+  } else {
+    for (let i = 0; i < NN; i++) { const a = (Math.PI / 2) * (i / NN); prof.push({ x: contactX - R2 * Math.cos(a), y: side * (hwc - R2 * Math.sin(a)) }); }   // arc dipping in
+    prof.push({ x: contactX, y: side * (hwc - R2) });
+    prof.push({ x: contactX, y: side * hwc });                                                    // flat across end back to rail
+  }
+  let i0 = 0; while (i0 < rail.length && rail[i0].x < lo) i0++;
+  let i1 = i0; while (i1 < rail.length && rail[i1].x <= hi) i1++;
+  return [...rail.slice(0, i0), ...prof, ...rail.slice(i1)];
+}
+
+// Cut inward quarter-round interlock notches into a closed inset-core polygon at the contact stations.
+// poly: {x:length, y:lateral}. Splits into right rail (asc X) + left rail (desc X) at the tip/tail extremes,
+// notches each, and reassembles. The tips/tails stay the rounded inset (untouched by the notches).
+function spliceInterlockNotches(poly, tipCX, tailCX, iTip, iTail, R) {
+  if (!poly || poly.length < 6) return poly;
+  let kMin = 0; for (let i = 1; i < poly.length; i++) if (poly[i].x < poly[kMin].x) kMin = i;
+  const rot = [...poly.slice(kMin), ...poly.slice(0, kMin)];       // start at the tail (min X)
+  let kt = 0; for (let i = 1; i < rot.length; i++) if (rot[i].x > rot[kt].x) kt = i;  // tip (max X)
+  let rr = rot.slice(0, kt + 1);                                   // right rail, tail→tip (asc X)
+  let lr = rot.slice(kt);                                          // left rail, tip→tail (desc X)
+  if (iTail) rr = insNotchAsc(rr, tailCX, R, -1, +1);
+  if (iTip) rr = insNotchAsc(rr, tipCX, R, +1, +1);
+  let lrAsc = [...lr].reverse();                                   // tail→tip (asc X), y<0
+  if (iTail) lrAsc = insNotchAsc(lrAsc, tailCX, R, -1, -1);
+  if (iTip) lrAsc = insNotchAsc(lrAsc, tipCX, R, +1, -1);
+  lr = lrAsc.reverse();                                            // back to tip→tail
+  return [...rr, ...lr.slice(1)];
 }
 function applyVCutToCore(ski) {
   const L = ski.length;
@@ -2550,31 +2587,25 @@ function applyVCutToCore(ski) {
 
   // Sample the core rails only within the (possibly clipped) X range.
   const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  // Does a plain (no V-cut, no interlock) core reach the very ends? Then it should be the rounded inset, not
+  // a blunt cap.
+  const reachTip = !vTip && !iTip && (tipContactX + endExt >= L - 0.5);
+  const reachTail = !vTail && !iTail && (tailContactX - endExt <= 0.5);
 
-  // ── Interlock ends: the core is the FULL inset outline (runs tip→tail, offset held all the way around so
-  // no wood is exposed) with a quarter-round notch bitten INWARD at each contact — flat along the sidewall
-  // line, flat across parallel to the end, arc between. The filler is the offset band past the contacts and
-  // wraps into those notches (core loses material, filler gains it). ──
-  if (iTip || iTail) {
+  // ── Interlock ends, OR a plain core that runs the whole length: the core is the TRUE inset of the outline
+  // (offset held all the way around, so the tips/tails round in by the offset and no wood is exposed). For
+  // interlock we then bite an inward quarter-round notch out of each rail at the contact; the filler is the
+  // offset band past the contacts and wraps into those notches. ──
+  if (iTip || iTail || (reachTip && reachTail)) {
     const R = Math.max(2, Math.min(ilR, effHalf * 0.5));
-    const hwcTip = hwAt(tipContactX), hwcTail = hwAt(tailContactX);
-    const xLo = iTail ? 0 : (vTail ? tailContactX : Math.max(0, tailContactX - endExt));
-    const xHi = iTip ? L : (vTip ? tipContactX : Math.min(L, tipContactX + endExt));
-    const seg = (out, a, b, fn) => { const n = Math.max(2, Math.round(Math.abs(b - a) / 4)); for (let i = 0; i <= n; i++) { const x = a + (b - a) * (i / n); out.push({ x, y: fn(x) }); } };
-    const railY = (side) => {
-      const out = [];
-      let start = xLo;
-      if (iTail) { seg(out, 0, tailContactX - R, x => side * hwAt(x)); seg(out, tailContactX - R, tailContactX, x => side * (hwcTail - Math.sqrt(Math.max(0, R * R - (tailContactX - x) ** 2)))); start = tailContactX; }
-      seg(out, start, iTip ? tipContactX : xHi, x => side * hwAt(x));
-      if (iTip) { seg(out, tipContactX, tipContactX + R, x => side * (hwcTip - Math.sqrt(Math.max(0, R * R - (x - tipContactX) ** 2)))); seg(out, tipContactX + R, L, x => side * hwAt(x)); }
-      return out;
-    };
-    const rR = railY(1), lR = railY(-1), loopI = [];
-    rR.forEach(p => loopI.push(p));
-    if (vTip) loopI.push({ x: tipContactX + tipExt, y: 0 });
-    for (let i = lR.length - 1; i >= 0; i--) loopI.push(lR[i]);
-    if (vTail) loopI.push({ x: tailContactX - tailExt, y: 0 });
-    return loopI;
+    let base;
+    try { base = offsetPolygonInward(getFullOutlinePoints(ski), coreInset).map(p => ({ x: p.y, y: p.x })); }
+    catch (e) { base = null; }
+    if (base && base.length >= 6) {
+      if (iTip || iTail) base = spliceInterlockNotches(base, tipContactX, tailContactX, iTip, iTail, R);
+      return base;
+    }
+    // fall through to rail sampling if the offset failed
   }
 
   const xStart = vTail ? tailContactX : Math.max(0, tailContactX - endExt);
@@ -2603,31 +2634,35 @@ function applyVCutToCore(ski) {
 function fillerLoops(ski) {
   const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const tipContactX = L - ski.tipLength, tailContactX = ski.tailLength;
+  const iTip = !!ski.interlockTip && !ski.vcutTip, iTail = !!ski.interlockTail && !ski.vcutTail;
   const R = Math.max(2, Math.min(ski.interlockR || 10, Math.max(1, (tipContactX - tailContactX) / 2) * 0.5));
-  const hwFull = (x) => Math.max(0.5, getWidthAtPos(ski, x / L) / 2);              // ski outline (outer edge of the filler band)
-  const hwInset = (x) => Math.max(0.5, getWidthAtPos(ski, x / L) / 2 - coreInset); // inset core rail (inner edge)
-  const seg = (a, b, fn) => { const n = Math.max(2, Math.round(Math.abs(b - a) / 4)), o = []; for (let i = 0; i <= n; i++) { const x = a + (b - a) * (i / n); o.push(fn(x)); } return o; };
+  const overlap = Math.max(6, coreInset + 4);   // oversized-blank overrun past the ski edge (trimmed after cure)
   const out = {};
-  if (ski.interlockTip && !ski.vcutTip) {
-    const hwc = hwInset(tipContactX);
-    const inner = (x) => (x >= tipContactX && x <= tipContactX + R) ? (hwc - Math.sqrt(Math.max(0, R * R - (x - tipContactX) ** 2))) : hwInset(x);  // inset rail with the notch
-    const loop = [];
-    seg(tipContactX, L, x => ({ x, y: hwFull(x) })).forEach(p => loop.push(p));   // outline right contact→tip
-    seg(L, tipContactX, x => ({ x, y: -hwFull(x) })).forEach(p => loop.push(p));  // outline left tip→contact
-    seg(tipContactX, L, x => ({ x, y: -inner(x) })).forEach(p => loop.push(p));   // inset+notch left contact→tip (band inner edge)
-    seg(L, tipContactX, x => ({ x, y: inner(x) })).forEach(p => loop.push(p));    // inset+notch right tip→contact
-    out.tip = loop;
-  }
-  if (ski.interlockTail && !ski.vcutTail) {
-    const hwc = hwInset(tailContactX);
-    const inner = (x) => (x >= tailContactX - R && x <= tailContactX) ? (hwc - Math.sqrt(Math.max(0, R * R - (tailContactX - x) ** 2))) : hwInset(x);
-    const loop = [];
-    seg(tailContactX, 0, x => ({ x, y: hwFull(x) })).forEach(p => loop.push(p));
-    seg(0, tailContactX, x => ({ x, y: -hwFull(x) })).forEach(p => loop.push(p));
-    seg(tailContactX, 0, x => ({ x, y: -inner(x) })).forEach(p => loop.push(p));
-    seg(0, tailContactX, x => ({ x, y: inner(x) })).forEach(p => loop.push(p));
-    out.tail = loop;
-  }
+  let outline, inset;
+  try { outline = getFullOutlinePoints(ski).map(p => ({ x: p.y, y: p.x })); } catch (e) { return out; }   // {x:length, y:lateral}
+  try { inset = offsetPolygonInward(getFullOutlinePoints(ski), coreInset).map(p => ({ x: p.y, y: p.x })); } catch (e) { inset = null; }
+  if (!inset || inset.length < 6) return out;
+  inset = spliceInterlockNotches(inset, tipContactX, tailContactX, iTip, iTail, R);
+
+  // Band for one end = ski outline (outer) from the contact around the end back to the contact, then the
+  // rounded inset core (inner, with its notch) reversed to close. The inset tip pulls in by the offset, so
+  // the band naturally wraps the whole rounded end — that's the tip/tail filler.
+  const band = (contactX, isTip) => {
+    const keep = (p) => isTip ? (p.x >= contactX) : (p.x <= contactX);
+    const outer = outline.filter(keep);
+    const innerPts = inset.filter(keep);
+    if (outer.length < 2 || innerPts.length < 2) return null;
+    return [...outer, ...innerPts.slice().reverse()];
+  };
+  // Oversized rectangular blank (what you actually cut, glue on, and trim back after cure).
+  const blank = (contactX, isTip) => {
+    let maxHW = 0.5; outline.forEach(p => { if ((isTip ? p.x >= contactX : p.x <= contactX)) maxHW = Math.max(maxHW, Math.abs(p.y)); });
+    const xEdge = isTip ? L : 0, xIn = contactX;
+    const xOut = isTip ? xEdge + overlap : xEdge - overlap, yH = maxHW + overlap;
+    return [{ x: xIn, y: yH }, { x: xOut, y: yH }, { x: xOut, y: -yH }, { x: xIn, y: -yH }, { x: xIn, y: yH }];
+  };
+  if (iTip) { const b = band(tipContactX, true); if (b) out.tip = b; out.tipBlank = blank(tipContactX, true); }
+  if (iTail) { const b = band(tailContactX, false); if (b) out.tail = b; out.tailBlank = blank(tailContactX, false); }
   return out;
 }
 
@@ -4351,6 +4386,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       // Filler pieces (interlock ends): the keyed tip/tail stock, drawn in blue so the wood core (brass)
       // and the filler are visibly separate — they meet along the keyed seam.
       const fl = fillerLoops(ski);
+      // Oversized rectangular blanks (what you cut; the overrun past the ski edge is trimmed after cure).
+      ctx.strokeStyle = "rgba(58,120,216,0.4)"; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (!bl) return; ctx.beginPath(); bl.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.stroke(); });
+      // Finished filler band (between the rounded inset core and the outline), solid-ish blue.
       ctx.strokeStyle = "#3a78d8"; ctx.lineWidth = 1.2; ctx.setLineDash([2, 2]);
       [fl.tip, fl.tail].forEach(fp => { if (!fp) return; ctx.beginPath(); fp.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.stroke(); });
       ctx.setLineDash([]);
