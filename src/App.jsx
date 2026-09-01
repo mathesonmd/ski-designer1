@@ -398,6 +398,7 @@ const DEFAULT_SKI={
   inserts:[],   // shaped metal/carbon reinforcement (Mantra frame / Rustler strip)
   vcutTip:false, vcutTipExt:120,
   vcutTail:false, vcutTailExt:120,
+  interlockTip:false, interlockTail:false, interlockR:10,   // classic snoCAD-style keyed tip/tail filler joint (radius mm)
   // Export orientation for all CNC files: "vertical" (portrait, length up the page) or
   // "horizontal" (landscape, length across the page). Geometry rotates; text labels and the
   // measurements table always stay horizontal for readability.
@@ -428,7 +429,7 @@ const DEFAULT_SKI={
 // File extension `.bcski` (Black Chapel Ski). JSON envelope with metadata for forward-compat.
 const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
-const APP_VERSION = "0.6";
+const APP_VERSION = "0.9";
 
 function saveDesignToFile(ski, study) {
   const envelope = {
@@ -2514,6 +2515,8 @@ function applyVCutToCore(ski) {
   const tailContactX = ski.tailLength;
   const tipContactX = L - ski.tipLength;
   const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const iTip = !!ski.interlockTip && !vTip, iTail = !!ski.interlockTail && !vTail;   // keyed joint only when no V-cut
+  const ilR = Math.max(2, ski.interlockR || 10);
   // POSITIVE extension = outward spear (apex past the contact); NEGATIVE = inward notch (apex toward
   // the center). Clamp to a safe range so the outline can't self-intersect.
   const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
@@ -2523,8 +2526,16 @@ function applyVCutToCore(ski) {
 
   // Sample the core rails only within the (possibly clipped) X range.
   const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
-  const xStart = vTail ? tailContactX : Math.max(0, tailContactX - endExt);
-  const xEnd = vTip ? tipContactX : Math.min(L, tipContactX + endExt);
+  const xStart = (vTail || iTail) ? tailContactX : Math.max(0, tailContactX - endExt);
+  const xEnd = (vTip || iTip) ? tipContactX : Math.min(L, tipContactX + endExt);
+  // Interlock seam across a core end: a rounded key (radius r) bulging toward the end (dir=+1 tip / -1 tail)
+  // at each rail, with a flat run between — the filler is cut with the matching notch so it can't slide.
+  const interlockSeam = (xc, hwv, dir) => {
+    const r = Math.max(2, Math.min(ilR, hwv * 0.6)), NN = 10, out = [];
+    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (hwv - r) + r * Math.sin(a) }); }
+    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (-hwv + r) + r * Math.sin(a) }); }
+    return out;
+  };
   const N = 200;
   const rightRail = [], leftRail = [];
   for (let i = 0; i <= N; i++) {
@@ -2542,12 +2553,16 @@ function applyVCutToCore(ski) {
   if (vTip) {
     // from right contact → apex (pointing toward tip) → left contact
     loop.push({ x: tipContactX + tipExt, y: 0 });
+  } else if (iTip) {
+    interlockSeam(tipContactX, hwAt(tipContactX), 1).forEach(p => loop.push(p));
   }
   // Left rail tip→tail (reverse)
   for (let i = leftRail.length - 1; i >= 0; i--) loop.push(leftRail[i]);
   // Tail end
   if (vTail) {
     loop.push({ x: tailContactX - tailExt, y: 0 });
+  } else if (iTail) {
+    interlockSeam(tailContactX, hwAt(tailContactX), -1).reverse().forEach(p => loop.push(p));
   }
   return loop;
 }
@@ -6937,7 +6952,7 @@ function computeVariantMetrics(snap) {
     radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
     coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
     k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0,
-    core: coreL ? ((CORE_MATERIALS[(coreWoods(coreL)[0] || {}).mat] || {}).name || "wood") : "",
+    core: coreL ? (coreWoods(coreL).map(cw => (CORE_MATERIALS[cw.mat] || {}).name || cw.mat).filter(Boolean).join(" + ") || "wood") : "",
     layup: lay,
     stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
   };
@@ -8761,6 +8776,21 @@ export default function App() {
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Positive = outward spear, negative = inward notch. Preview in the Core view.
           </div>
+
+          <div style={{ marginTop: 8, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>INTERLOCK KEY (CLASSIC)</span>
+            <InfoBubble C={C} width={260}>
+              The snoCAD-style keyed joint. The wood core ends at the contact and a rounded key of the chosen radius is cut into each rail; the tip/tail filler is cut with the matching tab so it locks in and can't slide. An alternative to the V-cut for that end (turn the V-cut off to use it). Shows in the Core view and the Core / Combined DXF.
+            </InfoBubble>
+          </div>
+          {toggleBtn("Tip interlock key", "interlockTip")}
+          {toggleBtn("Tail interlock key", "interlockTail")}
+          {(ski.interlockTip || ski.interlockTail) && inputField("Key radius (mm)", "interlockR", 4, 40, 1)}
+          {(ski.interlockTip || ski.interlockTail) && (ski.vcutTip || ski.vcutTail) && (
+            <div style={{ color: C.torch, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              A V-cut is on for the same end — the V-cut takes that end; the interlock only applies where no V-cut is set.
+            </div>
+          )}
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title={t("sec.layup", "Layup / Materials")}>
@@ -9385,7 +9415,7 @@ export default function App() {
         </AccordionSection>
 
         <div style={{ marginTop: "auto", padding: "8px 12px", borderTop: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.</div>
+          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.  ·  v{APP_VERSION}</div>
         </div>
       </div>
 
