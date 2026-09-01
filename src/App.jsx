@@ -4476,8 +4476,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       // and the filler are visibly separate — they meet along the keyed seam.
       const fl = fillerLoops(ski);
       // Oversized rectangular blanks (what you cut; the overrun past the ski edge is trimmed after cure).
-      ctx.strokeStyle = "rgba(58,120,216,0.4)"; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
-      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (!bl) return; ctx.beginPath(); bl.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.stroke(); });
+      ctx.fillStyle = "rgba(58,120,216,0.16)"; ctx.strokeStyle = "rgba(58,120,216,0.55)"; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (!bl) return; ctx.beginPath(); bl.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.fill(); ctx.stroke(); });
       // Finished filler band (between the rounded inset core and the outline), solid-ish blue.
       ctx.strokeStyle = "#3a78d8"; ctx.lineWidth = 1.2; ctx.setLineDash([2, 2]);
       [fl.tip, fl.tail].forEach(fp => { if (!fp) return; ctx.beginPath(); fp.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.stroke(); });
