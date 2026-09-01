@@ -1384,6 +1384,8 @@ function printTiledPlan(ski, paper, opts) {
   let coreD = "";
   // applyVCutToCore returns {x:length, y:lateral} — the opposite of getFullOutlinePoints — so swap it back.
   if (opts.core !== false) { try { coreD = pathOf(applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }))); } catch (e) {} }
+  let fillerD = "";
+  if (opts.core !== false) { try { const fl = fillerLoops(ski); const parts = []; if (fl.tip) parts.push(pathOf(fl.tip.map(p => ({ x: p.y, y: p.x })))); if (fl.tail) parts.push(pathOf(fl.tail.map(p => ({ x: p.y, y: p.x })))); fillerD = parts.join(" "); } catch (e) {} }
   let baseD = "";
   // Base cut line (reflects the edge wrap and inset), in the same {x:lateral, y:length} frame as the outline.
   try {
@@ -1477,6 +1479,7 @@ function printTiledPlan(ski, paper, opts) {
       + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
       + (baseD ? `<path d="${baseD}" fill="none" stroke="#c88a3a" stroke-width="0.3" stroke-dasharray="2,2"/>` : "")
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
+      + (fillerD ? `<path d="${fillerD}" fill="none" stroke="#c8935a" stroke-width="0.3" stroke-dasharray="1,1.5"/>` : "")
       + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
       + (profD ? profExtra + `<path d="${profD}" fill="none" stroke="#000" stroke-width="0.4"/>` : "")
       + (rockD ? rockExtra + `<path d="${rockD}" fill="rgba(10,138,95,0.08)" stroke="#0a8a5f" stroke-width="0.45"/>` : "")
@@ -2262,8 +2265,8 @@ function exportCorePlanDXF(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
   let planPts;
-  if (ski.vcutTip || ski.vcutTail) {
-    // V-cut core: use the shared helper (X=length space) and swap to this export's X=width/Y=length.
+  if (ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
+    // V-cut or interlock core: use the shared helper (X=length space) and swap to this export's X=width/Y=length.
     planPts = applyVCutToCore(ski).map(p => ({ x: p.y, y: p.x }));
   } else {
     planPts = [];
@@ -2286,6 +2289,7 @@ function exportCorePlanDXF(ski){
 
   const layers = [
     { name: 'CORE_PLAN_OUTLINE', color: 3 },
+    { name: 'FILLER', color: 4 },
     { name: 'CENTERLINE', color: 5 },
     { name: 'REFERENCE', color: 1 },
     { name: 'TEXT', color: 2 },
@@ -2294,6 +2298,12 @@ function exportCorePlanDXF(ski){
 
   // Closed core outline
   dxf += dxfLwpolyline('CORE_PLAN_OUTLINE', planPts.map(P), true);
+
+  // Tip/tail filler pieces (interlock ends): their own closed outlines, keyed edge mating the core.
+  { const fl = fillerLoops(ski);
+    if (fl.tip) { dxf += dxfLwpolyline('FILLER', fl.tip.map(fp => P({ x: fp.y, y: fp.x })), true); const lp = P({ x: 0, y: ski.length - ski.tipLength / 2 }); dxf += dxfText('TEXT', lp.x, lp.y, 6, "TIP FILLER"); }
+    if (fl.tail) { dxf += dxfLwpolyline('FILLER', fl.tail.map(fp => P({ x: fp.y, y: fp.x })), true); const lp = P({ x: 0, y: ski.tailLength / 2 }); dxf += dxfText('TEXT', lp.x, lp.y, 6, "TAIL FILLER"); }
+  }
 
   // Labels sit beyond the core's MAXIMUM half-width so they clear the whole outline.
   const maxHW = Math.max(...planPts.map(p => Math.abs(p.x)));
@@ -2554,7 +2564,7 @@ function applyVCutToCore(ski) {
     // from right contact → apex (pointing toward tip) → left contact
     loop.push({ x: tipContactX + tipExt, y: 0 });
   } else if (iTip) {
-    interlockSeam(tipContactX, hwAt(tipContactX), 1).forEach(p => loop.push(p));
+    interlockSeam(tipContactX, hwAt(tipContactX), -1).forEach(p => loop.push(p));
   }
   // Left rail tip→tail (reverse)
   for (let i = leftRail.length - 1; i >= 0; i--) loop.push(leftRail[i]);
@@ -2562,9 +2572,44 @@ function applyVCutToCore(ski) {
   if (vTail) {
     loop.push({ x: tailContactX - tailExt, y: 0 });
   } else if (iTail) {
-    interlockSeam(tailContactX, hwAt(tailContactX), -1).reverse().forEach(p => loop.push(p));
+    interlockSeam(tailContactX, hwAt(tailContactX), 1).reverse().forEach(p => loop.push(p));
   }
   return loop;
+}
+
+// Tip/tail filler pieces (the "tipspacer" stock). Each is the core-inset planform from the contact out to
+// the end, closed on the inboard side by the SAME keyed seam the core carries — so the filler's tab drops
+// straight into the core's notch. Only produced for ends set to interlock (no V-cut). x = length, y = lateral.
+function fillerLoops(ski) {
+  const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
+  const tipContactX = L - ski.tipLength, tailContactX = ski.tailLength;
+  const hwAt = (xmm) => Math.max(0.5, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+  const ilR = Math.max(2, ski.interlockR || 10);
+  const seam = (xc, hwv, dir) => {
+    const r = Math.max(2, Math.min(ilR, hwv * 0.6)), NN = 10, out = [];
+    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (hwv - r) + r * Math.sin(a) }); }
+    for (let i = 0; i <= NN; i++) { const a = Math.PI / 2 - Math.PI * (i / NN); out.push({ x: xc + dir * r * Math.cos(a), y: (-hwv + r) + r * Math.sin(a) }); }
+    return out;
+  };
+  const railTo = (x0, x1) => { const N = 80, r = [], l = []; for (let i = 0; i <= N; i++) { const x = x0 + (x1 - x0) * (i / N); const h = hwAt(x); r.push({ x, y: h }); l.push({ x, y: -h }); } return { r, l }; };
+  const out = {};
+  if (ski.interlockTip && !ski.vcutTip) {
+    const { r, l } = railTo(tipContactX, L);
+    const loop = [];
+    r.forEach(p => loop.push(p));
+    for (let i = l.length - 1; i >= 0; i--) loop.push(l[i]);
+    seam(tipContactX, hwAt(tipContactX), -1).forEach(p => loop.push(p));
+    out.tip = loop;
+  }
+  if (ski.interlockTail && !ski.vcutTail) {
+    const { r, l } = railTo(tailContactX, 0);
+    const loop = [];
+    r.forEach(p => loop.push(p));
+    for (let i = l.length - 1; i >= 0; i--) loop.push(l[i]);
+    seam(tailContactX, hwAt(tailContactX), 1).reverse().forEach(p => loop.push(p));
+    out.tail = loop;
+  }
+  return out;
 }
 
 // ══════════════ COMBINED "ALL VIEWS" EXPORT ══════════════
@@ -4273,7 +4318,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     // Only shown when a tip/tail V-cut is enabled (keeps the view clean otherwise). Draws the core
     // outline terminating in the V at the cut end(s), in brass, so you can see where the wood core
     // ends and the fill triangle begins.
-    if (ski.vcutTip || ski.vcutTail) {
+    if (ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
       const loop = applyVCutToCore(ski);   // X=length space; swap to plan (skiX=y, skiY=x)
       ctx.save();
       ctx.strokeStyle = C.coreStroke || "#c8935a";
@@ -4284,17 +4329,20 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
       });
       ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
-      // Label the fill triangles
-      ctx.fillStyle = C.coreStroke || "#c8935a";
+      // Filler pieces (interlock ends): the keyed tip/tail stock, drawn in blue so the wood core (brass)
+      // and the filler are visibly separate — they meet along the keyed seam.
+      const fl = fillerLoops(ski);
+      ctx.strokeStyle = "#3a78d8"; ctx.lineWidth = 1.2; ctx.setLineDash([2, 2]);
+      [fl.tip, fl.tail].forEach(fp => { if (!fp) return; ctx.beginPath(); fp.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); ctx.stroke(); });
+      ctx.setLineDash([]);
+      // Labels
       ctx.font = "8px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
-      if (ski.vcutTip) {
-        const apex = toMain(0, (ski.length - ski.tipLength) + (ski.vcutTipExt || 0));
-        ctx.fillText("FILL", apex.x, apex.y - 4);
-      }
-      if (ski.vcutTail) {
-        const apex = toMain(0, ski.tailLength - (ski.vcutTailExt || 0));
-        ctx.fillText("FILL", apex.x, apex.y + 10);
-      }
+      ctx.fillStyle = C.coreStroke || "#c8935a";
+      if (ski.vcutTip) { const apex = toMain(0, (ski.length - ski.tipLength) + (ski.vcutTipExt || 0)); ctx.fillText("FILL", apex.x, apex.y - 4); }
+      if (ski.vcutTail) { const apex = toMain(0, ski.tailLength - (ski.vcutTailExt || 0)); ctx.fillText("FILL", apex.x, apex.y + 10); }
+      ctx.fillStyle = "#3a78d8";
+      if (fl.tip) { const c = toMain(0, ski.length - ski.tipLength / 2); ctx.fillText("FILLER", c.x, c.y); }
+      if (fl.tail) { const c = toMain(0, ski.tailLength / 2); ctx.fillText("FILLER", c.x, c.y); }
       ctx.restore();
     }
 
