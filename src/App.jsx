@@ -3881,23 +3881,24 @@ function topDownDesignSVG(ski, map, opts) {
 // Self-contained plan-view thumbnail: ski outline + the top-down design overlay, fit to width W with the
 // height sized to the ski so a long skinny ski doesn't sit in a tall empty box.
 // Renders a ski silhouette filled with its topsheet artwork, a soft drop shadow (lift) and an inner shadow
-// hugging the curved edges (depth). silD = the outline path in the target frame; (bx,by,bw,bh) its bbox.
+// hugging the curved edges (depth). silD = outline path (the clip); clipB = its bbox (shadow sizing);
+// imgB = the image-fit region (may span the whole pair so each ski shows its slice, matching the plan view).
 let _tsUid = 0;
-function skiArtworkLayer(silD, bx, by, bw, bh, topsheet, tag) {
-  if (!topsheet || !topsheet.src || bw <= 0 || bh <= 0) return null;
+function skiArtworkLayer(silD, clipB, imgB, topsheet, tag) {
+  if (!topsheet || !topsheet.src || clipB.w <= 0 || clipB.h <= 0) return null;
   const u = `${tag}${++_tsUid}`;
   const op = topsheet.opacity != null ? topsheet.opacity : 1;
-  const scale = topsheet.scale || 1, iw = bw * scale, ih = bh * scale;
-  const icx = bx + bw / 2 + (topsheet.offsetX || 0) * bw, icy = by + bh / 2 + (topsheet.offsetY || 0) * bh;
-  const rot = topsheet.rotation || 0;
+  const scale = topsheet.scale || 1, iw = imgB.w * scale, ih = imgB.h * scale;
+  const icx = imgB.x + imgB.w / 2 + (topsheet.offsetX || 0) * imgB.w, icy = imgB.y + imgB.h / 2 + (topsheet.offsetY || 0) * imgB.h;
+  const rot = topsheet.rotation || 0, sb = clipB.h;
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
   const defs = `<clipPath id="clip${u}"><path d="${silD}"/></clipPath>`
-    + `<filter id="drop${u}" x="-25%" y="-45%" width="150%" height="195%"><feDropShadow dx="0" dy="${(bh * 0.06).toFixed(1)}" stdDeviation="${(bh * 0.055).toFixed(1)}" flood-color="#000" flood-opacity="0.42"/></filter>`
-    + `<filter id="inb${u}"><feGaussianBlur stdDeviation="${(bh * 0.02).toFixed(2)}"/></filter>`;
+    + `<filter id="drop${u}" x="-25%" y="-45%" width="150%" height="195%"><feDropShadow dx="0" dy="${(sb * 0.06).toFixed(1)}" stdDeviation="${(sb * 0.055).toFixed(1)}" flood-color="#000" flood-opacity="0.42"/></filter>`
+    + `<filter id="inb${u}"><feGaussianBlur stdDeviation="${(sb * 0.02).toFixed(2)}"/></filter>`;
   const body = `<g filter="url(#drop${u})">`
     + `<path d="${silD}" fill="#171717"/>`
     + `<g clip-path="url(#clip${u})"><image href="${esc(topsheet.src)}" x="${(icx - iw / 2).toFixed(1)}" y="${(icy - ih / 2).toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}" preserveAspectRatio="xMidYMid slice" opacity="${op}" transform="rotate(${rot} ${icx.toFixed(1)} ${icy.toFixed(1)})"/></g>`
-    + `<g clip-path="url(#clip${u})"><path d="${silD}" fill="none" stroke="rgba(0,0,0,0.55)" stroke-width="${(bh * 0.06).toFixed(1)}" filter="url(#inb${u})"/></g>`
+    + `<g clip-path="url(#clip${u})"><path d="${silD}" fill="none" stroke="rgba(0,0,0,0.55)" stroke-width="${(sb * 0.06).toFixed(1)}" filter="url(#inb${u})"/></g>`
     + `<path d="${silD}" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="1.2"/>`
     + `</g>`;
   return { defs, body };
@@ -3916,7 +3917,11 @@ function planPreviewSVG(ski, W, opts) {
   if (o.artwork && o.topsheet && o.topsheet.src) {
     const xs = outline.map(p => mp(p).x), ys = outline.map(p => mp(p).y);
     const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
-    const art = skiArtworkLayer(sil, bx, by, bw, bh, o.topsheet, "pp");
+    // Ski art is one continuous graphic across the pair, so this single ski shows its slice (top band);
+    // a board fills its own frame.
+    const isBoard = ski.mode === "snowboard";
+    const imgB = isBoard ? { x: bx, y: by, w: bw, h: bh } : { x: bx, y: by, w: bw, h: bh * 2.12 };
+    const art = skiArtworkLayer(sil, { x: bx, y: by, w: bw, h: bh }, imgB, o.topsheet, "pp");
     if (art) return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg"><defs>${art.defs}</defs>${art.body}</svg>`;
   }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">`
@@ -3950,13 +3955,17 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand, opts) {
   const rowMapLL = (r) => (len, lat) => ({ x: ox + len * sc, y: cY + rowLat(r, lat) * sc });
   const bcArt = bcOpts.artwork && bcOpts.topsheet && bcOpts.topsheet.src;
   let bcDefs = "";
+  // Combined bbox across all rows — the art fits this once so each ski clips its slice (as the plan view does).
+  let cbx = 1e9, cby = 1e9, cbX = -1e9, cbY = -1e9;
+  if (bcArt && outline.length) { for (let r = 0; r < (pairSkis ? 2 : 1); r++) { const m = rowMapPt(r); outline.forEach(p => { const s = m(p); if (s.x < cbx) cbx = s.x; if (s.y < cby) cby = s.y; if (s.x > cbX) cbX = s.x; if (s.y > cbY) cbY = s.y; }); } }
+  const imgBox = { x: cbx, y: cby, w: cbX - cbx, h: cbY - cby };
   const silhouetteSVG = Array.from({ length: pairSkis ? 2 : 1 }, (_, r) => {
     const mpp = rowMapPt(r);
     const sil = outline.length ? outline.map((p, i) => `${i ? "L" : "M"}${mpp(p).x.toFixed(1)},${mpp(p).y.toFixed(1)}`).join(" ") + " Z" : "";
     if (bcArt && sil) {
       const xs = outline.map(p => mpp(p).x), ys = outline.map(p => mpp(p).y);
       const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
-      const art = skiArtworkLayer(sil, bx, by, bw, bh, bcOpts.topsheet, "bc");
+      const art = skiArtworkLayer(sil, { x: bx, y: by, w: bw, h: bh }, imgBox, bcOpts.topsheet, "bc");
       if (art) { bcDefs += art.defs; return art.body; }
     }
     return (sil ? `<path d="${sil}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>` : "") + topDownDesignSVG(ski, rowMapLL(r), { brass });
@@ -6905,7 +6914,7 @@ function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
   );
 }
 
-function TopsheetDesigner({ ski, C, onClose }) {
+function TopsheetDesigner({ ski, C, onClose, onApply }) {
   const bleed = 10, gap = 12.7;   // print bleed (sheet edge to trim box) and the gap between the two skis
   const L = ski.length;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
@@ -7057,6 +7066,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
   const dup = () => { const l = layers.find(x => x.id === sel); if (!l || l.type === "bg") return; const id = "d" + Date.now(); const clone = { ...l, id, x: l.x + 25, y: l.y + 25 }; if (l.pts) clone.pts = l.pts.map(pt => ({ ...pt })); setLayers(ls => [...ls, clone]); setSel(id); };
   const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-${isBoard ? "board" : "pair"}-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
+  const applyToSki = async () => { setBusy("Applying…"); await new Promise(r => setTimeout(r, 30)); try { const ppm = 150 / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, false); const url = oc.toDataURL("image/png"); if (onApply) onApply(url); setBusy(""); onClose(); } catch (e) { setBusy(""); alert("Couldn't apply the design."); } };
 
   const s = layers.find(l => l.id === sel);
   const inp = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
@@ -7152,6 +7162,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
             <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 4 }}>{outPx.w.toLocaleString()} × {outPx.h.toLocaleString()} px</span>
             <button disabled={!!busy} onClick={() => exportImg("png")} style={{ background: C.heading, color: C.bgDeep, border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{busy || "Export PNG (print-ready)"}</button>
             <button disabled={!!busy} onClick={() => exportImg("jpg")} style={{ background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, padding: "9px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>JPG</button>
+            <button disabled={!!busy} onClick={applyToSki} title="Use this design as the ski's topsheet — shows in the plan view, 3D, build card and design study" style={{ background: C.torch, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>✓ Apply to ski</button>
           </div>
           <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.5 }}>
             <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>PRINT & SEND OUT</div>
@@ -9263,7 +9274,7 @@ export default function App() {
 
           <button onClick={() => setTopsheetOpen(true)} style={{ ...primaryBtn, marginBottom: 6 }}>◨  Open Topsheet Designer</button>
           <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 12, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-            Full pair-template designer — colors, gradients, uploaded art, text & shapes, with a print-ready export (1" bleed) for a topsheet printer. The quick overlay below is just for previewing on the silhouette.
+            Full pair-template designer — colors, gradients, uploaded art, text & shapes, with a print-ready export (1" bleed) for a topsheet printer. When your design is ready, hit <b style={{ color: C.torch }}>Apply to ski</b> inside to use it as the topsheet — it then shows in the plan view, 3D, build card and design study. (Or upload a flat image below to preview one directly.)
           </div>
 
           <input ref={topsheetFileRef} type="file" accept="image/*" style={{ display: "none" }}
@@ -10244,7 +10255,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {topsheetOpen && <TopsheetDesigner ski={ski} C={C} onClose={() => setTopsheetOpen(false)} />}
+      {topsheetOpen && <TopsheetDesigner ski={ski} C={C} onClose={() => setTopsheetOpen(false)} onApply={(src) => setTopsheet(t => ({ ...t, src, name: "Designed topsheet", fit: "cover", scale: 1, offsetX: 0, offsetY: 0, rotation: 0, opacity: 1 }))} />}
       {showToolpath && <ToolpathPreviewModal gcode={camResult.gcode} stats={camResult.stats} onClose={() => setShowToolpath(false)} />}
 
       {previewSvg && (
