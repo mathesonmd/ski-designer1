@@ -156,7 +156,11 @@ const INSERT_MATERIALS = {
   pu:         { name: "PU",            thick: 2.0,  density: 300,  E: 55 },
   hardwood:   { name: "Hardwood",      thick: 2.0,  density: 670,  E: 12000 },
   abs:        { name: "ABS",            thick: 1.5,  density: 1050, E: 2300 },
+  custom:     { name: "Custom",          thick: 0.5,  density: 1500, E: 20000 },
 };
+// Effective properties of a shaped insert — the material defaults, overridden by any per-insert value the
+// builder typed (thickness / density / modulus), so weight and flex use exactly what they set.
+const insertProps = (ins) => { const m = INSERT_MATERIALS[ins.material] || INSERT_MATERIALS.titanal; return { thick: ins.thick != null ? ins.thick : m.thick, density: ins.density != null ? ins.density : m.density, E: ins.E != null ? ins.E : m.E, name: m.name }; };
 // ── Language scaffolding ────────────────────────────────────────────────────────────────────────────────
 // t(id, english) returns the active language's string, falling back to English. Only a small starter set is
 // translated so far; the niche ski vocabulary (sidecut, camber, Voigt bound, and so on) needs native review
@@ -165,7 +169,7 @@ const I18N = {
   en: {},
   es: { "btn.close": "Cerrar", "btn.load": "Cargar", "btn.new": "Nuevo", "btn.newDesign": "Nuevo dise\u00f1o", "btn.save": "Guardar", "designer.board": "Dise\u00f1ador de tablas", "designer.ski": "Dise\u00f1ador de esqu\u00eds", "goto.board": "Ir al dise\u00f1ador de tablas", "goto.ski": "Ir al dise\u00f1ador de esqu\u00eds", "study.capture": "Capturar dise\u00f1o actual", "study.captureMax": "4 variantes (m\u00e1x.)", "study.layup": "LAMINADO", "study.notes": "NOTAS", "study.openReport": "Abrir informe comparativo", "study.print": "Imprimir / Guardar PDF", "study.title": "Estudio de dise\u00f1o", "chart.flexProfile": "Perfil de flexi\u00f3n", "chart.position": "posici\u00f3n (mm)", "chart.softer": "M\u00e1s blando", "chart.stiffer": "M\u00e1s r\u00edgido", "chart.subtitle": "Rigidez a lo largo del esqu\u00ed", "chart.tail": "COLA", "chart.tip": "ESP\u00c1TULA", "chart.underfoot": "CENTRO", "tbl.bend": "flexi\u00f3n en tres puntos", "tbl.core": "N\u00facleo", "tbl.coreThick": "Punta del n\u00facleo / Pat\u00edn / Cola", "tbl.dims": "Esp\u00e1tula / Pat\u00edn / Cola", "tbl.layup": "Laminado", "tbl.length": "Longitud", "tbl.peakEI": "EI m\u00e1ximo", "tbl.radius": "radio de corte lateral", "tbl.weight": "Peso (est.)", "sec.advanced": "Avanzado \u2014 Constantes de materiales", "sec.bom": "Lista de materiales", "sec.buildCard": "Ficha de construcci\u00f3n", "sec.cnc": "Exportar CNC", "sec.designStudy": "Estudio de dise\u00f1o (comparar)", "sec.dimensions": "Dimensiones (mm)", "sec.edgesCore": "Cantos y n\u00facleo", "sec.flex": "An\u00e1lisis de flexi\u00f3n", "sec.gettingStarted": "Primeros pasos", "sec.layup": "Laminado / Materiales", "sec.metalInserts": "Insertos met\u00e1licos (flex)", "sec.presets": "Plantillas", "sec.print": "Imprimir / Plantillas", "sec.sideProfile": "Perfil lateral", "sec.splitboard": "Tabla Splitboard", "sec.stance": "Postura e insertos", "sec.suppliers": "Proveedores de materiales", "sec.symmetry": "Simetr\u00eda", "sec.topsheetArt": "Arte del Topsheet", "sec.views": "Vistas", "study.desc": "Captura el dise\u00f1o actual como variante, aj\u00fastalo, captura de nuevo \u2014 hasta cuatro \u2014 y compara su flexi\u00f3n, peso y n\u00facleo lado a lado, exportando un solo informe. Pensado para estudios comparativos (titanal vs carbono, etc.).", "study.update": "ACTUALIZAR", "study.help": "Haz clic en el nombre de una variante para cargarla en el editor. Haz cambios y luego pulsa Actualizar para guardarlos en esa variante \u2014 nada queda bloqueado.", "study.captureTwo": "Captura al menos dos para comparar.", "adv.desc": "Los m\u00f3dulos y densidades detr\u00e1s de cada c\u00e1lculo. Los cambios se guardan solo en este navegador y afectan a toda la herramienta (flexi\u00f3n, peso, grosor). La mayor\u00eda deber\u00eda dejarlos como est\u00e1n \u2014 est\u00e1n aqu\u00ed para ajustar el modelo a tus propios materiales.", "grp.g1.label": "PREPARAR", "grp.g1.caption": "Empieza un dise\u00f1o o abre uno guardado, y elige c\u00f3mo verlo.", "grp.g2.label": "DISE\u00d1O", "grp.g2.caption": "Da forma al esqu\u00ed \u2014 dimensiones, rocker y camber, n\u00facleo y laminado.", "grp.g3.label": "GR\u00c1FICOS", "grp.g3.caption": "Aplica una imagen al topsheet, previsualiza el par y m\u00edralo en 3D.", "grp.g4.label": "ANALIZAR", "grp.g4.caption": "Revisa el perfil de flexi\u00f3n y una estimaci\u00f3n de materiales y coste.", "grp.g5.label": "EXPORTAR", "grp.g5.caption": "Archivos de corte CNC (DXF/SVG/STL) y una ficha de construcci\u00f3n con tu marca.", "grp.g6.label": "M\u00c1S", "grp.g6.caption": "Proveedores, calculadoras externas y un lugar para enviar comentarios.", "sec.file": "Archivo", "file.designName": "Nombre del dise\u00f1o", "file.untitled": "Dise\u00f1o sin t\u00edtulo", "file.shareLink": "Copiar enlace para compartir", "file.shareNote": "Un enlace que reabre este dise\u00f1o exacto en cualquier navegador. Los gr\u00e1ficos no se incluyen.", "file.saveNote1": "Guarda en un archivo", "file.saveNote2": "en tu ordenador. Los archivos se pueden volver a abrir en cualquier momento y dispositivo. El autoguardado mantiene una copia sin guardar en tu navegador.", "view.editTitle": "Editar la forma", "view.edit1": "Arrastra los nodos redondos en la vista de planta para remodelar y ajustar dimensiones.", "view.edit2": "Arrastra los tiradores de tangente (rombos) en los paneles de zoom de esp\u00e1tula/cola para un control b\u00e9zier fino.", "view.edit3": "Arrastra los tiradores cuadrados de ancho en los contactos para fijar el ancho de esp\u00e1tula/cola.", "view.edit4": "Despl\u00e1zate para hacer zoom, arrastra el espacio vac\u00edo para mover; doble clic para restablecer.", "view.plan": "Planta", "view.analysis": "An\u00e1lisis", "view.prof": "Perfil", "view.core": "N\u00facleo", "view.flex": "Flex", "view.layup": "Capas", "view.pairOn": "Vista en par: S\u00cd", "view.pairOff": "Vista en par: NO", "gs.buildFirstSki": "Construye tu primer esqu\u00ed", "gs.buildFirstBoard": "Construye tu primera tabla", "gs.intro": "Ve de arriba abajo por los paneles de la izquierda. Cada paso de abajo corresponde a un panel.", "gs.t.preset": "Elige una plantilla", "gs.sb1b": "Abre Plantillas y elige una tabla de inicio \u2014 True Twin, Dir. Twin o Directional \u2014 o explora la base de datos como referencia. Rellena dimensiones razonables para ajustar.", "gs.t.dims": "Fija las dimensiones", "gs.sb2b": "En Dimensiones, fija la longitud total y el ancho de esp\u00e1tula / pat\u00edn / cola. La vista de planta se actualiza en vivo.", "gs.t.tipTailSb": "Forma de esp\u00e1tula y cola", "gs.sb3b": "En el panel de Snowboard elige Sim\u00e9trica (true twin, ambos extremos iguales) o Asim\u00e9trica (direccional). Da forma a la esp\u00e1tula arrastrando los nodos en la vista de planta; en una twin la cola la sigue. En una tabla ambos lados siempre se reflejan.", "gs.t.stance": "Postura, insertos y tipo de tabla", "gs.sb4b": "Fija el ancho de postura, el retroceso y el patr\u00f3n de insertos (2x4 / 4x4 / canal). Elige S\u00f3lida o Splitboard \u2014 Splitboard a\u00f1ade los dos cantos interiores a los materiales, dibuja el montaje del herraje (fijaciones, brackets de traves\u00eda, ganchos de esp\u00e1tula/cola) en el plano y muestra una lista de construcci\u00f3n.", "gs.t.sideProfile": "Perfil lateral", "gs.sb5b": "Fija el camber y la elevaci\u00f3n de esp\u00e1tula / cola \u2014 la l\u00ednea de rocker que sigue tu molde de prensa. El camber multizona est\u00e1 para tablas de triple camber.", "gs.t.layupFlex": "Laminado y flexi\u00f3n", "gs.layupFlexB": "En Laminado / Materiales, la pila de capas es tu construcci\u00f3n de arriba abajo \u2014 cambia el material de cualquier capa desde su desplegable, reordena las telas, fija sus gramajes, mezcla el n\u00facleo o a\u00f1ade insertos de espuma y metal. El panel de Flexi\u00f3n se actualiza en vivo; cal\u00edbralo con una flexi\u00f3n de prueba real si la tienes.", "gs.t.printCut": "Imprimir o cortar", "gs.printCutB": "\u00bfSin CNC? Imprimir / Plantillas da un plano + perfil a escala 1:1 en mosaico para construir una plantilla a mano. Con CNC, usa Exportar CNC (DXF / SVG / STL) o el espacio CAM para el G-code.", "gs.sk1b": "Abre Plantillas y elige una forma de inicio (All-Mtn es un primer esqu\u00ed seguro), o explora la base de datos como referencia. Rellena dimensiones razonables para ajustar.", "gs.sk2b": "En Dimensiones, fija la longitud total, el ancho de esp\u00e1tula / pat\u00edn / cola, la longitud de esp\u00e1tula / cola y el radio de corte. La vista de planta se actualiza en vivo.", "gs.t.tipTailSki": "Da forma a esp\u00e1tula y cola", "gs.sk3b": "Arrastra los nodos redondos en la vista de planta para mover contactos y anchos; arrastra los tiradores en forma de rombo en los paneles de zoom de esp\u00e1tula / cola para afinar la curva. Despl\u00e1zate para zoom, arrastra para mover.", "gs.sk4b": "Fija el camber y la elevaci\u00f3n de esp\u00e1tula / cola \u2014 la l\u00ednea de rocker que sigue tu molde de prensa. Tambi\u00e9n hay camber multizona y un canto serrado.", "gs.t.checkFlex": "Revisa la flexi\u00f3n", "gs.sk6b": "Lee la valoraci\u00f3n de flexi\u00f3n. Ajusta el grosor del n\u00facleo, el ancho o los materiales hasta que ruede bien para el esquiador.", "gs.matchSki": "Reproducir un esqu\u00ed publicado", "gs.matchBoard": "Reproducir una tabla publicada", "gs.matchIntro": "Dos interruptores te permiten reproducir un esqu\u00ed real a partir de su ficha t\u00e9cnica \u2014 porque en un esqu\u00ed real el radio de corte lateral y el perfil de rocker describen geometr\u00edas distintas, y no se pueden igualar ambos con un solo juego de n\u00fameros.", "gs.sidecutLabel": "El radio de corte \"ajusta\" (Dimensiones):", "gs.sidecutDesc": "elige qu\u00e9 cede cuando escribes un radio.", "gs.waist": "Pat\u00edn", "gs.waistDesc": "\u2014 mantiene los contactos y mueve el pat\u00edn. Bueno para dise\u00f1ar desde cero.", "gs.tipTailLbl": "Esp\u00e1tula/Cola", "gs.tipTailD1": "\u2014 mantiene todos los anchos (incl. pat\u00edn) y mueve los puntos de contacto para alcanzar el radio. \u00dasalo para conservar a la vez un pat\u00edn", "gs.and": "y", "gs.tipTailD2": "un radio publicados.", "gs.rockerLabel": "Enlace de rocker (Perfil lateral):", "gs.rockerDesc": "controla si el arranque del rocker sigue los puntos de contacto.", "gs.linked": "Enlazado", "gs.linkedDesc": "\u2014 el rocker empieza en el contacto (estilo Snocad). Editar el % de rocker mueve los contactos y el radio. Sencillo.", "gs.unlinked": "Sin enlazar", "gs.unlinkedDesc": "\u2014 el arranque del rocker es independiente y queda por dentro del contacto. Editar el % de rocker cambia solo el perfil lateral; los contactos y el radio no se mueven.", "gs.recipe": "Receta para reproducir una ficha: introduce la longitud + 3 anchos, pon \u00abR ajusta\u00bb \u2192 Esp\u00e1tula/Cola y escribe el radio, luego pon rocker \u2192 Sin enlazar e introduce el % de rocker publicado. Todos los n\u00fameros se mantienen a la vez.", "gs.saveOften": "Guarda a menudo.", "gs.saveOften1": "Usa Guardar en la cabecera (o el panel Archivo) para conservar un archivo", "gs.saveOften2": ". No se pierde nada si cierras la pesta\u00f1a \u2014 el autoguardado mantiene una copia en tu navegador.", "gs.next": "\u00bfQu\u00e9 viene despu\u00e9s?", "gs.next1": "Corta el contorno y talla el afinado del n\u00facleo \u2014 con CNC desde el espacio CAM o las exportaciones DXF/STL, o a mano desde la impresi\u00f3n 1:1 en mosaico \u2014 y luego pr\u00e9nsalo en un molde que siga tu perfil lateral.", "gs.nextSplit": "Para una splitboard, corta la tabla acabada por la l\u00ednea central y monta el herraje de split seg\u00fan el montaje mostrado en el plano.", "gs.next2": "Consulta Herramientas externas para notas de corte y prensado.", "presets.browseBoard": "Explorar base de datos de tablas", "presets.browseSki": "Explorar base de datos de esqu\u00eds", "presets.ghost": "Fantasma (solo dimensiones):", "presets.clear": "borrar", "presets.template": "O empieza desde una plantilla:", "dim.length": "Longitud", "dim.noseW": "A. pala", "dim.tipW": "A. esp\u00e1tula", "dim.waist": "Pat\u00edn", "dim.tailW": "A. cola", "dim.noseLen": "L. pala", "dim.tipLen": "L. esp\u00e1tula", "dim.tailLen": "L. cola", "dim.waistPos": "Pos. pat\u00edn", "dim.bumps": "Ondas (n\u00ba)", "dim.bumpDepth": "Prof. onda (mm)", "dim.span": "tramo", "dim.fullLength": "longitud total", "dim.waistHelpFull": "0.5 = centro geom\u00e9trico del esqu\u00ed (fracci\u00f3n de la longitud total).", "dim.waistHelpSpan": "0.5 = punto medio entre los contactos (fracci\u00f3n del canto efectivo).", "dim.serrated": "CANTO SERRADO (ondulado)", "state.on": " \u00b7 S\u00cd", "dim.serratedHelp": "Una onda en el corte lateral entre los contactos para m\u00e1s agarre, difuminada hasta fundirse con el canto efectivo en cada extremo. C\u00f3rtala con la fresadora; una cuchilla de arrastre redondea cualquier onda m\u00e1s ajustada que el desfase de su hoja.", "dim.asymmetric": "ASIM\u00c9TRICO", "state.advanced": " (avanzado)", "dim.diffRadii": "Radios de corte distintos", "dim.diffEdges": "Cantos efectivos distintos", "dim.waistOut": "Pat\u00edn \u25b2 EXTERIOR", "dim.waistIn": "Pat\u00edn \u25bc INTERIOR", "dim.outEdge": "\u25b2 canto EXTERIOR", "dim.eff": "efect.", "dim.inEdge": "\u25bc canto INTERIOR", "dim.asymHelp": "\u25b2 exterior = canto +x, \u25bc interior = canto \u2212x. Ambos modos de corte de base (envolvente completo y por contacto) siguen cada canto de forma independiente, por lo que los recortes tambi\u00e9n son asim\u00e9tricos." },
   fr: { "designer.ski": "Concepteur de skis", "designer.board": "Concepteur de snowboards", "goto.board": "Aller au concepteur de snowboards", "goto.ski": "Aller au concepteur de skis", "sec.gettingStarted": "Pour commencer", "study.title": "\u00c9tude de conception", "chart.flexProfile": "Profil de flexion", "chart.subtitle": "Rigidit\u00e9 sur la longueur du ski", "chart.stiffer": "Plus rigide", "chart.softer": "Plus souple", "chart.tail": "TALON", "chart.underfoot": "PATIN", "chart.tip": "SPATULE", "chart.position": "position (mm)", "tbl.length": "Longueur", "tbl.dims": "Spatule / Patin / Talon", "tbl.core": "Noyau", "tbl.layup": "Stratifi\u00e9", "tbl.weight": "Poids (est.)", "study.layup": "STRATIFI\u00c9", "study.notes": "NOTES", "sec.presets": "Pr\u00e9r\u00e9glages", "sec.dimensions": "Dimensions (mm)", "sec.sideProfile": "Profil lat\u00e9ral", "sec.symmetry": "Sym\u00e9trie", "sec.stance": "Position & inserts", "sec.edgesCore": "Carres & noyau", "sec.layup": "Stratifi\u00e9 / Mat\u00e9riaux", "sec.metalInserts": "Inserts m\u00e9talliques (flex)", "sec.flex": "Analyse de flexion", "sec.print": "Imprimer / Gabarits", "sec.cnc": "Export CNC", "sec.buildCard": "Fiche de construction", "sec.designStudy": "\u00c9tude de conception (comparer)", "sec.bom": "Nomenclature", "sec.advanced": "Avanc\u00e9 \u2014 Constantes de mat\u00e9riaux", "sec.suppliers": "Fournisseurs de mat\u00e9riaux", "sec.views": "Vues", "btn.save": "Enregistrer", "btn.load": "Charger", "btn.new": "Nouveau", "btn.newDesign": "Nouveau design", "btn.close": "Fermer", "study.capture": "Capturer le design actuel", "study.captureMax": "4 variantes (max)", "study.openReport": "Ouvrir le rapport comparatif", "study.print": "Imprimer / Enregistrer PDF" },
-  ru: { "designer.ski": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u043b\u044b\u0436", "designer.board": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u043e\u0432", "goto.board": "\u041a \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u0430\u043c", "goto.ski": "\u041a \u043b\u044b\u0436\u0430\u043c", "sec.gettingStarted": "\u041d\u0430\u0447\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u044b", "study.title": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430", "chart.flexProfile": "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "chart.subtitle": "\u0416\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c \u043f\u043e \u0434\u043b\u0438\u043d\u0435 \u043b\u044b\u0436\u0438", "chart.stiffer": "\u0416\u0451\u0441\u0442\u0447\u0435", "chart.softer": "\u041c\u044f\u0433\u0447\u0435", "chart.tail": "\u041f\u042f\u0422\u041a\u0410", "chart.underfoot": "\u0426\u0415\u041d\u0422\u0420", "chart.tip": "\u041d\u041e\u0421\u041e\u041a", "chart.position": "\u043f\u043e\u0437\u0438\u0446\u0438\u044f (\u043c\u043c)", "tbl.length": "\u0414\u043b\u0438\u043d\u0430", "tbl.dims": "\u041d\u043e\u0441\u043e\u043a / \u0422\u0430\u043b\u0438\u044f / \u041f\u044f\u0442\u043a\u0430", "tbl.core": "\u0421\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "tbl.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442", "tbl.weight": "\u0412\u0435\u0441 (\u043e\u0446.)", "study.layup": "\u041b\u0410\u041c\u0418\u041d\u0410\u0422", "study.notes": "\u0417\u0410\u041c\u0415\u0422\u041a\u0418", "sec.presets": "\u041f\u0440\u0435\u0441\u0435\u0442\u044b", "sec.dimensions": "\u0420\u0430\u0437\u043c\u0435\u0440\u044b (\u043c\u043c)", "sec.sideProfile": "\u0411\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c", "sec.symmetry": "\u0421\u0438\u043c\u043c\u0435\u0442\u0440\u0438\u044f", "sec.stance": "\u0421\u0442\u043e\u0439\u043a\u0430 \u0438 \u0432\u0441\u0442\u0430\u0432\u043a\u0438", "sec.edgesCore": "\u041a\u0430\u043d\u0442\u044b \u0438 \u0441\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "sec.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442 / \u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u044b", "sec.metalInserts": "\u041c\u0435\u0442\u0430\u043b\u043b\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0432\u0441\u0442\u0430\u0432\u043a\u0438 (\u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c)", "sec.flex": "\u0410\u043d\u0430\u043b\u0438\u0437 \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "sec.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0428\u0430\u0431\u043b\u043e\u043d\u044b", "sec.cnc": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 \u0427\u041f\u0423", "sec.buildCard": "\u041a\u0430\u0440\u0442\u0430 \u0441\u0431\u043e\u0440\u043a\u0438", "sec.designStudy": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430 (\u0441\u0440\u0430\u0432\u043d\u0438\u0442\u044c)", "sec.bom": "\u0421\u043f\u0435\u0446\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.advanced": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u043d\u044b\u0435 \u2014 \u041a\u043e\u043d\u0441\u0442\u0430\u043d\u0442\u044b \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.suppliers": "\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0438 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.views": "\u0412\u0438\u0434\u044b", "btn.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "btn.load": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c", "btn.new": "\u041d\u043e\u0432\u044b\u0439", "btn.newDesign": "\u041d\u043e\u0432\u044b\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "btn.close": "\u0417\u0430\u043a\u0440\u044b\u0442\u044c", "study.capture": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "study.captureMax": "4 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u0430 (\u043c\u0430\u043a\u0441.)", "study.openReport": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043e\u0442\u0447\u0451\u0442 \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u044f", "study.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c PDF", "tbl.bend": "\u0418\u0441\u043f\u044b\u0442\u0430\u043d\u0438\u0435 \u043d\u0430 \u0442\u0440\u0451\u0445\u0442\u043e\u0447\u0435\u0447\u043d\u044b\u0439 \u0438\u0437\u0433\u0438\u0431", "tbl.peakEI": "\u041c\u0430\u043a\u0441\u0438\u043c\u0430\u043b\u044c\u043d\u0430\u044f \u0438\u0437\u0433\u0438\u0431\u043d\u0430\u044f \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c (EI)" },
+  ru: { "designer.ski": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u043b\u044b\u0436", "designer.board": "\u041a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u043e\u0440 \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u043e\u0432", "goto.board": "\u041a \u0441\u043d\u043e\u0443\u0431\u043e\u0440\u0434\u0430\u043c", "goto.ski": "\u041a \u043b\u044b\u0436\u0430\u043c", "sec.gettingStarted": "\u041d\u0430\u0447\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442\u044b", "study.title": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430", "chart.flexProfile": "\u041f\u0440\u043e\u0444\u0438\u043b\u044c \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "chart.subtitle": "\u0416\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c \u043f\u043e \u0434\u043b\u0438\u043d\u0435 \u043b\u044b\u0436\u0438", "chart.stiffer": "\u0416\u0451\u0441\u0442\u0447\u0435", "chart.softer": "\u041c\u044f\u0433\u0447\u0435", "chart.tail": "\u041f\u042f\u0422\u041a\u0410", "chart.underfoot": "\u0426\u0415\u041d\u0422\u0420", "chart.tip": "\u041d\u041e\u0421\u041e\u041a", "chart.position": "\u043f\u043e\u0437\u0438\u0446\u0438\u044f (\u043c\u043c)", "tbl.length": "\u0414\u043b\u0438\u043d\u0430", "tbl.dims": "\u041d\u043e\u0441\u043e\u043a / \u0422\u0430\u043b\u0438\u044f / \u041f\u044f\u0442\u043a\u0430", "tbl.core": "\u0421\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "tbl.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442", "tbl.weight": "\u0412\u0435\u0441 (\u043e\u0446.)", "study.layup": "\u041b\u0410\u041c\u0418\u041d\u0410\u0422", "study.notes": "\u0417\u0410\u041c\u0415\u0422\u041a\u0418", "sec.presets": "\u041f\u0440\u0435\u0441\u0435\u0442\u044b", "sec.dimensions": "\u0420\u0430\u0437\u043c\u0435\u0440\u044b (\u043c\u043c)", "sec.sideProfile": "\u0411\u043e\u043a\u043e\u0432\u043e\u0439 \u043f\u0440\u043e\u0444\u0438\u043b\u044c", "sec.symmetry": "\u0421\u0438\u043c\u043c\u0435\u0442\u0440\u0438\u044f", "sec.stance": "\u0421\u0442\u043e\u0439\u043a\u0430 \u0438 \u0432\u0441\u0442\u0430\u0432\u043a\u0438", "sec.edgesCore": "\u041a\u0430\u043d\u0442\u044b \u0438 \u0441\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a", "sec.layup": "\u041b\u0430\u043c\u0438\u043d\u0430\u0442 / \u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u044b", "sec.metalInserts": "\u041c\u0435\u0442\u0430\u043b\u043b\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u0432\u0441\u0442\u0430\u0432\u043a\u0438 (\u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c)", "sec.flex": "\u0410\u043d\u0430\u043b\u0438\u0437 \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u0438", "sec.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0428\u0430\u0431\u043b\u043e\u043d\u044b", "sec.cnc": "\u042d\u043a\u0441\u043f\u043e\u0440\u0442 \u0427\u041f\u0423", "sec.buildCard": "\u041a\u0430\u0440\u0442\u0430 \u0441\u0431\u043e\u0440\u043a\u0438", "sec.designStudy": "\u0418\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u0434\u0438\u0437\u0430\u0439\u043d\u0430 (\u0441\u0440\u0430\u0432\u043d\u0438\u0442\u044c)", "sec.bom": "\u0421\u043f\u0435\u0446\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.advanced": "\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u043d\u044b\u0435 \u2014 \u041a\u043e\u043d\u0441\u0442\u0430\u043d\u0442\u044b \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.suppliers": "\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0438 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432", "sec.views": "\u0412\u0438\u0434\u044b", "btn.save": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c", "btn.load": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c", "btn.new": "\u041d\u043e\u0432\u044b\u0439", "btn.newDesign": "\u041d\u043e\u0432\u044b\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "btn.close": "\u0417\u0430\u043a\u0440\u044b\u0442\u044c", "study.capture": "\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0434\u0438\u0437\u0430\u0439\u043d", "study.captureMax": "4 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u0430 (\u043c\u0430\u043a\u0441.)", "study.openReport": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043e\u0442\u0447\u0451\u0442 \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u044f", "study.print": "\u041f\u0435\u0447\u0430\u0442\u044c / \u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c PDF", "tbl.bend": "\u0418\u0441\u043f\u044b\u0442\u0430\u043d\u0438\u0435 \u043d\u0430 \u0442\u0440\u0451\u0445\u0442\u043e\u0447\u0435\u0447\u043d\u044b\u0439 \u0438\u0437\u0433\u0438\u0431", "tbl.peakEI": "\u041c\u0430\u043a\u0441\u0438\u043c\u0430\u043b\u044c\u043d\u0430\u044f \u0438\u0437\u0433\u0438\u0431\u043d\u0430\u044f \u0436\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c (EI)", "sec.topsheetArt": "\u0413\u0440\u0430\u0444\u0438\u043a\u0430 \u0442\u043e\u043f\u0448\u0438\u0442\u0430", "sec.splitboard": "\u0421\u043f\u043b\u0438\u0442\u0431\u043e\u0440\u0434", "tbl.radius": "\u0420\u0430\u0434\u0438\u0443\u0441 \u0441\u0430\u0439\u0434\u043a\u0430\u0442\u0430 \u043b\u044b\u0436", "tbl.coreThick": "\u0422\u043e\u043b\u0449\u0438\u043d\u0430 \u043d\u043e\u0441\u0430 / \u0442\u0430\u043b\u0438\u0438 / \u0445\u0432\u043e\u0441\u0442\u0430 \u0441\u0435\u0440\u0434\u0435\u0447\u043d\u0438\u043a\u0430", "tbl.sidewall": "\u0411\u043e\u043a\u043e\u0432\u0438\u043d\u0430", "tbl.inserts": "\u0412\u0441\u0442\u0430\u0432\u043a\u0438", "tbl.stiffness": "\u0416\u0451\u0441\u0442\u043a\u043e\u0441\u0442\u044c (\u043e\u0446\u0435\u043d\u043a\u0430)" },
   ja: { "designer.ski": "\u30b9\u30ad\u30fc\u30c7\u30b6\u30a4\u30ca\u30fc", "designer.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u30c7\u30b6\u30a4\u30ca\u30fc", "goto.board": "\u30b9\u30ce\u30fc\u30dc\u30fc\u30c9\u3078", "goto.ski": "\u30b9\u30ad\u30fc\u3078", "sec.gettingStarted": "\u306f\u3058\u3081\u306b", "study.title": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3", "chart.flexProfile": "\u30d5\u30ec\u30c3\u30af\u30b9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "chart.subtitle": "\u30b9\u30ad\u30fc\u5168\u9577\u306e\u525b\u6027", "chart.stiffer": "\u786c\u3044", "chart.softer": "\u67d4\u3089\u304b\u3044", "chart.tail": "\u30c6\u30fc\u30eb", "chart.underfoot": "\u8db3\u4e0b", "chart.tip": "\u30c8\u30c3\u30d7", "chart.position": "\u4f4d\u7f6e (mm)", "tbl.length": "\u9577\u3055", "tbl.dims": "\u30c8\u30c3\u30d7 / \u30a6\u30a8\u30b9\u30c8 / \u30c6\u30fc\u30eb", "tbl.core": "\u30b3\u30a2", "tbl.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "tbl.weight": "\u91cd\u91cf (\u63a8\u5b9a)", "study.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7", "study.notes": "\u30e1\u30e2", "sec.presets": "\u30d7\u30ea\u30bb\u30c3\u30c8", "sec.dimensions": "\u5bf8\u6cd5 (mm)", "sec.sideProfile": "\u30b5\u30a4\u30c9\u30d7\u30ed\u30d5\u30a1\u30a4\u30eb", "sec.symmetry": "\u5bfe\u79f0", "sec.stance": "\u30b9\u30bf\u30f3\u30b9\u3068\u30a4\u30f3\u30b5\u30fc\u30c8", "sec.edgesCore": "\u30a8\u30c3\u30b8\u3068\u30b3\u30a2", "sec.layup": "\u30ec\u30a4\u30a2\u30c3\u30d7 / \u6750\u6599", "sec.metalInserts": "\u30e1\u30bf\u30eb\u30a4\u30f3\u30b5\u30fc\u30c8 (\u30d5\u30ec\u30c3\u30af\u30b9)", "sec.flex": "\u30d5\u30ec\u30c3\u30af\u30b9\u89e3\u6790", "sec.print": "\u5370\u5237 / \u30c6\u30f3\u30d7\u30ec\u30fc\u30c8", "sec.cnc": "CNC\u66f8\u304d\u51fa\u3057", "sec.buildCard": "\u30d3\u30eb\u30c9\u30ab\u30fc\u30c9", "sec.designStudy": "\u8a2d\u8a08\u30b9\u30bf\u30c7\u30a3 (\u6bd4\u8f03)", "sec.bom": "\u90e8\u54c1\u8868", "sec.advanced": "\u8a73\u7d30 \u2014 \u6750\u6599\u5b9a\u6570", "sec.suppliers": "\u6750\u6599\u30b5\u30d7\u30e9\u30a4\u30e4\u30fc", "sec.views": "\u30d3\u30e5\u30fc", "btn.save": "\u4fdd\u5b58", "btn.load": "\u8aad\u307f\u8fbc\u307f", "btn.new": "\u65b0\u898f", "btn.newDesign": "\u65b0\u898f\u30c7\u30b6\u30a4\u30f3", "btn.close": "\u9589\u3058\u308b", "study.capture": "\u73fe\u5728\u306e\u30c7\u30b6\u30a4\u30f3\u3092\u53d6\u308a\u8fbc\u3080", "study.captureMax": "4\u30d0\u30ea\u30a2\u30f3\u30c8 (\u6700\u5927)", "study.openReport": "\u6bd4\u8f03\u30ec\u30dd\u30fc\u30c8\u3092\u958b\u304f", "study.print": "\u5370\u5237 / PDF\u4fdd\u5b58" },
 };
 const LANGS = [["en", "EN"], ["es", "ES"], ["fr", "FR"], ["ru", "RU"], ["ja", "JA"]];
@@ -431,7 +435,12 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "0.9";
 
-function saveDesignToFile(ski, study) {
+// The Topsheet Designer's default layer stack (just a solid-dark background). A factory so each reset gets a
+// fresh object rather than a shared reference.
+const DEFAULT_TS_LAYERS = () => [{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }];
+const _tsLayersHaveContent = (ls) => Array.isArray(ls) && ls.length > 0 && (ls.length > 1 || ls[0].type !== "bg" || ls[0].kind === "gradient" || ls[0].color !== "#141414");
+
+function saveDesignToFile(ski, study, topsheet, tsLayers) {
   const envelope = {
     format: BCSKI_FORMAT,
     formatVersion: BCSKI_FORMAT_VERSION,
@@ -440,6 +449,9 @@ function saveDesignToFile(ski, study) {
     designName: ski.designName || "Untitled Design",
     ski: ski,
     study: (study && study.variants && study.variants.length) ? study : null,
+    topsheet: (topsheet && topsheet.src) ? topsheet : null,
+    // Full editable Designer stack (image layers stored as data URLs; the decoded <img> is dropped).
+    topsheetLayers: _tsLayersHaveContent(tsLayers) ? tsLayers.map(l => (l.type === "img" ? { ...l, img: undefined } : l)) : null,
   };
   const json = JSON.stringify(envelope, null, 2);
   const safeName = (ski.designName || "untitled").replace(/[^a-z0-9-]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "");
@@ -478,6 +490,8 @@ function parseDesignFile(jsonText) {
     return { ok: false, error: "File is missing ski data." };
   }
   const study = (parsed.study && Array.isArray(parsed.study.variants)) ? parsed.study : null;
+  const topsheet = (parsed.topsheet && parsed.topsheet.src) ? parsed.topsheet : null;
+  const topsheetLayers = (Array.isArray(parsed.topsheetLayers) && parsed.topsheetLayers.length) ? parsed.topsheetLayers : null;
   // Migration hook for future format versions:
   let ski = parsed.ski;
   const newerFile = parsed.formatVersion > BCSKI_FORMAT_VERSION;
@@ -534,11 +548,11 @@ function parseDesignFile(jsonText) {
 
   if (newerFile) {
     // Newer file than this app knows about. Loaded above with defaults backfilled; warn the caller.
-    return { ok: true, ski, study, warning: `This design was saved by a newer version of the designer. It loaded, but a field or two may not be recognized — update the app if something looks off.` };
+    return { ok: true, ski, study, topsheet, topsheetLayers, warning: `This design was saved by a newer version of the designer. It loaded, but a field or two may not be recognized — update the app if something looks off.` };
   }
   // Ensure designName exists (older files may not have it)
   if (!ski.designName) ski.designName = parsed.designName || "Loaded Design";
-  return { ok: true, ski, study };
+  return { ok: true, ski, study, topsheet, topsheetLayers };
 }
 
 function loadDesignFromFile(file) {
@@ -673,8 +687,8 @@ function insertLayersAt(ski, pos) {
     const a = ins.posStart != null ? ins.posStart : 0.32, b0 = ins.posEnd != null ? ins.posEnd : 0.68;
     const s = Math.min(a, b0), e = Math.max(a, b0);
     if (pos < s || pos > e || e <= s) continue;
-    const im = INSERT_MATERIALS[ins.material] || INSERT_MATERIALS.titanal;
-    const t = ins.thick != null ? ins.thick : im.thick, E = im.E || 40000;
+    const ip = insertProps(ins);
+    const t = ip.thick, E = ip.E || 40000;
     const f = (pos - s) / (e - s);
     const wT = ins.wTail != null ? ins.wTail : 36, wW = ins.wWaist != null ? ins.wWaist : 56, wTp = ins.wTip != null ? ins.wTip : 36;
     let w; if (f <= 0.5) { const u = f / 0.5, sm = u * u * (3 - 2 * u); w = wT + sm * (wW - wT); } else { const u = (f - 0.5) / 0.5, sm = u * u * (3 - 2 * u); w = wW + sm * (wTp - wW); }
@@ -792,9 +806,9 @@ function computeBOM(ski) {
       const pl = insertPolys(ski, ins);
       let a = Math.abs(_polyArea(pl.outer));
       if (pl.inner) a -= Math.abs(_polyArea(pl.inner));   // mm^2 (frame is hollow)
-      const im = INSERT_MATERIALS[ins.material] || INSERT_MATERIALS.titanal;
-      const thick = ins.thick != null ? ins.thick : im.thick;
-      const dens = (im.density || 2830) / 1e6;   // kg/m^3 -> g/mm^3
+      const ip = insertProps(ins);
+      const thick = ip.thick;
+      const dens = (ip.density || 2830) / 1e6;   // kg/m^3 -> g/mm^3
       insertMassKg += (a * thick * dens) / 1000;
       insertAreaM2 += a / 1e6;
     } catch (e) {}
@@ -4510,6 +4524,16 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     if ((ski.coreInset || 0) > 0 || ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
       const loop = applyVCutToCore(ski);   // X=length space; swap to plan (skiX=y, skiY=x)
       const traceCore = () => { ctx.beginPath(); loop.forEach((p, i) => { const s = toMain(p.y, p.x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); }); ctx.closePath(); };
+      // Sidewall material: the strip between the inset core rail and the outline, running contact→contact
+      // (past the contacts it's tip/tail filler, not sidewall). Shown so you can see the wall as you set it.
+      const _sw = ski.layup && ski.layup.sidewall;
+      if ((ski.coreInset || 0) > 0 && _sw && _sw.mat && _sw.mat !== "none") {
+        const _tcx = ski.length - ski.tipLength, _tacx = ski.tailLength, _ci = ski.coreInset;
+        const _hwF = x => Math.max(0.5, getWidthAtPos(ski, x / ski.length) / 2);
+        const _hwI = x => Math.max(0.3, getWidthAtPos(ski, x / ski.length) / 2 - _ci);
+        const _strip = (sgn) => { ctx.beginPath(); const N = 70; for (let i = 0; i <= N; i++) { const x = _tacx + (_tcx - _tacx) * (i / N); const s = toMain(sgn * _hwF(x), x); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); } for (let i = N; i >= 0; i--) { const x = _tacx + (_tcx - _tacx) * (i / N); const s = toMain(sgn * _hwI(x), x); ctx.lineTo(s.x, s.y); } ctx.closePath(); ctx.fill(); };
+        ctx.save(); ctx.fillStyle = "rgba(232,232,238,0.5)"; _strip(1); _strip(-1); ctx.restore();
+      }
       // Wood fill + lengthwise grain, clipped to the core. The sidewall offset is the plain gap between this
       // and the outline (like snoCAD's solid-white sidewalls).
       ctx.save(); traceCore(); ctx.fillStyle = "rgba(196,146,88,0.22)"; ctx.fill(); ctx.clip();
@@ -6920,7 +6944,7 @@ function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
   );
 }
 
-function TopsheetDesigner({ ski, C, onClose, onApply }) {
+function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   const bleed = 10, gap = 12.7;   // print bleed (sheet edge to trim box) and the gap between the two skis
   const L = ski.length;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
@@ -6935,8 +6959,18 @@ function TopsheetDesigner({ ski, C, onClose, onApply }) {
   const W = 2 * latMax, tL = L + 2 * (bleed + margin);
   const tW = isBoard ? (W + 2 * (bleed + margin)) : (2 * W + gap + 2 * (bleed + margin));
   const skiYc = isBoard ? [bleed + margin + W / 2] : [bleed + margin + W / 2, bleed + margin + W + gap + W / 2];
-  const [layers, setLayers] = useState([{ id: "bg", type: "bg", kind: "solid", color: "#141414", c2: "#3a3a3a", angle: 0, gx: 0.5, gy: 0.5 }]);
   const [sel, setSel] = useState("bg");
+  // Image layers persist as data-URL `src`; decode a real <img> for any that don't have one yet (e.g. just
+  // loaded from a file). Guarded so it doesn't re-decode in a loop.
+  useEffect(() => {
+    (layers || []).forEach(l => {
+      if (l.type === "img" && l.src && (!l.img || l.img.__bcsrc !== l.src)) {
+        const img = new Image();
+        img.onload = () => { img.__bcsrc = l.src; setLayers(ls => ls.map(x => (x.id === l.id ? { ...x, img } : x))); };
+        img.src = l.src;
+      }
+    });
+  }, [layers, setLayers]);
   const [dpi, setDpi] = useState(150);
   const [guides, setGuides] = useState(true);
   const [crop, setCrop] = useState(true);
@@ -7061,7 +7095,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply }) {
   const onWheel = e => { e.preventDefault(); const p = ptr(e), before = toMM(p.x, p.y); const nz = Math.max(1, Math.min(12, zoom * (1 - e.deltaY * 0.0015))); const neff = fit * nz; setZoom(nz); setPan({ x: (p.x - before.x * neff) - (box.w - tL * neff) / 2, y: (p.y - before.y * neff) - (box.h - tW * neff) / 2 }); };
   const finishPen = closed => { if (penAnchors.length >= 2) { let a = 1e9, b = -1e9, c = 1e9, d = -1e9; penAnchors.forEach(p => { a = Math.min(a, p.x); b = Math.max(b, p.x); c = Math.min(c, p.y); d = Math.max(d, p.y); }); const cx = (a + b) / 2, cy = (c + d) / 2, id = "p" + Date.now(); setLayers(ls => [...ls, { id, type: "shape", shape: "path", pts: penAnchors.map(p => ({ x: p.x - cx, y: p.y - cy, ix: p.ix, iy: p.iy, ox: p.ox, oy: p.oy })), closed: !!closed, x: cx, y: cy, color: "#e8552a", fill: !!closed, stroke: closed ? 0 : 4, strokeColor: "#000", rot: 0, opacity: 1 }]); setSel(id); } setPenAnchors([]); setPenCur(null); setMode("select"); };
 
-  const addImage = file => { const id = "img" + Date.now(); const img = new Image(); img.onload = () => setLayers(ls => [...ls, { id, type: "img", img, x: tL / 2, y: tW / 2, wmm: Math.min(tL, tW * 1.5) * 0.4, rot: 0, opacity: 1 }]); img.src = URL.createObjectURL(file); setSel(id); };
+  const addImage = file => { const id = "img" + Date.now(); const reader = new FileReader(); reader.onload = () => { const src = reader.result; const img = new Image(); img.onload = () => { img.__bcsrc = src; setLayers(ls => [...ls, { id, type: "img", src, img, x: tL / 2, y: tW / 2, wmm: Math.min(tL, tW * 1.5) * 0.4, rot: 0, opacity: 1 }]); setSel(id); }; img.src = src; }; reader.readAsDataURL(file); };
   const addText = () => { const id = "t" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: "BLACK CHAPEL", x: tL / 2, y: tW / 2, size: 60, color: "#F0EDE4", font: fonts[0], bold: true, rot: 0, opacity: 1 }]); setSel(id); };
   const addBootLine = () => { const id = "boot" + Date.now(); setLayers(ls => [...ls, { id, type: "bootline", pos: bootPos, color: "#ffffff", weight: 1.5, tickSpacing: 20, showTicks: true, opacity: 1 }]); setSel(id); };
   const dimLine = () => `${Math.round(L)} \u00b7 ${Math.round(ski.tipWidth)}-${Math.round(ski.waistWidth)}-${Math.round(ski.tailWidth)} mm`;
@@ -7072,7 +7106,11 @@ function TopsheetDesigner({ ski, C, onClose, onApply }) {
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
   const dup = () => { const l = layers.find(x => x.id === sel); if (!l || l.type === "bg") return; const id = "d" + Date.now(); const clone = { ...l, id, x: l.x + 25, y: l.y + 25 }; if (l.pts) clone.pts = l.pts.map(pt => ({ ...pt })); setLayers(ls => [...ls, clone]); setSel(id); };
   const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-${isBoard ? "board" : "pair"}-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
-  const applyToSki = async () => { setBusy("Applying…"); await new Promise(r => setTimeout(r, 30)); try { const ppm = 150 / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, false); const url = oc.toDataURL("image/png"); if (onApply) onApply(url); setBusy(""); onClose(); } catch (e) { setBusy(""); alert("Couldn't apply the design."); } };
+  const renderDesignURL = () => { const maxLong = 3000, ppm = Math.min(150 / 25.4, maxLong / tL), oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, false); return oc.toDataURL("image/png"); };
+  const applyToSki = async (close = true) => { setBusy("Applying…"); await new Promise(r => setTimeout(r, 30)); try { const url = renderDesignURL(); if (onApply) onApply(url); setBusy(""); if (close) onClose(); } catch (e) { setBusy(""); alert("Couldn't apply the design."); } };
+  // Closing auto-applies any real design (so it's not lost if you forget to hit Apply) — but only once all
+  // image layers have decoded, so it never overwrites loaded art with an image-less render.
+  const closeDesigner = () => { const content = layers.some(l => l.type !== "bg"); const ready = layers.every(l => l.type !== "img" || l.img); if (content && ready) applyToSki(true); else onClose(); };
 
   const s = layers.find(l => l.id === sel);
   const inp = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
@@ -7086,7 +7124,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
-      <BrandBar title="Topsheet Designer" subtitle={`${isBoard ? "board" : "pair"} · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={onClose} C={C} />
+      <BrandBar title="Topsheet Designer" subtitle={`${isBoard ? "board" : "pair"} · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={closeDesigner} C={C} />
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 322, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -7168,7 +7206,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply }) {
             <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 4 }}>{outPx.w.toLocaleString()} × {outPx.h.toLocaleString()} px</span>
             <button disabled={!!busy} onClick={() => exportImg("png")} style={{ background: C.heading, color: C.bgDeep, border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{busy || "Export PNG (print-ready)"}</button>
             <button disabled={!!busy} onClick={() => exportImg("jpg")} style={{ background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, padding: "9px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>JPG</button>
-            <button disabled={!!busy} onClick={applyToSki} title="Use this design as the ski's topsheet — shows in the plan view, 3D, build card and design study" style={{ background: C.torch, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>✓ Apply to ski</button>
+            <button disabled={!!busy} onClick={() => applyToSki(true)} title="Use this design as the ski's topsheet — shows in the plan view, 3D, build card and design study" style={{ background: C.torch, color: "#fff", border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>✓ Apply to ski</button>
           </div>
           <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.5 }}>
             <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>PRINT & SEND OUT</div>
@@ -7226,14 +7264,19 @@ function computeVariantMetrics(snap) {
   const runS = (snap.tailLength || 0) / snap.length, runE = (snap.length - (snap.tipLength || 0)) / snap.length;
   const stack = (snap.layup && snap.layup.stack) || [];
   const coreL = stack.find(l => l.kind === "core");
+  const sw = snap.layup && snap.layup.sidewall;
+  const swName = (sw && sw.mat && sw.mat !== "none") ? (((SIDEWALL_MATERIALS[sw.mat] || {}).name || sw.mat) + (sw.thick ? ` \u00b7 ${sw.thick}mm` : "")) : "";
+  const insMats = Array.isArray(snap.inserts) && snap.inserts.length ? [...new Set(snap.inserts.map(ins => (INSERT_MATERIALS[ins.material] || {}).name || ins.material).filter(Boolean))].join(", ") : "";
+  let rating = ""; try { rating = flexRating(fp.underfootK).label; } catch (e) {}
   const lay = stack.filter(l => ["fabric", "uni", "metal", "veneer", "vds"].includes(l.kind)).map(l =>
     l.kind === "metal" ? ((METALS[l.mat] || {}).name || "metal") : l.kind === "veneer" ? (((VENEERS[l.mat] || {}).name || "wood") + " veneer") : l.kind === "vds" ? "VDS" : ((FIBERS[l.mat] || {}).name || l.mat)).join(", ");
   return {
     length: snap.length, tip: snap.tipWidth, waist: snap.waistWidth, tail: snap.tailWidth,
     radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
     coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
-    k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0,
+    k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0, rating,
     core: coreL ? (coreWoods(coreL).map(cw => (CORE_MATERIALS[cw.mat] || {}).name || cw.mat).filter(Boolean).join(" + ") || "wood") : "",
+    sidewall: swName, inserts: insMats,
     layup: lay,
     stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
   };
@@ -7283,9 +7326,12 @@ function studyTableHTML(variants) {
     [t("tbl.radius", "Sidecut radius"), v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
     [t("tbl.coreThick", "Core tip / waist / tail"), (v, i) => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm` + (i ? dlt(v.coreWaist, first.coreWaist, 1, 0.05) : "")],
     [t("tbl.core", "Core"), v => v.core || "&mdash;"],
+    [t("tbl.sidewall", "Sidewall"), v => v.sidewall || "&mdash;"],
+    [t("tbl.inserts", "Inserts"), v => v.inserts || "&mdash;"],
     [t("tbl.layup", "Layup"), v => v.layup || "&mdash;"],
     [t("tbl.bend", "3-pt bend"), (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
     [t("tbl.peakEI", "Peak EI"), (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
+    [t("tbl.stiffness", "Stiffness (est)"), v => v.rating || "&mdash;"],
     [t("tbl.weight", "Weight (est)"), (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
@@ -7439,6 +7485,9 @@ export default function App() {
   const [topsheet, setTopsheet] = useState({
     src: null, name: null, opacity: 1, scale: 1, offsetX: 0, offsetY: 0, rotation: 0, fit: "cover",
   });
+  // Full editable Topsheet Designer layer stack — lifted here so it survives closing the designer and saves
+  // with the file (durable, re-editable). Image layers carry a data-URL `src`; the designer decodes `img`.
+  const [tsLayers, setTsLayers] = useState(DEFAULT_TS_LAYERS);
   const topsheetFileRef = useRef(null);
   const [show3D, setShow3D] = useState(false);
   const [pairView, setPairView] = useState(false);
@@ -7851,11 +7900,11 @@ export default function App() {
       if (!name) return;
       const named = { ...ski, designName: name };
       setSki(named);
-      saveDesignToFile(named, study);
+      saveDesignToFile(named, study, topsheet, tsLayers);
     } else {
-      saveDesignToFile(ski, study);
+      saveDesignToFile(ski, study, topsheet, tsLayers);
     }
-  }, [ski, studyVariants, studyNotes, studyTitle]);
+  }, [ski, studyVariants, studyNotes, studyTitle, topsheet, tsLayers]);
 
   const handleLoadClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -7868,6 +7917,8 @@ export default function App() {
     if (result.ok) {
       setSki(result.ski);
       if (result.study && Array.isArray(result.study.variants)) { setStudyVariants(result.study.variants); setStudyNotes(result.study.notes || ""); setStudyTitle(result.study.title || ""); setActiveVariant(null); }
+      if (result.topsheet && result.topsheet.src) setTopsheet(result.topsheet); else setTopsheet(t => ({ ...t, src: null, name: null }));
+      setTsLayers(result.topsheetLayers && result.topsheetLayers.length ? result.topsheetLayers : DEFAULT_TS_LAYERS());
       setLoadMessage({ type: result.warning ? "warn" : "ok", text: result.warning || `Loaded "${result.ski.designName}"${result.study && result.study.variants.length ? ` + ${result.study.variants.length} study variant${result.study.variants.length > 1 ? "s" : ""}` : ""}` });
       setTimeout(() => setLoadMessage(null), 4000);
     } else {
@@ -7880,6 +7931,8 @@ export default function App() {
   const handleNewDesign = useCallback(() => {
     if (window.confirm("Start a new design? Any unsaved changes will be lost (autosave will keep a copy).")) {
       setSki({ ...DEFAULT_SKI, designName: "Untitled Design" });
+      setTopsheet(t => ({ ...t, src: null, name: null }));
+      setTsLayers(DEFAULT_TS_LAYERS());
     }
   }, []);
 
@@ -9249,7 +9302,7 @@ export default function App() {
                   <button onClick={() => setSki(s => ({ ...s, inserts: s.inserts.filter(i => i.id !== ins.id) }))} style={{ background: "transparent", border: "none", color: C.labelDim, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
                 </div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                  <select value={ins.material} onChange={e => up({ material: e.target.value })} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <select value={ins.material} onChange={e => { const m = INSERT_MATERIALS[e.target.value] || {}; up({ material: e.target.value, thick: m.thick, density: m.density, E: m.E }); }} style={{ flex: 1, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                     {Object.keys(INSERT_MATERIALS).map(k => <option key={k} value={k}>{INSERT_MATERIALS[k].name}</option>)}
                   </select>
                   <select value={ins.layer} onChange={e => up({ layer: e.target.value })} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -9257,6 +9310,13 @@ export default function App() {
                     <option value="below">Below core</option>
                   </select>
                 </div>
+                {(() => { const ip = insertProps(ins); const cell = { width: 58, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 6px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }; const lb = { color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }; return (
+                  <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={lb}>thick</span><input type="number" step={0.1} min={0.1} value={ip.thick} onChange={e => up({ thick: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>mm</span>
+                    <span style={lb}>ρ</span><input type="number" step={10} min={0} value={ip.density} onChange={e => up({ density: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>kg/m³</span>
+                    <span style={lb}>E</span><input type="number" step={500} min={0} value={ip.E} onChange={e => up({ E: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>MPa</span>
+                  </div>
+                ); })()}
                 {numRow("Start 0-1", "posStart", 0, 1, 0.01)}
                 {numRow("End 0-1", "posEnd", 0, 1, 0.01)}
                 {numRow("W tail", "wTail", 0, 300, 1)}
@@ -10261,7 +10321,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {topsheetOpen && <TopsheetDesigner ski={ski} C={C} onClose={() => setTopsheetOpen(false)} onApply={(src) => setTopsheet(t => ({ ...t, src, name: "Designed topsheet", fit: "cover", scale: 1, offsetX: 0, offsetY: 0, rotation: 0, opacity: 1 }))} />}
+      {topsheetOpen && <TopsheetDesigner ski={ski} C={C} layers={tsLayers} setLayers={setTsLayers} onClose={() => setTopsheetOpen(false)} onApply={(src) => setTopsheet(t => ({ ...t, src, name: "Designed topsheet", fit: "cover", scale: 1, offsetX: 0, offsetY: 0, rotation: 0, opacity: 1 }))} />}
       {showToolpath && <ToolpathPreviewModal gcode={camResult.gcode} stats={camResult.stats} onClose={() => setShowToolpath(false)} />}
 
       {previewSvg && (
