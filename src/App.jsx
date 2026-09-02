@@ -7025,7 +7025,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
         const posMM = (l.pos != null ? l.pos : bootPos) * L;
         const halfAt = (mm) => Math.max(2, getWidthAtPos(ski, Math.max(0, Math.min(1, mm / L))) / 2);
         const mark = (yc, mm, frac) => { const hw = halfAt(mm) * frac, x = bleed + margin + mm; ctx.beginPath(); ctx.moveTo(x, yc - hw); ctx.lineTo(x, yc + hw); ctx.stroke(); };
-        skiYc.forEach((yc) => { mark(yc, posMM, 1); if (l.showTicks !== false) { const sp = l.tickSpacing || 20; mark(yc, Math.max(0, posMM - sp), 0.55); mark(yc, Math.min(L, posMM + sp), 0.55); } });
+        skiYc.forEach((yc) => { const sp = l.span != null ? l.span : 1; mark(yc, posMM, sp); if (l.showTicks !== false) { const ts = l.tickSpacing || 20; mark(yc, Math.max(0, posMM - ts), sp * 0.55); mark(yc, Math.min(L, posMM + ts), sp * 0.55); } });
       }
       ctx.restore();
     }
@@ -7191,10 +7191,11 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
           {s && s.type === "bootline" && (<>
             {colorField("Color", s.color || "#ffffff", v => upd(s.id, { color: v }))}
             {numField("Line weight mm", s.weight || 1.5, 0.2, 8, 0.1, v => upd(s.id, { weight: v }))}
+            {numField("Mark width %", Math.round((s.span != null ? s.span : 1) * 100), 10, 100, 5, v => upd(s.id, { span: Math.max(0.1, Math.min(1, v / 100)) }))}
             <label style={{ display: "flex", gap: 5, alignItems: "center", color: C.label, fontSize: 11, marginTop: 8, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={s.showTicks !== false} onChange={e => upd(s.id, { showTicks: e.target.checked })} /> Fore/aft ticks</label>
             {s.showTicks !== false && numField("Tick spacing mm", s.tickSpacing || 20, 5, 60, 1, v => upd(s.id, { tickSpacing: v }))}
             {numField("Position mm from tail", Math.round((s.pos != null ? s.pos : bootPos) * L), 0, Math.round(L), 1, v => upd(s.id, { pos: Math.max(0, Math.min(1, v / L)) }))}
-            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Auto-placed at the narrowest point (boot center) and drawn on both skis. Ticks mark ±spacing fore/aft for binding alignment.</div>
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Auto-placed at the narrowest point (boot center) and drawn on both skis. Ticks mark \u00b1spacing fore/aft for binding alignment. Mark width narrows them in from the edges for a subtler look.</div>
           </>)}
         </div>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, gap: 10 }}>
