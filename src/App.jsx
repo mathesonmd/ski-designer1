@@ -4453,6 +4453,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       const acc = (s) => { if (s.x < bMinX) bMinX = s.x; if (s.x > bMaxX) bMaxX = s.x; if (s.y < bMinY) bMinY = s.y; if (s.y > bMaxY) bMaxY = s.y; };
       right.concat(left).forEach(p => { acc(mapA(p)); if (pairView) acc(mapB(p)); });
       const box = { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY };
+      // Pair view off: the art is one continuous graphic across the pair, so extend the box one more band
+      // (+gap) on the partner side and let this single ski show its own slice (ski A = the near band).
+      if (!pairView && ski.mode !== "snowboard") {
+        if (isVertical) box.maxX = box.minX + (box.maxX - box.minX) * 2.1;
+        else box.maxY = box.minY + (box.maxY - box.minY) * 2.1;
+      }
       const rowClip = () => { ctx.beginPath(); if (isVertical) ctx.rect(0, 0, mainColW, height); else ctx.rect(0, mainRowY, width, mainRowH); ctx.clip(); };
       const paint = (mapFn) => { ctx.save(); rowClip(); tracePath(mapFn); ctx.clip(); drawTopsheetImage(ctx, topsheetImgRef.current, box, topsheet); ctx.restore(); };
       paint(mapA);
