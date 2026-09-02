@@ -693,7 +693,13 @@ function insertLayersAt(ski, pos) {
     const wT = ins.wTail != null ? ins.wTail : 36, wW = ins.wWaist != null ? ins.wWaist : 56, wTp = ins.wTip != null ? ins.wTip : 36;
     let w; if (f <= 0.5) { const u = f / 0.5, sm = u * u * (3 - 2 * u); w = wT + sm * (wW - wT); } else { const u = (f - 0.5) / 0.5, sm = u * u * (3 - 2 * u); w = wW + sm * (wTp - wW); }
     const bw = ins.type === "frame" ? Math.min(w, 2 * (ins.borderW != null ? ins.borderW : 12)) : w;
-    if (bw > 0 && t > 0 && E > 0) out.push({ E, b: bw, t, above: ins.layer !== "below" });
+    // End taper (skive): ramp the insert's contribution to zero over the last `endTaper` mm at each end, the
+    // way a metal insert is ground/beveled so it doesn't leave a hard stiffness cliff. 0 = square-cut ends.
+    const taper = ins.endTaper != null ? ins.endTaper : 0;
+    let taperF = 1;
+    if (taper > 0) { const d = Math.min((pos - s), (e - pos)) * ski.length; if (d < taper) taperF = Math.max(0, Math.min(1, d / taper)); }
+    const bwT = bw * taperF;
+    if (bwT > 0 && t > 0 && E > 0) out.push({ E, b: bwT, t, above: ins.layer !== "below" });
   }
   return out;
 }
@@ -4461,22 +4467,24 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
     // ── Topsheet artwork ──────────────────────────────────────────
     if (topsheet && topsheet.src && topsheetImgRef.current) {
-      // Combined on-screen bounding box (both skis in pair view, else just ski A). The art is fit to
-      // this box, so each ski shows its slice of one continuous image.
-      let bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
-      const acc = (s) => { if (s.x < bMinX) bMinX = s.x; if (s.x > bMaxX) bMaxX = s.x; if (s.y < bMinY) bMinY = s.y; if (s.y > bMaxY) bMaxY = s.y; };
-      right.concat(left).forEach(p => { acc(mapA(p)); if (pairView) acc(mapB(p)); });
-      const box = { minX: bMinX, minY: bMinY, maxX: bMaxX, maxY: bMaxY };
-      // Pair view off: the art is one continuous graphic across the pair, so extend the box one more band
-      // (+gap) on the partner side and let this single ski show its own slice (ski A = the near band).
-      if (!pairView && ski.mode !== "snowboard") {
-        if (isVertical) box.maxX = box.minX + (box.maxX - box.minX) * 2.1;
-        else box.maxY = box.minY + (box.maxY - box.minY) * 2.1;
-      }
+      // The art is one continuous graphic across the pair. Give EACH ski its own fit box, extended one band
+      // (+gap) onto the partner side, so it shows only its own slice — ski A the near band, ski B the far one.
+      // Doing it per-ski (not one shared pair box) keeps the print's 12.7mm gap from fighting the on-screen
+      // pair spacing, which was zooming/shifting the pair.
+      const boxFor = (mapFn, isA) => {
+        let nx = Infinity, ny = Infinity, xx = -Infinity, xy = -Infinity;
+        right.concat(left).forEach(p => { const s = mapFn(p); if (s.x < nx) nx = s.x; if (s.x > xx) xx = s.x; if (s.y < ny) ny = s.y; if (s.y > xy) xy = s.y; });
+        const b = { minX: nx, minY: ny, maxX: xx, maxY: xy };
+        if (ski.mode !== "snowboard") {
+          if (isVertical) { const w = b.maxX - b.minX; if (isA) b.maxX = b.minX + w * 2.1; else b.minX = b.maxX - w * 2.1; }
+          else { const h = b.maxY - b.minY; if (isA) b.maxY = b.minY + h * 2.1; else b.minY = b.maxY - h * 2.1; }
+        }
+        return b;
+      };
       const rowClip = () => { ctx.beginPath(); if (isVertical) ctx.rect(0, 0, mainColW, height); else ctx.rect(0, mainRowY, width, mainRowH); ctx.clip(); };
-      const paint = (mapFn) => { ctx.save(); rowClip(); tracePath(mapFn); ctx.clip(); drawTopsheetImage(ctx, topsheetImgRef.current, box, topsheet); ctx.restore(); };
-      paint(mapA);
-      if (pairView) paint(mapB);
+      const paint = (mapFn, isA) => { ctx.save(); rowClip(); tracePath(mapFn); ctx.clip(); drawTopsheetImage(ctx, topsheetImgRef.current, boxFor(mapFn, isA), topsheet); ctx.restore(); };
+      paint(mapA, true);
+      if (pairView) paint(mapB, false);
       // Re-stroke outlines on top for crisp edges over the artwork.
       ctx.save(); tracePath(mapA); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
       if (pairView) { tracePath(mapB); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
@@ -9327,6 +9335,7 @@ export default function App() {
                     <span style={lb}>thick</span><input type="number" step={0.1} min={0.1} value={ip.thick} onChange={e => up({ thick: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>mm</span>
                     <span style={lb}>ρ</span><input type="number" step={10} min={0} value={ip.density} onChange={e => up({ density: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>kg/m³</span>
                     <span style={lb}>E</span><input type="number" step={500} min={0} value={ip.E} onChange={e => up({ E: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>MPa</span>
+                    <span style={lb} title="Skive: ramps stiffness to zero over this length at each end, like a beveled metal insert. 0 = square ends (sharp flex step).">end taper</span><input type="number" step={5} min={0} value={ins.endTaper != null ? ins.endTaper : 0} onChange={e => up({ endTaper: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>mm</span>
                   </div>
                 ); })()}
                 {numRow("Start 0-1", "posStart", 0, 1, 0.01)}
