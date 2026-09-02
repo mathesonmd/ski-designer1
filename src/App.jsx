@@ -6500,7 +6500,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(W, H);
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.15;
+      renderer.toneMappingExposure = 1.0;
       if (THREE.SRGBColorSpace && "outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
       else if (THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
       renderer.shadowMap.enabled = true;
@@ -6528,17 +6528,17 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const wallGeo = mkGeom(g.wallPos, g.wallIdx);
 
       // Lights: soft hemisphere fill, a warm key that casts a soft contact shadow, and a cool rim.
-      scene.add(new THREE.HemisphereLight(0xf3ede2, 0x26211c, 0.35));
-      const key = new THREE.DirectionalLight(0xfff2e2, 2.1);
+      scene.add(new THREE.HemisphereLight(0xf3ede2, 0x26211c, 0.5));
+      const key = new THREE.DirectionalLight(0xfff2e2, 1.3);
       key.position.set(-0.55, 1.5, 0.85).multiplyScalar(g.len);
       key.castShadow = true;
       key.shadow.mapSize.set(2048, 2048);
       { const s = g.len * 0.85, sc = key.shadow.camera; sc.left = -s; sc.right = s; sc.top = s; sc.bottom = -s; sc.near = g.len * 0.05; sc.far = g.len * 6; key.shadow.bias = -0.0005; if ("radius" in key.shadow) key.shadow.radius = 6; }
       scene.add(key);
-      const rim = new THREE.DirectionalLight(0x9ec4ff, 0.55);
+      const rim = new THREE.DirectionalLight(0x9ec4ff, 0.4);
       rim.position.set(0.6, 0.5, -1.1).multiplyScalar(g.len); scene.add(rim);
 
-      const eiTop = 1.0, eiEdge = 1.15, eiBase = 0.5;
+      const eiTop = 0.55, eiEdge = 1.15, eiBase = 0.5;
       let topMat;
       if (topsheet && topsheet.src) {
         const tex = new THREE.Texture();
@@ -6547,9 +6547,9 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
         im.src = topsheet.src;
         if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace; else if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
         if (renderer.capabilities && renderer.capabilities.getMaxAnisotropy) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        topMat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.42, metalness: 0.0, clearcoat: 0.9, clearcoatRoughness: 0.16, envMapIntensity: eiTop, side: THREE.DoubleSide });
+        topMat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.55, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.38, envMapIntensity: eiTop, side: THREE.DoubleSide });
       } else {
-        topMat = new THREE.MeshPhysicalMaterial({ color: "#c8935a", roughness: 0.45, metalness: 0.05, clearcoat: 0.85, clearcoatRoughness: 0.2, envMapIntensity: eiTop, side: THREE.DoubleSide });
+        topMat = new THREE.MeshPhysicalMaterial({ color: "#c8935a", roughness: 0.5, metalness: 0.05, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.8, side: THREE.DoubleSide });
       }
       const botMat = new THREE.MeshStandardMaterial({ color: "#161310", roughness: 0.86, metalness: 0.0, envMapIntensity: eiBase, side: THREE.DoubleSide });
       const wallMat = new THREE.MeshStandardMaterial({ color: "#c4c8ce", roughness: 0.26, metalness: 0.92, envMapIntensity: eiEdge, side: THREE.DoubleSide });
@@ -7447,7 +7447,7 @@ export default function App() {
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet })}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet })}${notesHtml}${reportCardHTML()}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -7626,6 +7626,7 @@ export default function App() {
 
   // Export the branded (white-labelable) spec sheet as SVG or PNG.
   const [bcArtwork, setBcArtwork] = useState(false);
+  const [bcLogoDims, setBcLogoDims] = useState(null);
   const exportSpecSheet = useCallback((fmt) => {
     const run = (logoDims) => {
       const brand = { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims };
@@ -7702,6 +7703,15 @@ export default function App() {
     const run = (logoDims) => setPreviewSvg(buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims }, { artwork: bcArtwork, topsheet }));
     if (builderBrand.logoSrc) { const lg = new Image(); lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight }); lg.onerror = () => run(null); lg.src = builderBrand.logoSrc; } else run(null);
   }, [ski, derived, flex, bom, builderBrand, bcArtwork, topsheet]);
+  // Keep the logo aspect on hand so the study report's build card can be built synchronously.
+  useEffect(() => { if (!builderBrand.logoSrc) { setBcLogoDims(null); return; } const lg = new Image(); lg.onload = () => setBcLogoDims({ w: lg.naturalWidth, h: lg.naturalHeight }); lg.onerror = () => setBcLogoDims(null); lg.src = builderBrand.logoSrc; }, [builderBrand.logoSrc]);
+  // Build the current design's build card as an HTML block (scaled image) to append to the study report.
+  const reportCardHTML = useCallback(() => {
+    let svg = ""; try { svg = buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims: bcLogoDims }, { artwork: studyArtwork, topsheet }); } catch (e) { return ""; }
+    if (!svg) return "";
+    const uri = "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+    return `<div style="margin-top:22px;page-break-before:always"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:8px">BUILD CARD \u2014 ${String(ski.designName || "Untitled").replace(/[<>&]/g, "")}</div><img src="${uri}" style="width:100%;max-width:960px;display:block;border:1px solid #e6e2da;border-radius:6px"/></div>`;
+  }, [ski, derived, flex, bom, builderBrand, bcLogoDims, studyArtwork, topsheet]);
 
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
@@ -9891,6 +9901,7 @@ export default function App() {
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
             <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet }) }} />
+            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: reportCardHTML() }} />
             <div style={{ marginTop: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>{t("study.notes", "NOTES")}</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
