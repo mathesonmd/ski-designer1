@@ -1479,7 +1479,7 @@ function printTiledPlan(ski, paper, opts) {
       + `<path d="${pathD}" fill="none" stroke="#000" stroke-width="0.35"/>`
       + (baseD ? `<path d="${baseD}" fill="none" stroke="#c88a3a" stroke-width="0.3" stroke-dasharray="2,2"/>` : "")
       + (coreD ? `<path d="${coreD}" fill="none" stroke="#0a8a5f" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
-      + (fillerBlankD ? `<path d="${fillerBlankD}" fill="none" stroke="#999" stroke-width="0.25" stroke-dasharray="3,2"/>` : "")
+      + (fillerBlankD ? `<path d="${fillerBlankD}" fill="rgba(58,120,216,0.14)" stroke="rgba(58,120,216,0.5)" stroke-width="0.3" stroke-dasharray="3,2"/>` : "")
       + (fillerD ? `<path d="${fillerD}" fill="none" stroke="#c8935a" stroke-width="0.3" stroke-dasharray="1,1.5"/>` : "")
       + `<line x1="${c0.x}" y1="${c0.y}" x2="${c1.x}" y2="${c1.y}" stroke="#3a78d8" stroke-width="0.25" stroke-dasharray="4,3"/>`
       + (profD ? profExtra + `<path d="${profD}" fill="none" stroke="#000" stroke-width="0.4"/>` : "")
@@ -3871,7 +3871,7 @@ function topDownDesignSVG(ski, map, opts) {
       const core = applyVCutToCore(ski);
       if (core && core.length > 2) s += `<path d="${pathOf(core, true)}" fill="rgba(196,146,88,0.32)" stroke="${brass}" stroke-width="1.1" stroke-dasharray="5,3"/>`;
       const fl = fillerLoops(ski);
-      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (bl && bl.length > 2) s += `<path d="${pathOf(bl, true)}" fill="none" stroke="#8a8a8a" stroke-width="0.7" stroke-dasharray="4,3"/>`; });
+      [fl.tipBlank, fl.tailBlank].forEach(bl => { if (bl && bl.length > 2) s += `<path d="${pathOf(bl, true)}" fill="rgba(58,120,216,0.16)" stroke="rgba(58,120,216,0.55)" stroke-width="0.7" stroke-dasharray="4,3"/>`; });
       [fl.tip, fl.tail].forEach(fp => { if (fp && fp.length > 2) s += `<path d="${pathOf(fp, true)}" fill="rgba(58,120,216,0.13)" stroke="#3a78d8" stroke-width="0.9"/>`; });
     }
   } catch (e) {}
@@ -3880,7 +3880,30 @@ function topDownDesignSVG(ski, map, opts) {
 
 // Self-contained plan-view thumbnail: ski outline + the top-down design overlay, fit to width W with the
 // height sized to the ski so a long skinny ski doesn't sit in a tall empty box.
-function planPreviewSVG(ski, W) {
+// Renders a ski silhouette filled with its topsheet artwork, a soft drop shadow (lift) and an inner shadow
+// hugging the curved edges (depth). silD = the outline path in the target frame; (bx,by,bw,bh) its bbox.
+let _tsUid = 0;
+function skiArtworkLayer(silD, bx, by, bw, bh, topsheet, tag) {
+  if (!topsheet || !topsheet.src || bw <= 0 || bh <= 0) return null;
+  const u = `${tag}${++_tsUid}`;
+  const op = topsheet.opacity != null ? topsheet.opacity : 1;
+  const scale = topsheet.scale || 1, iw = bw * scale, ih = bh * scale;
+  const icx = bx + bw / 2 + (topsheet.offsetX || 0) * bw, icy = by + bh / 2 + (topsheet.offsetY || 0) * bh;
+  const rot = topsheet.rotation || 0;
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const defs = `<clipPath id="clip${u}"><path d="${silD}"/></clipPath>`
+    + `<filter id="drop${u}" x="-25%" y="-45%" width="150%" height="195%"><feDropShadow dx="0" dy="${(bh * 0.06).toFixed(1)}" stdDeviation="${(bh * 0.055).toFixed(1)}" flood-color="#000" flood-opacity="0.42"/></filter>`
+    + `<filter id="inb${u}"><feGaussianBlur stdDeviation="${(bh * 0.02).toFixed(2)}"/></filter>`;
+  const body = `<g filter="url(#drop${u})">`
+    + `<path d="${silD}" fill="#171717"/>`
+    + `<g clip-path="url(#clip${u})"><image href="${esc(topsheet.src)}" x="${(icx - iw / 2).toFixed(1)}" y="${(icy - ih / 2).toFixed(1)}" width="${iw.toFixed(1)}" height="${ih.toFixed(1)}" preserveAspectRatio="xMidYMid slice" opacity="${op}" transform="rotate(${rot} ${icx.toFixed(1)} ${icy.toFixed(1)})"/></g>`
+    + `<g clip-path="url(#clip${u})"><path d="${silD}" fill="none" stroke="rgba(0,0,0,0.55)" stroke-width="${(bh * 0.06).toFixed(1)}" filter="url(#inb${u})"/></g>`
+    + `<path d="${silD}" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="1.2"/>`
+    + `</g>`;
+  return { defs, body };
+}
+
+function planPreviewSVG(ski, W, opts) {
   let outline = []; try { outline = getFullOutlinePoints(ski); } catch (e) {}
   if (!outline.length) return `<svg viewBox="0 0 ${W} 20" width="100%" xmlns="http://www.w3.org/2000/svg"></svg>`;
   const pad = 8, maxLat = Math.max(1, ...outline.map(p => Math.abs(p.x)));
@@ -3889,13 +3912,21 @@ function planPreviewSVG(ski, W) {
   const ox = pad, oy = H / 2;
   const mp = p => ({ x: ox + p.y * sc, y: oy - p.x * sc });
   const sil = outline.map((p, i) => `${i ? "L" : "M"}${mp(p).x.toFixed(1)},${mp(p).y.toFixed(1)}`).join(" ") + " Z";
+  const o = opts || {};
+  if (o.artwork && o.topsheet && o.topsheet.src) {
+    const xs = outline.map(p => mp(p).x), ys = outline.map(p => mp(p).y);
+    const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+    const art = skiArtworkLayer(sil, bx, by, bw, bh, o.topsheet, "pp");
+    if (art) return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg"><defs>${art.defs}</defs>${art.body}</svg>`;
+  }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">`
     + `<path d="${sil}" fill="rgba(200,147,90,0.08)" stroke="#c8935a" stroke-width="1.4"/>`
     + topDownDesignSVG(ski, (len, lat) => ({ x: ox + len * sc, y: oy - lat * sc }), { brass: "#c8935a" })
     + `</svg>`;
 }
 
-function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
+function buildSpecSheetSVG(ski, derived, flex, bom, brand, opts) {
+  const bcOpts = opts || {};
   const W = 1400, H = 900, pad = 50;
   const bg = "#141210", brass = "#c8935a", bone = "#ede6d8", dim = "#9b9388", torch = "#e8552a", border = "#37322c";
   const rating = flexRating(flex.underfootK);
@@ -3917,9 +3948,17 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
   const rowLat = (r, lat) => (r === 1 ? (cOff - lat) : (lat - cOff));   // r0 = ski A, r1 = mirror partner
   const rowMapPt = (r) => (p) => ({ x: ox + p.y * sc, y: cY + rowLat(r, p.x) * sc });
   const rowMapLL = (r) => (len, lat) => ({ x: ox + len * sc, y: cY + rowLat(r, lat) * sc });
+  const bcArt = bcOpts.artwork && bcOpts.topsheet && bcOpts.topsheet.src;
+  let bcDefs = "";
   const silhouetteSVG = Array.from({ length: pairSkis ? 2 : 1 }, (_, r) => {
     const mpp = rowMapPt(r);
     const sil = outline.length ? outline.map((p, i) => `${i ? "L" : "M"}${mpp(p).x.toFixed(1)},${mpp(p).y.toFixed(1)}`).join(" ") + " Z" : "";
+    if (bcArt && sil) {
+      const xs = outline.map(p => mpp(p).x), ys = outline.map(p => mpp(p).y);
+      const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+      const art = skiArtworkLayer(sil, bx, by, bw, bh, bcOpts.topsheet, "bc");
+      if (art) { bcDefs += art.defs; return art.body; }
+    }
     return (sil ? `<path d="${sil}" fill="rgba(200,147,90,0.10)" stroke="${brass}" stroke-width="2"/>` : "") + topDownDesignSVG(ski, rowMapLL(r), { brass });
   }).join("");
   const dimsY = cY + (pairLatW / 2) * sc + 30;
@@ -3987,6 +4026,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand) {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>${bcDefs}</defs>
   <rect width="${W}" height="${H}" fill="${bg}"/>
   <rect x="16" y="16" width="${W - 32}" height="${H - 32}" fill="none" stroke="${border}" stroke-width="1.5"/>
   <text x="${pad}" y="72" font-size="22" fill="${brass}" font-family="monospace" letter-spacing="4">${esc(brandName)}</text>
@@ -6869,6 +6909,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const bleed = 10, gap = 12.7;   // print bleed (sheet edge to trim box) and the gap between the two skis
   const L = ski.length;
   const outline = useMemo(() => { try { return getFullOutlinePoints(ski); } catch (e) { return []; } }, [ski]);
+  const bootPos = useMemo(() => { let best = 0.5, bw = 1e9; for (let i = 0; i <= 120; i++) { const t = i / 120; let w; try { w = getWidthAtPos(ski, t); } catch (e) { w = 1e9; } if (w < bw) { bw = w; best = t; } } return best; }, [ski]);
   // Band half-width from the ACTUAL outline extent (both edges), so an asymmetric tip that reaches further
   // on one side than the nominal width still sits inside the band and the bleed. Falls back to nominal.
   const latMax = outline.length ? Math.max(...outline.map(p => Math.abs(p.x))) : Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth) / 2;
@@ -6916,11 +6957,18 @@ function TopsheetDesigner({ ski, C, onClose }) {
     for (const l of layers) {
       ctx.save(); ctx.globalAlpha = l.opacity != null ? l.opacity : 1;
       if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.drawImage(l.img, -w / 2, -h / 2, w, h); }
-      else if (l.type === "text") { ctx.fillStyle = l.color; ctx.font = `${l.bold ? "bold " : ""}${l.size}px ${l.font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180); ctx.fillText(l.text, 0, 0); }
+      else if (l.type === "text") { ctx.fillStyle = l.color; ctx.font = `${l.bold ? "bold " : ""}${l.size}px ${l.font}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180); const _ln = String(l.text).split("\n"), _lh = l.size * 1.2, _y0 = -(_ln.length - 1) * _lh / 2; _ln.forEach((tx, i) => ctx.fillText(tx, 0, _y0 + i * _lh)); }
       else if (l.type === "shape") {
         ctx.translate(l.x, l.y); ctx.rotate((l.rot || 0) * Math.PI / 180);
         if (l.shape === "line") { ctx.strokeStyle = l.color; ctx.lineWidth = Math.max(0.5, l.thick || 6); ctx.lineCap = "round"; shapePath(ctx, l); ctx.stroke(); }
         else { shapePath(ctx, l); if (l.fill !== false) { ctx.fillStyle = l.color; ctx.fill(); } if (l.stroke > 0) { ctx.strokeStyle = l.strokeColor || "#000"; ctx.lineWidth = l.stroke; ctx.stroke(); } }
+      }
+      else if (l.type === "bootline") {
+        ctx.strokeStyle = l.color || "#ffffff"; ctx.lineWidth = Math.max(0.3, l.weight || 1.5); ctx.lineCap = "round";
+        const posMM = (l.pos != null ? l.pos : bootPos) * L;
+        const halfAt = (mm) => Math.max(2, getWidthAtPos(ski, Math.max(0, Math.min(1, mm / L))) / 2);
+        const mark = (yc, mm, frac) => { const hw = halfAt(mm) * frac, x = bleed + margin + mm; ctx.beginPath(); ctx.moveTo(x, yc - hw); ctx.lineTo(x, yc + hw); ctx.stroke(); };
+        skiYc.forEach((yc) => { mark(yc, posMM, 1); if (l.showTicks !== false) { const sp = l.tickSpacing || 20; mark(yc, Math.max(0, posMM - sp), 0.55); mark(yc, Math.min(L, posMM + sp), 0.55); } });
       }
       ctx.restore();
     }
@@ -6931,7 +6979,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
   const layerBox = l => {
     if (l.type === "img" && l.img) { const w = l.wmm, h = w * (l.img.height / l.img.width); return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
     if (l.type === "shape") { if (l.shape === "path") { let a = 1e9, b = -1e9, c = 1e9, d = -1e9; l.pts.forEach(p => { a = Math.min(a, p.x); b = Math.max(b, p.x); c = Math.min(c, p.y); d = Math.max(d, p.y); }); return { x: l.x + a, y: l.y + c, w: b - a, h: d - c }; } return { x: l.x - l.w / 2, y: l.y - (l.shape === "line" ? (l.thick || 6) / 2 : l.h / 2), w: l.w, h: l.shape === "line" ? (l.thick || 6) : l.h }; }
-    if (l.type === "text") { const w = l.text.length * l.size * 0.6, h = l.size; return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
+    if (l.type === "text") { const lines = String(l.text).split("\n"); const w = Math.max(1, ...lines.map(s => s.length)) * l.size * 0.6, h = lines.length * l.size * 1.2; return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
     return null;
   };
   useEffect(() => {
@@ -6951,19 +6999,22 @@ function TopsheetDesigner({ ski, C, onClose }) {
     // selection + rotate handle (screen space)
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const s = layers.find(l => l.id === sel);
-    if (s && s.type !== "bg" && mode === "select") { const b = layerBox(s); if (b) { const cS = toSC(b.x, b.y), c2 = toSC(b.x + b.w, b.y + b.h); ctx.save(); if (s.rot) { const cen = toSC(s.x, s.y); ctx.translate(cen.x, cen.y); ctx.rotate((s.rot) * Math.PI / 180); ctx.translate(-cen.x, -cen.y); } ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(cS.x, cS.y, c2.x - cS.x, c2.y - cS.y); ctx.setLineDash([]); const hx = (cS.x + c2.x) / 2, hy = cS.y - 22; ctx.beginPath(); ctx.moveTo(hx, cS.y); ctx.lineTo(hx, hy); ctx.stroke(); ctx.fillStyle = C.heading; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore(); } }
+    if (s && s.type !== "bg" && mode === "select") { const b = layerBox(s); if (b) { const cS = toSC(b.x, b.y), c2 = toSC(b.x + b.w, b.y + b.h); ctx.save(); if (s.rot) { const cen = toSC(s.x, s.y); ctx.translate(cen.x, cen.y); ctx.rotate((s.rot) * Math.PI / 180); ctx.translate(-cen.x, -cen.y); } ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeRect(cS.x, cS.y, c2.x - cS.x, c2.y - cS.y); ctx.setLineDash([]); const hx = (cS.x + c2.x) / 2, hy = cS.y - 22; ctx.beginPath(); ctx.moveTo(hx, cS.y); ctx.lineTo(hx, hy); ctx.stroke(); ctx.fillStyle = C.heading; ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); [[cS.x, cS.y], [c2.x, cS.y], [c2.x, c2.y], [cS.x, c2.y]].forEach(([qx, qy]) => { ctx.fillStyle = "#fff"; ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.rect(qx - 4, qy - 4, 8, 8); ctx.fill(); ctx.stroke(); }); ctx.restore(); } }
     if (s && s.type === "bg" && s.kind === "gradient") { const h = toSC(s.gx * tL, s.gy * tW); ctx.fillStyle = C.heading; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(h.x, h.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
     if (s && s.type === "shape" && s.shape === "path" && mode === "select") { const a = (s.rot || 0) * Math.PI / 180, cx = ox + s.x * eff, cy = oy + s.y * eff; const tf = (px, py) => ({ x: cx + (px * Math.cos(a) - py * Math.sin(a)) * eff, y: cy + (px * Math.sin(a) + py * Math.cos(a)) * eff }); s.pts.forEach(pt => { const A = tf(pt.x, pt.y); [[pt.ox, pt.oy], [pt.ix, pt.iy]].forEach(([hx, hy]) => { if (hx || hy) { const H = tf(pt.x + hx, pt.y + hy); ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(H.x, H.y); ctx.stroke(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(H.x, H.y, 4, 0, Math.PI * 2); ctx.fill(); } }); ctx.fillStyle = C.heading; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(A.x, A.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }); }
   }, [layers, sel, guides, crop, eff, ox, oy, box, outline, draw, penAnchors, penCur, mode]);
 
   const ptr = e => { const r = cvRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cvRef.current.width / r.width), y: (e.clientY - r.top) * (cvRef.current.height / r.height) }; };
   const rotHandleAt = (s, p) => { const b = layerBox(s); if (!b) return false; let hx = ox + (b.x + b.w / 2) * eff, hy = oy + b.y * eff - 22; if (s.rot) { const cx = ox + s.x * eff, cy = oy + s.y * eff, a = s.rot * Math.PI / 180, dx = hx - cx, dy = hy - cy; hx = cx + dx * Math.cos(a) - dy * Math.sin(a); hy = cy + dx * Math.sin(a) + dy * Math.cos(a); } return Math.hypot(p.x - hx, p.y - hy) < 12; };
+  // Screen positions of the four framing-rectangle corners (rotated with the layer), for resize handles.
+  const cornerHandles = (s) => { const b = layerBox(s); if (!b) return []; const a = (s.rot || 0) * Math.PI / 180, cen = toSC(s.x, s.y); return [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]].map(([mx, my]) => { const sx = ox + mx * eff, sy = oy + my * eff, dx = sx - cen.x, dy = sy - cen.y; return { x: cen.x + dx * Math.cos(a) - dy * Math.sin(a), y: cen.y + dx * Math.sin(a) + dy * Math.cos(a) }; }); };
   const onDown = e => {
     const p = ptr(e), mm = toMM(p.x, p.y);
     if (mode === "pen") { if (penAnchors.length >= 2) { const f = toSC(penAnchors[0].x, penAnchors[0].y); if (Math.hypot(p.x - f.x, p.y - f.y) < 12) { finishPen(true); return; } } const idx = penAnchors.length; setPenAnchors(a => [...a, { x: mm.x, y: mm.y, ix: 0, iy: 0, ox: 0, oy: 0 }]); dragRef.current = { pen: idx }; return; }
     if (mode !== "select") { setDraw({ x0: mm.x, y0: mm.y, x1: mm.x, y1: mm.y }); return; }
     const s0 = layers.find(l => l.id === sel);
     if (s0 && s0.type !== "bg" && rotHandleAt(s0, p)) { dragRef.current = { rot: s0.id, cx: ox + s0.x * eff, cy: oy + s0.y * eff }; return; }
+    if (s0 && s0.type !== "bg" && s0.type !== "bootline") { const ch = cornerHandles(s0); for (let i = 0; i < ch.length; i++) { if (Math.hypot(p.x - ch[i].x, p.y - ch[i].y) < 11) { const b = layerBox(s0); dragRef.current = { resize: s0.id, startDiag: Math.max(1, Math.hypot(b.w / 2, b.h / 2)), base: { ...s0, pts: s0.pts ? s0.pts.map(pt => ({ ...pt })) : undefined } }; return; } } }
     if (s0 && s0.type === "shape" && s0.shape === "path") { const a = (s0.rot || 0) * Math.PI / 180, cx = ox + s0.x * eff, cy = oy + s0.y * eff; const tf = (px, py) => ({ x: cx + (px * Math.cos(a) - py * Math.sin(a)) * eff, y: cy + (px * Math.sin(a) + py * Math.cos(a)) * eff }); for (let i = 0; i < s0.pts.length; i++) { const pt = s0.pts[i]; if (pt.ox || pt.oy) { const H = tf(pt.x + pt.ox, pt.y + pt.oy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "o" }; return; } } if (pt.ix || pt.iy) { const H = tf(pt.x + pt.ix, pt.y + pt.iy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "i" }; return; } } const A = tf(pt.x, pt.y); if (Math.hypot(p.x - A.x, p.y - A.y) < 9) { dragRef.current = { pathA: s0.id, idx: i }; return; } } }
     if (s0 && s0.type === "bg" && s0.kind === "gradient") { const h = toSC(s0.gx * tL, s0.gy * tW); if (Math.hypot(p.x - h.x, p.y - h.y) < 14) { dragRef.current = { grad: true }; return; } }
     for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mm.x >= b.x - 2 && mm.x <= b.x + b.w + 2 && mm.y >= b.y - 2 && mm.y <= b.y + b.h + 2) { setSel(l.id); dragRef.current = { id: l.id, ox: mm.x - l.x, oy: mm.y - l.y }; return; } }
@@ -6978,6 +7029,7 @@ function TopsheetDesigner({ ski, C, onClose }) {
     if (d.pan) setPan({ x: p.x - d.sx, y: p.y - d.sy });
     else if (d.grad) { const mm = toMM(p.x, p.y); upd("bg", { gx: Math.max(0, Math.min(1, mm.x / tL)), gy: Math.max(0, Math.min(1, mm.y / tW)) }); }
     else if (d.rot) { const ang = Math.atan2(p.y - d.cy, p.x - d.cx) * 180 / Math.PI + 90; upd(d.rot, { rot: Math.round(ang) }); }
+    else if (d.resize) { const mm = toMM(p.x, p.y), base = d.base, factor = Math.max(0.05, Math.hypot(mm.x - base.x, mm.y - base.y) / d.startDiag); setLayers(ls => ls.map(l => { if (l.id !== d.resize) return l; if (l.type === "img") return { ...l, wmm: Math.max(4, base.wmm * factor) }; if (l.type === "text") return { ...l, size: Math.max(6, base.size * factor) }; if (l.type === "shape") { if (l.shape === "path") return { ...l, pts: base.pts.map(pt => ({ x: pt.x * factor, y: pt.y * factor, ix: pt.ix * factor, iy: pt.iy * factor, ox: pt.ox * factor, oy: pt.oy * factor })) }; if (l.shape === "line") return { ...l, w: Math.max(4, base.w * factor) }; return { ...l, w: Math.max(4, base.w * factor), h: Math.max(4, base.h * factor) }; } return l; })); }
     else if (d.pathA != null) { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => { if (l.id !== d.pathA) return l; const a = -(l.rot || 0) * Math.PI / 180, dx = mm.x - l.x, dy = mm.y - l.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); const pts = l.pts.slice(); pts[d.idx] = { ...pts[d.idx], x: lx, y: ly }; return { ...l, pts }; })); }
     else if (d.pathH) { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => { if (l.id !== d.pathH) return l; const a = -(l.rot || 0) * Math.PI / 180, dx = mm.x - l.x, dy = mm.y - l.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); const an = l.pts[d.idx], hx = lx - an.x, hy = ly - an.y; const pts = l.pts.slice(); pts[d.idx] = d.which === "o" ? { ...an, ox: hx, oy: hy, ix: -hx, iy: -hy } : { ...an, ix: hx, iy: hy, ox: -hx, oy: -hy }; return { ...l, pts }; })); }
     else { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => l.id === d.id ? { ...l, x: mm.x - d.ox, y: mm.y - d.oy } : l)); }
@@ -6996,6 +7048,10 @@ function TopsheetDesigner({ ski, C, onClose }) {
 
   const addImage = file => { const id = "img" + Date.now(); const img = new Image(); img.onload = () => setLayers(ls => [...ls, { id, type: "img", img, x: tL / 2, y: tW / 2, wmm: Math.min(tL, tW * 1.5) * 0.4, rot: 0, opacity: 1 }]); img.src = URL.createObjectURL(file); setSel(id); };
   const addText = () => { const id = "t" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: "BLACK CHAPEL", x: tL / 2, y: tW / 2, size: 60, color: "#F0EDE4", font: fonts[0], bold: true, rot: 0, opacity: 1 }]); setSel(id); };
+  const addBootLine = () => { const id = "boot" + Date.now(); setLayers(ls => [...ls, { id, type: "bootline", pos: bootPos, color: "#ffffff", weight: 1.5, tickSpacing: 20, showTicks: true, opacity: 1 }]); setSel(id); };
+  const dimLine = () => `${Math.round(L)} \u00b7 ${Math.round(ski.tipWidth)}-${Math.round(ski.waistWidth)}-${Math.round(ski.tailWidth)} mm`;
+  const dimStack = () => `LENGTH ${Math.round(L)}\nTIP ${Math.round(ski.tipWidth)}\nWAIST ${Math.round(ski.waistWidth)}\nTAIL ${Math.round(ski.tailWidth)}`;
+  const addDims = (stack) => { const id = "dim" + Date.now(); setLayers(ls => [...ls, { id, type: "text", text: stack ? dimStack() : dimLine(), x: tL / 2, y: tW / 2, size: stack ? 30 : 40, color: "#F0EDE4", font: fonts[0], bold: false, rot: 0, opacity: 1 }]); setSel(id); };
   const upd = (id, patch) => setLayers(ls => ls.map(l => l.id === id ? { ...l, ...patch } : l));
   const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
@@ -7023,18 +7079,23 @@ function TopsheetDesigner({ ski, C, onClose }) {
             <button onClick={() => setMode("rect")} style={btn(mode === "rect")}>▭ Rect</button>
             <button onClick={() => setMode("ellipse")} style={btn(mode === "ellipse")}>◯ Ellipse</button>
             <button onClick={() => setMode("line")} style={btn(mode === "line")}>╱ Line</button>
-            <button onClick={() => { setMode("pen"); setPenPts([]); }} style={btn(mode === "pen")}>✎ Pen</button>
+            <button onClick={() => { setMode("pen"); setPenAnchors([]); }} style={btn(mode === "pen")}>✎ Pen</button>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            <button onClick={addBootLine} style={btn(false)}>+ Boot marks</button>
+            <button onClick={() => addDims(false)} style={btn(false)}>+ Specs line</button>
+            <button onClick={() => addDims(true)} style={btn(false)}>+ Specs stack</button>
           </div>
           {drawing && <div style={{ background: C.inputBg, border: `1px solid ${C.heading}`, borderRadius: 4, padding: "7px 9px", marginBottom: 8, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: C.heading, display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ flex: 1 }}>{mode === "pen" ? `Pen: click to place points, drag for curves (${penAnchors.length}). Click the first point or Finish to close.` : `Drag to draw the ${mode}.${mode === "ellipse" ? " Hold Shift for a circle." : mode === "rect" ? " Hold Shift for a square." : ""}`}</span>
             {mode === "pen" && <button onClick={() => finishPen(true)} style={{ ...btn(true), padding: "4px 8px" }}>Finish</button>}
             <button onClick={() => { setMode("select"); setPenAnchors([]); setPenCur(null); setDraw(null); }} style={{ ...btn(false), padding: "4px 8px" }}>Cancel</button>
           </div>}
-          <div style={{ ...lab, marginTop: 0 }}>LAYERS (drag on canvas to move · handle to rotate)</div>
+          <div style={{ ...lab, marginTop: 0 }}>LAYERS (drag to move · handles to rotate / resize)</div>
           <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, marginBottom: 10, maxHeight: 140, overflowY: "auto" }}>
             {layers.slice().reverse().map(l => (
               <div key={l.id} onClick={() => { setSel(l.id); setMode("select"); }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", cursor: "pointer", background: sel === l.id ? C.inputBg : "transparent", borderBottom: `1px solid ${C.inputBorder}`, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: sel === l.id ? C.heading : C.label }}>
-                <span style={{ flex: 1 }}>{l.type === "bg" ? "Background" : l.type === "img" ? "Image" : l.type === "shape" ? l.shape : `"${l.text.slice(0, 12)}"`}</span>
+                <span style={{ flex: 1 }}>{l.type === "bg" ? "Background" : l.type === "img" ? "Image" : l.type === "bootline" ? "Boot marks" : l.type === "shape" ? l.shape : `"${String(l.text).split("\n")[0].slice(0, 12)}"`}</span>
                 {l.type !== "bg" && <><span onClick={e => { e.stopPropagation(); moveL(l.id, 1); }} style={{ cursor: "pointer" }}>▲</span><span onClick={e => { e.stopPropagation(); moveL(l.id, -1); }} style={{ cursor: "pointer" }}>▼</span><span onClick={e => { e.stopPropagation(); del(l.id); }} style={{ cursor: "pointer", color: "#e8552a" }}>✕</span></>}
               </div>
             ))}
@@ -7058,10 +7119,18 @@ function TopsheetDesigner({ ski, C, onClose }) {
             {numField("Opacity", s.opacity != null ? s.opacity : 1, 0, 1, 0.05, v => upd(s.id, { opacity: v }))}
           </>)}
           {s && s.type === "text" && (<>
-            <div style={lab}>Text</div><input value={s.text} onChange={e => upd(s.id, { text: e.target.value })} style={inp} />
+            <div style={lab}>Text</div><textarea value={s.text} onChange={e => upd(s.id, { text: e.target.value })} rows={String(s.text).includes("\n") ? 4 : 1} style={{ ...inp, resize: "vertical", minHeight: 32, lineHeight: 1.35 }} />
             <div style={lab}>Font (type any installed name)</div><input list="ts-fonts" value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={inp} /><datalist id="ts-fonts">{fonts.map(fn => <option key={fn} value={fn} />)}</datalist>
             <button onClick={loadSystemFonts} style={{ ...btn(false), width: "100%", marginTop: 4 }}>Load system fonts</button>
             {numField("Size mm", s.size, 10, 300, 1, v => upd(s.id, { size: v }))}{colorField("Color", s.color, v => upd(s.id, { color: v }))}{numField("Rotate°", s.rot || 0, -180, 180, 1, v => upd(s.id, { rot: v }))}
+          </>)}
+          {s && s.type === "bootline" && (<>
+            {colorField("Color", s.color || "#ffffff", v => upd(s.id, { color: v }))}
+            {numField("Line weight mm", s.weight || 1.5, 0.2, 8, 0.1, v => upd(s.id, { weight: v }))}
+            <label style={{ display: "flex", gap: 5, alignItems: "center", color: C.label, fontSize: 11, marginTop: 8, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}><input type="checkbox" checked={s.showTicks !== false} onChange={e => upd(s.id, { showTicks: e.target.checked })} /> Fore/aft ticks</label>
+            {s.showTicks !== false && numField("Tick spacing mm", s.tickSpacing || 20, 5, 60, 1, v => upd(s.id, { tickSpacing: v }))}
+            {numField("Position mm from tail", Math.round((s.pos != null ? s.pos : bootPos) * L), 0, Math.round(L), 1, v => upd(s.id, { pos: Math.max(0, Math.min(1, v / L)) }))}
+            <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Auto-placed at the narrowest point (boot center) and drawn on both skis. Ticks mark ±spacing fore/aft for binding alignment.</div>
           </>)}
         </div>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: 14, gap: 10 }}>
@@ -7211,12 +7280,13 @@ function studyTableHTML(variants) {
 }
 // One card per variant: top-down plan (horizontal), a gap, then the layup sandwich — stacked in a single
 // rectangle. Laid out two per row so variants sit side by side.
-function studyDesignHTML(variants) {
+function studyDesignHTML(variants, opts) {
   if (!variants || !variants.length) return "";
+  const o = opts || {};
   const esc = s => String(s == null ? "" : s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
   const CW = 330;   // inner content width for both the plan and the layup, so they align
   const cells = variants.map((v, i) => {
-    let plan = ""; try { plan = planPreviewSVG(v.ski, CW); } catch (e) {}
+    let plan = ""; try { plan = planPreviewSVG(v.ski, CW, { artwork: o.artwork, topsheet: o.topsheet }); } catch (e) {}
     let ls = { svg: "", height: 60 }; try { ls = buildLayerStackSVG(v.ski, { w: CW }); } catch (e) {}
     const c = STUDY_COLORS[i % STUDY_COLORS.length];
     return `<div style="flex:1 1 calc(50% - 7px);min-width:300px;box-sizing:border-box;border:1px solid #e6e2da;border-radius:6px;padding:9px 10px;background:#fff">`
@@ -7290,6 +7360,7 @@ export default function App() {
   // one report — the trade-study workflow (titanal vs carbon, etc.) instead of one build card per design.
   const [studyVariants, setStudyVariants] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) { const p = JSON.parse(r); if (Array.isArray(p.variants)) return p.variants; } } catch (e) {} return []; });
   const [studyOpen, setStudyOpen] = useState(false);
+  const [studyArtwork, setStudyArtwork] = useState(false);
   const [studyNotes, setStudyNotes] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) return JSON.parse(r).notes || ""; } catch (e) {} return ""; });
   const [studyTitle, setStudyTitle] = useState(() => { try { const r = localStorage.getItem("bcs_study"); if (r) return JSON.parse(r).title || ""; } catch (e) {} return ""; });
   const [activeVariant, setActiveVariant] = useState(null);   // id of the variant currently loaded for editing
@@ -7313,7 +7384,7 @@ export default function App() {
     const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
-    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants)}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet })}${notesHtml}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
     win.document.close();
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 350);
   };
@@ -7488,10 +7559,11 @@ export default function App() {
   }, [ski, topsheet, pairView]);
 
   // Export the branded (white-labelable) spec sheet as SVG or PNG.
+  const [bcArtwork, setBcArtwork] = useState(false);
   const exportSpecSheet = useCallback((fmt) => {
     const run = (logoDims) => {
       const brand = { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims };
-      const svg = buildSpecSheetSVG(ski, derived, flex, bom, brand);
+      const svg = buildSpecSheetSVG(ski, derived, flex, bom, brand, { artwork: bcArtwork, topsheet });
       const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-specsheet`;
       if (fmt === "svg") {
         const blob = new Blob([svg], { type: "image/svg+xml" });
@@ -7526,7 +7598,7 @@ export default function App() {
       lg.onerror = () => run(null);
       lg.src = builderBrand.logoSrc;
     } else run(null);
-  }, [ski, derived, flex, bom, builderBrand]);
+  }, [ski, derived, flex, bom, builderBrand, bcArtwork, topsheet]);
 
   // Build-sheet PREVIEW — render the spec sheet on screen before exporting so you can see the layup
   // cross-section and every spec. Loads the logo dims first (same as export) so the preview matches 1:1.
@@ -7561,9 +7633,9 @@ export default function App() {
   const [preview3D, setPreview3D] = useState(false);
   const [asymOpen, setAsymOpen] = useState(false);
   const openSpecPreview = useCallback(() => {
-    const run = (logoDims) => setPreviewSvg(buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims }));
+    const run = (logoDims) => setPreviewSvg(buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims }, { artwork: bcArtwork, topsheet }));
     if (builderBrand.logoSrc) { const lg = new Image(); lg.onload = () => run({ w: lg.naturalWidth, h: lg.naturalHeight }); lg.onerror = () => run(null); lg.src = builderBrand.logoSrc; } else run(null);
-  }, [ski, derived, flex, bom, builderBrand]);
+  }, [ski, derived, flex, bom, builderBrand, bcArtwork, topsheet]);
 
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
@@ -9509,6 +9581,9 @@ export default function App() {
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             A wide logo (e.g. 800×200 px) reads best. Saved on this device; the footer credits the tool.
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8, fontSize: 11.5, color: topsheet && topsheet.src ? C.label : C.labelDim, fontFamily: "'JetBrains Mono', monospace", cursor: topsheet && topsheet.src ? "pointer" : "not-allowed" }} title={topsheet && topsheet.src ? "" : "Apply a topsheet image first (Topsheet Art)"}>
+            <input type="checkbox" checked={bcArtwork} disabled={!(topsheet && topsheet.src)} onChange={e => setBcArtwork(e.target.checked)} /> Show ski with artwork + shadow
+          </label>
           <button onClick={openSpecPreview}
             style={{ ...primaryBtn, marginBottom: 6 }}>
             Preview Build Card
@@ -9731,13 +9806,14 @@ export default function App() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#555", cursor: topsheet && topsheet.src ? "pointer" : "not-allowed", opacity: topsheet && topsheet.src ? 1 : 0.5 }} title={topsheet && topsheet.src ? "" : "Apply a topsheet image first"}><input type="checkbox" checked={studyArtwork} disabled={!(topsheet && topsheet.src)} onChange={e => setStudyArtwork(e.target.checked)} /> Artwork</label>
                 <button onClick={printStudy} style={{ background: "#c8935a", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 5, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>{t("study.print", "Print / Save PDF")}</button>
                 <button onClick={() => setStudyOpen(false)} style={{ background: "transparent", border: "1px solid #ccc", color: "#333", padding: "8px 12px", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>{t("btn.close", "Close")}</button>
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: `<svg viewBox="0 0 760 340" width="100%" style="border:1px solid #eee">${studyChartSVG(studyVariants, 760, 340)}</svg>` }} />
             <div style={{ marginTop: 16 }} dangerouslySetInnerHTML={{ __html: studyTableHTML(studyVariants) }} />
-            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyDesignHTML(studyVariants) }} />
+            <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet }) }} />
             <div style={{ marginTop: 18 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: "#333", marginBottom: 5 }}>{t("study.notes", "NOTES")}</div>
               <textarea value={studyNotes} onChange={e => setStudyNotes(e.target.value)} placeholder="Your analysis and recommendation…" style={{ width: "100%", minHeight: 90, padding: 8, border: "1px solid #ccc", borderRadius: 5, fontSize: 12, fontFamily: "'Segoe UI', system-ui, sans-serif", resize: "vertical", boxSizing: "border-box" }} />
