@@ -9089,13 +9089,13 @@ export default function App() {
           {(() => { const lb = { color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }; return (
             <div>
               <div style={lb}>Core Inset (mm)</div>
-              <input type="number" step={0.5} min={0} max={20} value={ski.coreInset != null ? ski.coreInset : 5}
+              <input type="number" step={0.5} min={0} max={30} value={ski.coreInset != null ? ski.coreInset : 5}
                 onChange={e => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSki(s => { const sw = s.layup && s.layup.sidewall; const linkWall = sw && sw.mat && sw.mat !== "none"; return { ...s, coreInset: v, layup: linkWall ? { ...s.layup, sidewall: { ...sw, thick: v } } : s.layup }; }); }}
                 style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 8px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
             </div>
           ); })()}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Narrows the wood core inside the edges per side to leave room for sidewall material. Shown live in the plan view as the wood core inside the white sidewall gap.
+            Sidewall allowance per side \u2014 how far the wood core sits in from the edge to make room for sidewall material. Usually <b style={{ color: C.label }}>5\u201310mm+</b>: it needs enough width that beveling the wall to 15\u201321\u00b0 in finishing doesn't cut through. (This is the sidewall, not the base edge inset, which is ~2mm.) Shown live in the plan view as the wood core inside the white sidewall gap.
           </div>
 
           {inputField("Core end ext past contact (mm)", "coreEndExt", 0, 300, 5)}
