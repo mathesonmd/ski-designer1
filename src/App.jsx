@@ -9086,7 +9086,14 @@ export default function App() {
             Tip is at the top, tail at the bottom. Type an exact value (e.g. 10.8) for any point — position is mm from the tail. Or drag the points in the Core view; double-click the line there to add one.
           </div>
 
-          {inputField("Core Inset (mm)", "coreInset", 0, 10, 0.5)}
+          {(() => { const lb = { color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }; return (
+            <div>
+              <div style={lb}>Core Inset (mm)</div>
+              <input type="number" step={0.5} min={0} max={20} value={ski.coreInset != null ? ski.coreInset : 5}
+                onChange={e => { const v = Math.max(0, parseFloat(e.target.value) || 0); setSki(s => { const sw = s.layup && s.layup.sidewall; const linkWall = sw && sw.mat && sw.mat !== "none"; return { ...s, coreInset: v, layup: linkWall ? { ...s.layup, sidewall: { ...sw, thick: v } } : s.layup }; }); }}
+                style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 8px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+            </div>
+          ); })()}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Narrows the wood core inside the edges per side to leave room for sidewall material. Shown live in the plan view as the wood core inside the white sidewall gap.
           </div>
@@ -9111,7 +9118,7 @@ export default function App() {
               {sw.mat && sw.mat !== "none" && (<>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
                   <span style={lab}>thickness / side</span>
-                  <input type="number" value={sw.thick != null ? sw.thick : (ski.coreInset || 4)} step={0.5} min={0} onChange={e => setSW({ thick: parseFloat(e.target.value) || 0 })} style={inpSm} /><span style={lab}>mm</span>
+                  <input type="number" value={sw.thick != null ? sw.thick : (ski.coreInset || 4)} step={0.5} min={0} onChange={e => { const v = parseFloat(e.target.value) || 0; setSki(s => ({ ...s, coreInset: v, layup: { ...s.layup, sidewall: { ...(s.layup.sidewall || {}), thick: v } } })); }} style={inpSm} /><span style={lab}>mm</span>
                 </div>
                 {sw.mat === "custom" ? (
                   <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -9338,6 +9345,9 @@ export default function App() {
                     <span style={lb}>E</span><input type="number" step={500} min={0} value={ip.E} onChange={e => up({ E: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>MPa</span>
                     <span style={lb} title="Skive: ramps stiffness to zero over this length at each end, like a beveled metal insert. 0 = square ends (sharp flex step).">end taper</span><input type="number" step={5} min={0} value={ins.endTaper != null ? ins.endTaper : 0} onChange={e => up({ endTaper: parseFloat(e.target.value) || 0 })} style={cell} /><span style={lb}>mm</span>
                   </div>
+                ); })()}
+                {(() => { let g = 0; try { const pl = insertPolys(ski, ins); let a = Math.abs(_polyArea(pl.outer)); if (pl.inner) a -= Math.abs(_polyArea(pl.inner)); const ip = insertProps(ins); g = a * ip.thick * ip.density / 1e6; } catch (e) {} return (
+                  <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>weight \u2248 <span style={{ color: C.value }}>{g.toFixed(0)} g</span> per ski (density \u00d7 area \u00d7 thickness)</div>
                 ); })()}
                 {numRow("Start 0-1", "posStart", 0, 1, 0.01)}
                 {numRow("End 0-1", "posEnd", 0, 1, 0.01)}
@@ -9723,10 +9733,10 @@ export default function App() {
               {t("study.help", "Click a variant's name to load it back into the editor. Make changes, then Update to save them to that variant — nothing is locked in.")}
             </div>
           )}
-          {studyVariants.length >= 2 && (
-            <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>{t("study.openReport", "Open comparison report")}</button>
+          {studyVariants.length >= 1 && (
+            <button onClick={() => setStudyOpen(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>{studyVariants.length >= 2 ? t("study.openReport", "Open comparison report") : t("study.openReportOne", "Open design report")}</button>
           )}
-          {studyVariants.length < 2 && studyVariants.length > 0 && (
+          {false && studyVariants.length < 2 && studyVariants.length > 0 && (
             <div style={{ color: C.labelDim, fontSize: 10, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>{t("study.captureTwo", "Capture at least two to compare.")}</div>
           )}
         </AccordionSection>
