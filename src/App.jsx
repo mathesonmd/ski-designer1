@@ -9095,7 +9095,7 @@ export default function App() {
             </div>
           ); })()}
           <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -2, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Sidewall allowance per side \u2014 how far the wood core sits in from the edge to make room for sidewall material. Usually <b style={{ color: C.label }}>5\u201310mm+</b>: it needs enough width that beveling the wall to 15\u201321\u00b0 in finishing doesn't cut through. (This is the sidewall, not the base edge inset, which is ~2mm.) Shown live in the plan view as the wood core inside the white sidewall gap.
+            Sidewall allowance per side, usually 5-10mm+. Not the base edge inset (~2mm).
           </div>
 
           {inputField("Core end ext past contact (mm)", "coreEndExt", 0, 300, 5)}
