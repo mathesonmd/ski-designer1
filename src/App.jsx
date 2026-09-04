@@ -6058,7 +6058,7 @@ const SIDEBAR_GROUPS = [
   ]},
   { id: "g6", num: "6", label: "MORE", caption: "Suppliers, external calculators, and a place to send feedback.", sections: [
     { key: "suppliers", title: "Material Suppliers", terms: "materials suppliers junksupply sandwich tech buy shop store" },
-    { key: "externalTools", title: "External Tools", terms: "external tools calculator sooth junk link" },
+    { key: "externalTools", title: "External Resources", terms: "external resources tools calculator sooth junk buildskis forum guide link" },
     { key: "beta", title: "Beta / Feedback", terms: "beta feedback contact bug report" },
   ]},
 ];
@@ -8439,6 +8439,14 @@ export default function App() {
           )}
         </div>
 
+        {/* Forum call-to-action — sits in the open space between the brand and the action buttons */}
+        {!isCompact && (
+          <a href="https://forum.buildskis.com/" target="_blank" rel="noopener noreferrer"
+            style={{ flexShrink: 0, whiteSpace: "nowrap", background: C.torch, color: "#fff", padding: "8px 16px", borderRadius: 6, textDecoration: "none", fontSize: 11.5, fontWeight: 700, letterSpacing: 0.4, fontFamily: "'JetBrains Mono', monospace", boxShadow: "0 1px 10px rgba(216,90,48,0.45)" }}>
+            Join the new ski building forum! ↗
+          </a>
+        )}
+
         {/* Right-side actions */}
         {isCompact ? (
           <button
@@ -8692,7 +8700,7 @@ export default function App() {
             </div>
             <div style={{ borderTop: `1px solid ${C.panelBorder}`, marginTop: 10, paddingTop: 10, color: C.label, fontSize: 12, lineHeight: 1.55 }}>
               <b style={{ color: C.heading }}>{t("gs.saveOften", "Save often.")}</b> {t("gs.saveOften1", "Use Save in the header (or File panel) to keep a")} <span style={{ color: C.heading, fontFamily: "'JetBrains Mono', monospace" }}>{ski.mode === "snowboard" ? ".bcboard" : ".bcski"}</span> {t("gs.saveOften2", "file. Nothing is lost if you close the tab — auto-save keeps a copy in your browser.")}<br /><br />
-              <b style={{ color: C.heading }}>{t("gs.next", "What comes next?")}</b> {t("gs.next1", "Cut the outline and carve the core taper — on a CNC from the CAM workspace or the DXF/STL exports, or by hand from the 1:1 tiled print — then press it in a mold that follows your side profile.")}{(ski.mode || "ski") === "snowboard" ? " " + t("gs.nextSplit", "For a splitboard, rip the finished board down the centerline and mount the split hardware to the layout shown on the plan.") : ""} {t("gs.next2", "See External Tools for cutting and press notes.")}
+              <b style={{ color: C.heading }}>{t("gs.next", "What comes next?")}</b> {t("gs.next1", "Cut the outline and carve the core taper — on a CNC from the CAM workspace or the DXF/STL exports, or by hand from the 1:1 tiled print — then press it in a mold that follows your side profile.")}{(ski.mode || "ski") === "snowboard" ? " " + t("gs.nextSplit", "For a splitboard, rip the finished board down the centerline and mount the split hardware to the layout shown on the plan.") : ""} {t("gs.next2", "See External Resources for cutting and press notes.")}
             </div>
           </div>
         </AccordionSection>
@@ -9757,7 +9765,13 @@ export default function App() {
           ))}
         </AccordionSection>
 
-        <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Tools">
+        <AccordionSection isOpen={sectionsOpen.externalTools} onToggle={() => toggleSection("externalTools")} title="External Resources">
+          <a href="https://buildskis.com/" target="_blank" rel="noopener noreferrer"
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>buildskis.com — build archive ↗</a>
+          <a href="https://forum.buildskis.com/" target="_blank" rel="noopener noreferrer"
+            style={{ display: "block", color: C.torch, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Build Skis forum ↗</a>
+          <a href="https://www.junksupply.com/diy-ski-snowboard-building-guide/" target="_blank" rel="noopener noreferrer"
+            style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply DIY build guide ↗</a>
           <a href="https://www.junksupply.com/ski-calculator/" target="_blank" rel="noopener noreferrer"
             style={{ display: "block", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4, textDecoration: "none" }}>Junk Supply Calc ↗</a>
           <a href="https://soothski.com/compare/" target="_blank" rel="noopener noreferrer"
