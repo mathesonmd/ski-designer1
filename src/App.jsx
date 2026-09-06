@@ -347,7 +347,7 @@ function makeSwallowtail(prongX, notchY) {
   const px = prongX != null ? prongX : 0.62, ny = notchY != null ? notchY : 0.58;
   return [
     { x: 1.0, y: 0.0, txIn: 0, tyIn: 0, txOut: 0, tyOut: 0.5 },                                  // contact
-    { x: px,  y: 1.0, txIn: 0.07, tyIn: -0.34, txOut: -0.20, tyOut: -0.05, corner: true },        // prong tip (corner, holds length at y=1)
+    { x: px,  y: 1.0, txIn: 0.07, tyIn: -0.34, txOut: -0.20, tyOut: -0.05, corner: true, role: "prong" },   // prong tip (corner; the furthest-extent node — holds the length at y=1)
     { x: 0.0, y: ny,  txIn: 0.22, tyIn: 0.09, txOut: 0, tyOut: 0, lockX: true, role: "notch" },   // notch, on the centerline
   ];
 }
@@ -4580,23 +4580,6 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       });
     }
 
-    // Swallowtail: a faint dashed "length" line across the prong tips (the very back of the ski), so it's
-    // clear the length is measured to the tips and not the notch.
-    if (ski.swallowtail && ski.tailNodesR && ski.tailNodesR.length) {
-      let prong = ski.tailNodesR[0];
-      for (const n of ski.tailNodesR) if (n.y > prong.y) prong = n;   // node sitting on the back line (max y)
-      const px = Math.abs(prong.x) * (ski.tailWidth / 2);
-      const sR = toMain(px, 0), sL = toMain(-px, 0), lbl = toMain(0, -7);
-      ctx.save();
-      ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(sR.x, sR.y); ctx.lineTo(sL.x, sL.y); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = `${isVertical ? 12 : 9}px 'JetBrains Mono', monospace`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("length", lbl.x, lbl.y);
-      ctx.restore();
-    }
-
     // ── Core top-down (always shown when there's a sidewall inset, so it updates live as you change it;
     // also for V-cut / interlock ends). Wood fill + grain reads the core against the plain sidewall gap. ──
     if ((ski.coreInset || 0) > 0 || ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
@@ -4956,6 +4939,27 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     const mainClipRect = isVertical
       ? { x: 0, y: 0, w: mainColW, h: height }
       : { x: 0, y: 0, w: width, h: mainRowH };
+
+    // Swallowtail: dashed "length" line across the prong tips, drawn on top so a topsheet can't hide it, and
+    // pegged to the actual prong node (the furthest-extent node) so it tracks as you drag the prong.
+    if (ski.swallowtail && ski.tailNodesR && ski.tailNodesR.length) {
+      let prong = ski.tailNodesR[0];
+      for (const n of ski.tailNodesR) if (n.y > prong.y) prong = n;   // furthest-extent node
+      const px = Math.abs(prong.x) * (ski.tailWidth / 2);
+      const py = ski.tailLength * (1 - prong.y);   // its along-ski position (0 when pinned to the back line)
+      const sR = toMain(px, py), sL = toMain(-px, py), lbl = toMain(0, py - 7);
+      ctx.save();
+      ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1.4; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(sR.x, sR.y); ctx.lineTo(sL.x, sL.y); ctx.stroke();
+      ctx.setLineDash([]);
+      // short end ticks so it reads as a dimension line
+      [[sR, 1], [sL, -1]].forEach(([s]) => { ctx.beginPath(); ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2); ctx.fillStyle = C.contactLine || "#e8552a"; ctx.fill(); });
+      ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = `${isVertical ? 12 : 9}px 'JetBrains Mono', monospace`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("length", lbl.x, lbl.y);
+      ctx.restore();
+    }
+
     cps.forEach(cp => {
       if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, mainClipRect);
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
@@ -5317,18 +5321,28 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       const updates = {};
 
       if (!isTip && dragStart.ski.swallowtail && !isContactNode) {
-        // Swallowtail prong/notch — PURE shape, never touch ski length or tailLength (only the contact node
-        // and the Dimensions panel do). The notch (last node) is pinned to the centerline and moves in depth
-        // only; the prong holds the tail-end line. This is what lets you pull the swallow in without the
-        // dimensions drifting.
-        if (nodes[cp.idx].lockX || cp.idx === nodes.length - 1) {
+        const nd = nodes[cp.idx];
+        if (nd.role === "notch" || nd.lockX) {
+          // Notch: centerline, depth only. Never touches the length.
           newNodes[cp.idx].x = 0;
-          newNodes[cp.idx].y = clamp(nodes[cp.idx].y + dNy, 0.2, 0.98);
+          newNodes[cp.idx].y = clamp(nd.y + dNy, 0.2, 0.98);
+        } else if (nd.role === "prong") {
+          // Prong: the furthest-extent node → it DEFINES the length. Along-drag moves the tail-end line,
+          // changing ski.length + tailLength (like the end node); lateral-drag sets prong width. Pinned to
+          // y=1 so it always sits on the length reference line.
+          const newSkiLen = clamp(Math.round(dragStart.ski.length - dSkiY), 1200, 2200);
+          const actualDelta = dragStart.ski.length - newSkiLen;
+          updates.length = newSkiLen;
+          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength - actualDelta), 60, 400);
+          newNodes[cp.idx].x = clamp(nd.x + dNx, 0.05, 1.0);
+          newNodes[cp.idx].y = 1;
         } else {
-          newNodes[cp.idx].x = clamp(nodes[cp.idx].x + dNx, 0.05, 1.0);
-          newNodes[cp.idx].y = clamp(nodes[cp.idx].y + dNy, 0.55, 1.0);
+          // Added interior point: pure shape, no length change.
+          newNodes[cp.idx].x = clamp(nd.x + dNx, 0, 1.0);
+          newNodes[cp.idx].y = clamp(nd.y + dNy, 0, 1.0);
         }
         updates[arrKey] = newNodes;
+        if (arrKey === "tailNodesR" && dragStart.ski.tailSymmetric) updates.tailNodesL = JSON.parse(JSON.stringify(newNodes));
       } else if (isContactNode) {
         // Along-ski drag of CONTACT node:
         //   Tip: contact at skiY = ski.length - tipLength. Drag right (+dSkiY) moves toward tip → tipLength shrinks.
@@ -5507,13 +5521,20 @@ function ProfileView({ ski, setSki, width, height }) {
       { key: "tipHeight",  xmm: L, ymm: TH,  min: 5, max: 80, step: 1, align: "right" },
       { key: "camberHeight", xmm: camberMidX, ymm: CH, min: 0, max: 10, step: 0.5, align: "center" },
     ];
-    const handles = handleDefs.map(h => { const s = toC(h.xmm, h.ymm); return { ...h, x: s.x, y: s.y, yScale, baseY, yExagg }; });
+    if (ski.rockerLinked === false) {
+      handleDefs.push(
+        { key: "tailRockerLen", xmm: tk.tail, ymm: 0, axis: "x", param: "tailRockerLen", min: 20, max: Math.round(L * 0.45), step: 1, takeoff: true },
+        { key: "tipRockerLen",  xmm: L - tk.tip, ymm: 0, axis: "x", param: "tipRockerLen", min: 20, max: Math.round(L * 0.45), step: 1, takeoff: true },
+      );
+    }
+    const handles = handleDefs.map(h => { const s = toC(h.xmm, h.ymm); return { ...h, x: s.x, y: s.y, yScale, baseY, yExagg, xScale, padX }; });
     handlesRef.current = handles;
 
     // Value labels (kept, nudged above the handle)
     ctx.fillStyle = C.heading;
     ctx.font = "bold 10px 'JetBrains Mono', monospace";
     handles.forEach(h => {
+      if (h.takeoff) return;   // takeoff dots are drawn + labelled separately below
       ctx.textAlign = h.align;
       const val = h.step < 1 ? h.ymm.toFixed(1) : Math.round(h.ymm);
       ctx.fillText(`${val}mm`, h.x + (h.align === "left" ? 8 : h.align === "right" ? -8 : 0), h.y - 11);
@@ -5521,11 +5542,39 @@ function ProfileView({ ski, setSki, width, height }) {
 
     // Handle dots
     handles.forEach(h => {
+      if (h.takeoff) return;
       const active = dragging === h.key || hovered === h.key;
       ctx.beginPath(); ctx.arc(h.x, h.y, active ? 7 : 5.5, 0, Math.PI * 2);
       ctx.fillStyle = active ? C.controlHover : C.heading; ctx.fill();
       ctx.strokeStyle = C.bgDeep; ctx.lineWidth = 1.5; ctx.stroke();
     });
+
+    // ── Reference marks along the base: tip/tail wide points (sidecut contacts) and the waist ──
+    const tipWideX = L - TL, tailWideX = TAIL;
+    const _span = Math.max(1, L - TL - TAIL);
+    const waistX = ski.waistFullLength ? (ski.waistPosition != null ? ski.waistPosition : 0.48) * L : TAIL + (ski.waistPosition != null ? ski.waistPosition : 0.48) * _span;
+    ctx.save();
+    [["TAIL WIDE", tailWideX], ["WAIST", waistX], ["TIP WIDE", tipWideX]].forEach(([lbl, xmm]) => {
+      const s = toC(xmm, 0);
+      ctx.strokeStyle = "rgba(200,147,90,0.55)"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(s.x, baseY - 5); ctx.lineTo(s.x, baseY + 6); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(200,147,90,0.8)"; ctx.font = "7px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+      ctx.fillText(lbl, s.x, baseY + 14);
+    });
+    ctx.restore();
+
+    // ── Early rise (rocker unlinked): draggable dots where the base leaves the snow (the contact/takeoff),
+    // separate from the wide points. Drawn on the snow line; drag horizontally to set the rise length. ──
+    if (ski.rockerLinked === false) {
+      [["tailRockerLen", tk.tail, Math.round(tk.tail)], ["tipRockerLen", L - tk.tip, Math.round(tk.tip)]].forEach(([key, xmm, mm]) => {
+        const s = toC(xmm, 0), active = dragging === key || hovered === key;
+        ctx.beginPath(); ctx.arc(s.x, baseY, active ? 7.5 : 6, 0, Math.PI * 2);
+        ctx.fillStyle = active ? C.controlHover : (C.contactLine || "#e8552a"); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = "bold 8px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+        ctx.fillText(`${mm}mm`, s.x, baseY - 10);
+      });
+    }
 
     ctx.fillStyle = C.dimText;
     ctx.font = "9px 'JetBrains Mono', monospace";
@@ -5549,6 +5598,14 @@ function ProfileView({ ski, setSki, width, height }) {
     if (dragging) {
       const xf = dragXformRef.current; if (!xf) return;
       const meta = handlesRef.current.find(h => h.key === dragging); if (!meta) return;
+      if (meta.axis === "x") {
+        // Takeoff dot: horizontal drag → rocker length in mm (early rise).
+        let xmm = (p.x - meta.padX) / meta.xScale;
+        let val = meta.param === "tipRockerLen" ? (L - xmm) : xmm;
+        val = Math.round(Math.max(meta.min, Math.min(meta.max, val)));
+        setSki(s => (s[meta.param] === val ? s : { ...s, [meta.param]: val }));
+        return;
+      }
       let ymm = (xf.baseY - p.y) / xf.yScale;
       ymm = Math.max(meta.min, Math.min(meta.max, ymm));
       ymm = Math.round(ymm / meta.step) * meta.step;
@@ -6458,12 +6515,17 @@ function RunningEdgeField({ ski, setSki, C }) {
 function RockerProfileField({ ski, setSki, C }) {
   const linked = ski.rockerLinked !== false;
   const live = linked ? rockerPercents(ski) : rockerProfilePercents(ski);
+  const tk = rockerTakeoffLens(ski);
+  const liveMm = { tip: Math.round(tk.tip), tail: Math.round(tk.tail) };   // rocker length in mm (early rise)
   const [tipT, setTipT] = useState(""); const [tailT, setTailT] = useState("");
   const [editing, setEditing] = useState(null); // 'tip' | 'tail' | null
 
-  const tipShown = editing === 'tip' ? tipT : live.tip.toFixed(0);
-  const tailShown = editing === 'tail' ? tailT : live.tail.toFixed(0);
-  const camberShown = Math.max(0, 100 - parseFloat(tipShown || live.tip) - parseFloat(tailShown || live.tail));
+  // When unlinked (early rise) the inputs are millimetres; when linked they're % of length.
+  const tipShown = editing === 'tip' ? tipT : (linked ? live.tip.toFixed(0) : String(liveMm.tip));
+  const tailShown = editing === 'tail' ? tailT : (linked ? live.tail.toFixed(0) : String(liveMm.tail));
+  const camberShown = linked
+    ? Math.max(0, 100 - parseFloat(tipShown || live.tip) - parseFloat(tailShown || live.tail))
+    : Math.max(0, Math.round(ski.length - (editing === 'tip' ? parseFloat(tipT) || liveMm.tip : liveMm.tip) - (editing === 'tail' ? parseFloat(tailT) || liveMm.tail : liveMm.tail)));
 
   const commit = (which, raw) => {
     const v = parseFloat(raw);
@@ -6471,23 +6533,20 @@ function RockerProfileField({ ski, setSki, C }) {
     if (!isFinite(v) || v < 0) return;
     setSki(s => {
       const isLinked = s.rockerLinked !== false;
-      const cur = isLinked ? rockerPercents(s) : rockerProfilePercents(s);
+      if (!isLinked) {
+        // Early rise: set the rocker takeoff length directly, in mm.
+        const mm = Math.round(Math.max(20, Math.min(s.length * 0.45, v)));
+        return which === 'tip' ? { ...s, tipRockerLen: mm } : { ...s, tailRockerLen: mm };
+      }
+      const cur = rockerPercents(s);
       const tipPct = which === 'tip' ? v : cur.tip;
       const tailPct = which === 'tail' ? v : cur.tail;
       if (tipPct + tailPct > 90) return s;  // leave some camber zone
-      if (isLinked) {
-        // Move the contacts (tip/tail length), keep takeoff mirrored, resync core.
-        const patch = tipTailFromRocker(s, tipPct, tailPct);
-        const next = { ...s, ...patch, tipRockerLen: patch.tipLength, tailRockerLen: patch.tailLength };
-        next.coreProfile = syncCoreContacts(next);
-        return next;
-      }
-      // Unlinked: move only the rocker takeoff lengths (side profile), leave contacts/radius alone.
-      return {
-        ...s,
-        tipRockerLen: Math.round(s.length * (tipPct / 100)),
-        tailRockerLen: Math.round(s.length * (tailPct / 100)),
-      };
+      // Move the contacts (tip/tail length), keep takeoff mirrored, resync core.
+      const patch = tipTailFromRocker(s, tipPct, tailPct);
+      const next = { ...s, ...patch, tipRockerLen: patch.tipLength, tailRockerLen: patch.tailLength };
+      next.coreProfile = syncCoreContacts(next);
+      return next;
     });
   };
 
@@ -6509,42 +6568,42 @@ function RockerProfileField({ ski, setSki, C }) {
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
         <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-          Rocker Profile (% of length)
+          {linked ? "Rocker Profile (% of length)" : "Early Rise (mm from ends)"}
         </span>
-        <button onClick={toggleLink} title={linked ? "Rocker takeoff is locked to the contact points. Tap for Early Rise: set where the tip/tail lifts independently of the outline shape and camber." : "Early Rise on: the lift point is independent of the contacts and camber. Tap to relink it to the contacts."}
-          style={{ background: linked ? "transparent" : (C.contactLine || "#e8552a") + "22", border: `1px solid ${linked ? C.inputBorder : (C.contactLine || "#e8552a")}`, borderRadius: 3, padding: "2px 7px", color: linked ? C.labelDim : (C.contactLine || "#e8552a"), fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>
-          {linked ? "Linked" : "⚡ Early Rise"}
+        <button onClick={toggleLink} title={linked ? "Early Rise is OFF: the rocker takeoff is locked to the contact points. Tap to turn it ON and set where the tip/tail lifts on its own, in mm." : "Early Rise is ON: the lift point is independent of the contacts and camber. Tap to turn it OFF (relink to the contacts)."}
+          style={{ background: linked ? C.inputBg : (C.contactLine || "#e8552a"), border: `1px solid ${linked ? C.inputBorder : (C.contactLine || "#e8552a")}`, borderRadius: 4, padding: "3px 10px", color: linked ? C.label : "#fff", fontSize: 9.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>
+          {linked ? "Early Rise: Off" : "⚡ Early Rise: On"}
         </button>
       </div>
       <div style={{ display: "flex", gap: 5 }}>
         <div style={cellStyle}>
-          <input type="number" min={0} max={45} step={1} value={tipShown}
-            onFocus={e => { setEditing('tip'); setTipT(live.tip.toFixed(0)); e.target.style.borderColor = C.inputFocus; }}
+          <input type="number" min={0} max={linked ? 45 : 900} step={1} value={tipShown}
+            onFocus={e => { setEditing('tip'); setTipT(linked ? live.tip.toFixed(0) : String(liveMm.tip)); e.target.style.borderColor = C.inputFocus; }}
             onChange={e => setTipT(e.target.value)}
             onBlur={e => { commit('tip', e.target.value); e.target.style.borderColor = C.inputBorder; }}
             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
             style={inputStyle} />
-          <div style={subLabel}>TIP</div>
+          <div style={subLabel}>TIP {linked ? "%" : "mm"}</div>
         </div>
         <div style={cellStyle}>
-          <input type="number" value={camberShown.toFixed(0)} disabled readOnly
+          <input type="number" value={linked ? camberShown.toFixed(0) : camberShown} disabled readOnly
             style={{ ...inputStyle, color: C.labelDim, cursor: "default", opacity: 0.8 }} />
-          <div style={subLabel}>CAMBER</div>
+          <div style={subLabel}>CAMBER {linked ? "%" : "mm"}</div>
         </div>
         <div style={cellStyle}>
-          <input type="number" min={0} max={45} step={1} value={tailShown}
-            onFocus={e => { setEditing('tail'); setTailT(live.tail.toFixed(0)); e.target.style.borderColor = C.inputFocus; }}
+          <input type="number" min={0} max={linked ? 45 : 900} step={1} value={tailShown}
+            onFocus={e => { setEditing('tail'); setTailT(linked ? live.tail.toFixed(0) : String(liveMm.tail)); e.target.style.borderColor = C.inputFocus; }}
             onChange={e => setTailT(e.target.value)}
             onBlur={e => { commit('tail', e.target.value); e.target.style.borderColor = C.inputBorder; }}
             onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
             style={inputStyle} />
-          <div style={subLabel}>TAIL</div>
+          <div style={subLabel}>TAIL {linked ? "%" : "mm"}</div>
         </div>
       </div>
       <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
         {linked
           ? "Linked: % sets tip/tail length (moves the contacts + radius). Tap Early Rise to lift the tip/tail before the contact, independent of the outline and camber."
-          : "Early Rise: % sets where the base lifts off, on its own. Contacts, radius, outline, and camber stay put. Higher % = earlier, longer rise."}
+          : `Early Rise: mm from each end to where the base lifts off (the takeoff dots in the side profile). Contacts, radius, and camber stay put. ≈ ${live.tip.toFixed(0)}% tip / ${live.tail.toFixed(0)}% tail of length.`}
       </div>
     </div>
   );
