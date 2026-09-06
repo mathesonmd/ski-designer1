@@ -4964,6 +4964,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = `${isVertical ? 12 : 9}px 'JetBrains Mono', monospace`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText("length", lbl.x, lbl.y);
+      // Swallow depth: dimension from the length line to the innermost node (notch), along the centerline.
+      let notch = _swR[_swR.length - 1];
+      for (const n of _swR) if ((n.role === "notch" || n.lockX) ) { notch = n; break; }
+      const depthMm = Math.round(ski.tailLength * (1 - notch.y));
+      if (depthMm > 1) {
+        const nS = toMain(0, ski.tailLength * (1 - notch.y)), bS = toMain(0, py);
+        ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.moveTo(nS.x, nS.y); ctx.lineTo(bS.x, bS.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(nS.x, nS.y, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.font = `${isVertical ? 11 : 8}px 'JetBrains Mono', monospace`;
+        const dl = toMain(Math.max(6, px * 0.35), ski.tailLength * (1 - notch.y) * 0.5);
+        ctx.textAlign = "left"; ctx.fillText(`swallow ${depthMm}mm`, dl.x + 4, dl.y);
+      }
       ctx.restore();
     }
 
@@ -9071,9 +9084,14 @@ export default function App() {
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
                 {(ski.mode || "ski") !== "snowboard" && (() => {
                   const on = !!ski.swallowtail;
-                  const setSwallow = (val) => setSki(s => val
-                    ? { ...s, swallowtail: true, tipTailSym: false, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() }
-                    : { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() });
+                  const setSwallow = (val) => setSki(s => {
+                    if (!val) return { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() };
+                    const patch = { ...s, swallowtail: true, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() };
+                    // A swallowtail is centreline-symmetric — clear any advanced L/R asymmetry so you don't have to hunt for a toggle.
+                    if (s.asymSidecut) { patch.asymSidecut = false; patch.waistWidth = Math.round(((s.waistOutside ?? s.waistWidth) + (s.waistInside ?? s.waistWidth)) / 2); }
+                    if (s.asymContact) { patch.asymContact = false; patch.tipLength = Math.round(((s.tipLengthOutside ?? s.tipLength) + (s.tipLengthInside ?? s.tipLength)) / 2); patch.tailLength = Math.round(((s.tailLengthOutside ?? s.tailLength) + (s.tailLengthInside ?? s.tailLength)) / 2); }
+                    return patch;
+                  });
                   return (
                     <div style={{ marginBottom: 8, marginTop: 2 }}>
                       <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tail shape</div>
@@ -9214,9 +9232,13 @@ export default function App() {
             </div>
             {!ski.tipTailSym && (() => {
               const on = !!ski.swallowtail;
-              const setSwallow = (val) => setSki(s => val
-                ? { ...s, swallowtail: true, tipTailSym: false, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() }
-                : { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() });
+              const setSwallow = (val) => setSki(s => {
+                if (!val) return { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() };
+                const patch = { ...s, swallowtail: true, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() };
+                if (s.asymSidecut) { patch.asymSidecut = false; patch.waistWidth = Math.round(((s.waistOutside ?? s.waistWidth) + (s.waistInside ?? s.waistWidth)) / 2); }
+                if (s.asymContact) { patch.asymContact = false; patch.tipLength = Math.round(((s.tipLengthOutside ?? s.tipLength) + (s.tipLengthInside ?? s.tipLength)) / 2); patch.tailLength = Math.round(((s.tailLengthOutside ?? s.tailLength) + (s.tailLengthInside ?? s.tailLength)) / 2); }
+                return patch;
+              });
               return (
                 <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px solid ${C.panelBorder}` }}>
                   <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tail shape</div>
