@@ -4580,6 +4580,23 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       });
     }
 
+    // Swallowtail: a faint dashed "length" line across the prong tips (the very back of the ski), so it's
+    // clear the length is measured to the tips and not the notch.
+    if (ski.swallowtail && ski.tailNodesR && ski.tailNodesR.length) {
+      let prong = ski.tailNodesR[0];
+      for (const n of ski.tailNodesR) if (n.y > prong.y) prong = n;   // node sitting on the back line (max y)
+      const px = Math.abs(prong.x) * (ski.tailWidth / 2);
+      const sR = toMain(px, 0), sL = toMain(-px, 0), lbl = toMain(0, -7);
+      ctx.save();
+      ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(sR.x, sR.y); ctx.lineTo(sL.x, sL.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = `${isVertical ? 12 : 9}px 'JetBrains Mono', monospace`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("length", lbl.x, lbl.y);
+      ctx.restore();
+    }
+
     // ── Core top-down (always shown when there's a sidewall inset, so it updates live as you change it;
     // also for V-cut / interlock ends). Wood fill + grain reads the core against the plain sidewall gap. ──
     if ((ski.coreInset || 0) > 0 || ski.vcutTip || ski.vcutTail || ski.interlockTip || ski.interlockTail) {
@@ -8135,6 +8152,7 @@ export default function App() {
     views: true,
     presets: true,
     splitboard: true,     // only shown in splitboard mode; relevant section, open there
+    symmetry: false,
     dimensions: true,
     snowboard: true,
     coreFill: false,
@@ -8977,7 +8995,7 @@ export default function App() {
                 {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", 80, 500)}
                 {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
-                {(() => {
+                {(ski.mode || "ski") !== "snowboard" && (() => {
                   const on = !!ski.swallowtail;
                   const setSwallow = (val) => setSki(s => val
                     ? { ...s, swallowtail: true, tipTailSym: false, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() }
@@ -9102,30 +9120,49 @@ export default function App() {
         </AccordionSection>
 
         {(ski.mode || "ski") === "snowboard" && (
+          <AccordionSection isOpen={sectionsOpen.symmetry !== false} onToggle={() => toggleSection("symmetry")} title={t("sec.symmetry", "Symmetry")}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tip &amp; Tail</div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {[["Symmetric", true], ["Asymmetric", false]].map(([lbl, symVal]) => {
+                const active = !!ski.tipTailSym === symVal;
+                return (
+                  <button key={lbl} onClick={() => setSki(s => symVal
+                    ? { ...s, tipTailSym: true, tipSymmetric: true, tailSymmetric: true, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() }
+                    : { ...s, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)) })}
+                    style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim, border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              {ski.tipTailSym ? "Symmetric (true twin): shape the nose and the tail follows. Both ends the same, both sides mirrored." : "Asymmetric (directional): the tail is editable on its own — drag its nodes in the plan view. Each end still mirrors left to right."}
+            </div>
+            {!ski.tipTailSym && (() => {
+              const on = !!ski.swallowtail;
+              const setSwallow = (val) => setSki(s => val
+                ? { ...s, swallowtail: true, tipTailSym: false, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() }
+                : { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() });
+              return (
+                <div style={{ marginTop: 10, paddingTop: 9, borderTop: `1px solid ${C.panelBorder}` }}>
+                  <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tail shape</div>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {[["Rounded", false], ["Swallowtail", true]].map(([lbl, val]) => {
+                      const active = on === val;
+                      return <button key={lbl} onClick={() => setSwallow(val)} style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim, border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>{lbl}</button>;
+                    })}
+                  </div>
+                  {on && <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Drag the prong tips for tail width and the centerline notch for swallow depth. Double-click the tail curve to add points, then drag their handles to shape. Length stays fixed (Tail Len). Both sides mirror.</div>}
+                </div>
+              );
+            })()}
+          </AccordionSection>
+        )}
+
+        {(ski.mode || "ski") === "snowboard" && (
           <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title={t("sec.stance", "Stance & Inserts")}>
             {inputField("Stance W", "stanceWidth", 400, 720)}
             {inputField("Setback", "setback", -40, 80)}
-            <div style={{ marginBottom: 8, marginTop: 2 }}>
-              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Symmetry (tip &amp; tail)</div>
-              <div style={{ display: "flex", gap: 5 }}>
-                {[["Symmetric", true], ["Asymmetric", false]].map(([lbl, symVal]) => {
-                  const active = !!ski.tipTailSym === symVal;
-                  return (
-                    <button key={lbl} onClick={() => setSki(s => symVal
-                      ? { ...s, tipTailSym: true, tipSymmetric: true, tailSymmetric: true, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() }
-                      : { ...s, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)) })}
-                      style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                        background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
-                        border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>
-                      {lbl}
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                {ski.tipTailSym ? "Symmetric (true twin): shape the tip and the tail follows. Both ends the same, both sides mirrored." : "Asymmetric (directional): the tail is now editable on its own — drag its nodes in the plan view. Each end still mirrors left to right. Needed for a swallowtail or any tail that differs from the nose."}
-              </div>
-            </div>
             <div style={{ marginBottom: 7 }}>
               <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
                 Insert Pattern
