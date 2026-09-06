@@ -894,7 +894,13 @@ function flexRating(k){
 // Sample a 2-node bezier shape into a sequence of points in normalized [0,1]² space.
 function sampleShape(nodes, nPts) {
   const pts = [];
-  for (let i = 0; i <= nPts; i++) pts.push(evalBez(nodes[0], nodes[1], i / nPts));
+  if (!nodes || nodes.length < 2) return pts;
+  const segs = nodes.length - 1;
+  const per = Math.max(2, Math.round(nPts / segs));   // samples per bezier segment
+  for (let s = 0; s < segs; s++) {
+    const a = nodes[s], b = nodes[s + 1];
+    for (let i = (s === 0 ? 0 : 1); i <= per; i++) pts.push(evalBez(a, b, i / per));  // skip shared node
+  }
   return pts;
 }
 
@@ -5020,32 +5026,58 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     const id = findCP(mx, my);
     if (id) {
       const cp = cps.find(c => c.id === id);
-      if (cp && (cp.type?.endsWith("Node") || cp.type?.endsWith("Tangent"))) {
-        // Which node array + default shape does this handle belong to?
+      if (cp && cp.type?.endsWith("Node")) {
         const isTip = cp.isTip;
         const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
         const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
-        const defShape = isTip ? makeRoundedTip() : makeRoundedTail();
-        const def = defShape[cp.idx];
-        if (def) {
-          setSki(s => {
-            const arr = (s[param] || (isTip ? makeRoundedTip() : makeRoundedTail())).map(n => ({ ...n }));
-            if (cp.type.endsWith("Node")) { arr[cp.idx].x = def.x; arr[cp.idx].y = def.y; }
-            else { arr[cp.idx].tx = def.tx; arr[cp.idx].ty = def.ty; }
-            const next = { ...s, [param]: arr };
-            // Keep symmetric side mirrored if applicable.
-            if (isTip && s.tipSymmetric) next.tipNodesL = arr.map(n => ({ ...n }));
-            if (!isTip && s.tailSymmetric) next.tailNodesL = arr.map(n => ({ ...n }));
-            return next;
-          });
-          return;
-        }
+        const mateKey = isTip ? (sideR ? "tipNodesL" : "tipNodesR") : (sideR ? "tailNodesL" : "tailNodesR");
+        setSki(s => {
+          const arr = (s[param] || (isTip ? makeRoundedTip() : makeRoundedTail())).map(n => ({ ...n }));
+          if (cp.idx > 0 && cp.idx < arr.length - 1) {
+            arr.splice(cp.idx, 1);   // double-click an added (middle) point → remove it
+          } else {
+            const defShape = isTip ? makeRoundedTip() : makeRoundedTail();
+            const def = cp.idx === 0 ? defShape[0] : defShape[defShape.length - 1];   // endpoint → reset to default
+            if (def) arr[cp.idx] = { ...arr[cp.idx], x: def.x, y: def.y, tx: def.tx, ty: def.ty };
+          }
+          const next = { ...s, [param]: arr };
+          if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[mateKey] = arr.map(n => ({ ...n }));
+          return next;
+        });
+        return;
+      }
+      if (cp && cp.type?.endsWith("Tangent")) {
+        const isTip = cp.isTip;
+        const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
+        const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
+        const mateKey = isTip ? (sideR ? "tipNodesL" : "tipNodesR") : (sideR ? "tailNodesL" : "tailNodesR");
+        const def = (isTip ? makeRoundedTip() : makeRoundedTail())[cp.idx];
+        if (def) setSki(s => { const arr = (s[param] || []).map(n => ({ ...n })); if (arr[cp.idx]) { arr[cp.idx].tx = def.tx; arr[cp.idx].ty = def.ty; } const next = { ...s, [param]: arr }; if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[mateKey] = arr.map(n => ({ ...n })); return next; });
+        return;
       }
     }
 
     const frame = findDragFrame(mx, my);
-    if (frame === "tip")  { setTipZoom(1);  setTipPan({ x: 0, y: 0 }); }
-    if (frame === "tail") { setTailZoom(1); setTailPan({ x: 0, y: 0 }); }
+    // In the tip/tail shaping frames, an empty-space double-click ADDS a bezier point (splits the longest
+    // segment). Combined with removing added points above, this gives full multi-point control — enough to
+    // shape swallowtails and other complex tails. Symmetric mode mirrors it to the other side.
+    if (frame === "tip" || frame === "tail") {
+      const isTip = frame === "tip";
+      const rKey = isTip ? "tipNodesR" : "tailNodesR", lKey = isTip ? "tipNodesL" : "tailNodesL";
+      setSki(s => {
+        const arr = (s[rKey] || (isTip ? makeRoundedTip() : makeRoundedTail())).map(n => ({ ...n }));
+        if (arr.length >= 8) return s;   // cap
+        let best = 0, bestLen = -1;
+        for (let i = 0; i < arr.length - 1; i++) { const dx = arr[i + 1].x - arr[i].x, dy = arr[i + 1].y - arr[i].y, l2 = dx * dx + dy * dy; if (l2 > bestLen) { bestLen = l2; best = i; } }
+        const a = arr[best], b = arr[best + 1];
+        const mid = evalBez(a, b, 0.5), q1 = evalBez(a, b, 0.42), q2 = evalBez(a, b, 0.58);
+        arr.splice(best + 1, 0, { x: mid.x, y: mid.y, tx: (q2.x - q1.x) * 0.7, ty: (q2.y - q1.y) * 0.7 });
+        const next = { ...s, [rKey]: arr };
+        if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[lKey] = arr.map(n => ({ ...n }));
+        return next;
+      });
+      return;
+    }
     if (frame === "main") { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }
   }, [findCP, cps, findDragFrame, setSki]);
 
@@ -6372,9 +6404,9 @@ function RockerProfileField({ ski, setSki, C }) {
         <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
           Rocker Profile (% of length)
         </span>
-        <button onClick={toggleLink} title={linked ? "Rocker takeoff is locked to the contact points (Snocad-style). Click to unlink." : "Rocker takeoff is independent of the contacts (advanced). Click to relink."}
+        <button onClick={toggleLink} title={linked ? "Rocker takeoff is locked to the contact points. Tap for Early Rise: set where the tip/tail lifts independently of the outline shape and camber." : "Early Rise on: the lift point is independent of the contacts and camber. Tap to relink it to the contacts."}
           style={{ background: linked ? "transparent" : (C.contactLine || "#e8552a") + "22", border: `1px solid ${linked ? C.inputBorder : (C.contactLine || "#e8552a")}`, borderRadius: 3, padding: "2px 7px", color: linked ? C.labelDim : (C.contactLine || "#e8552a"), fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>
-          {linked ? "🔗 Linked" : "⛓ Unlinked"}
+          {linked ? "Linked" : "⚡ Early Rise"}
         </button>
       </div>
       <div style={{ display: "flex", gap: 5 }}>
@@ -6404,8 +6436,8 @@ function RockerProfileField({ ski, setSki, C }) {
       </div>
       <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
         {linked
-          ? "Linked: % sets tip/tail length (moves contacts + radius)."
-          : "Unlinked: % sets rocker takeoff only. Contacts + radius stay fixed."}
+          ? "Linked: % sets tip/tail length (moves the contacts + radius). Tap Early Rise to lift the tip/tail before the contact, independent of the outline and camber."
+          : "Early Rise: % sets where the base lifts off, on its own. Contacts, radius, outline, and camber stay put. Higher % = earlier, longer rise."}
       </div>
     </div>
   );
@@ -8843,7 +8875,7 @@ export default function App() {
           {(() => {
             const board = (ski.mode || "ski") === "snowboard";
             const wMax = board ? 340 : 200;      // widths: boards run ~250-300mm
-            const waistMin = board ? 180 : 50, waistMax = board ? 320 : 180;
+            const waistMin = board ? 60 : 50, waistMax = board ? 320 : 180;   // board floor lowered for narrow single-plank / SKWAL boards
             const lenMin = board ? 1000 : 1200, lenMax = 2200;
             return (
               <>
