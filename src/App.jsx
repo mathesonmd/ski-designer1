@@ -4371,6 +4371,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     if (!ski.tipSymmetric) addShape(ski.tipNodesL, "tipL", true, -1, "tip");
     if (!ski.tipTailSym) { addShape(ski.tailNodesR, "tailR", false, 1, "tail");
     if (!ski.tailSymmetric) addShape(ski.tailNodesL, "tailL", false, -1, "tail"); }
+    else if (ski.mode === "snowboard") {
+      // Twin board: the tail SHAPE follows the tip, but the tail contact is still adjustable. Expose the tail
+      // contact node (both edges) so it's draggable for width + fore/aft; the drag mirrors to the tip.
+      cps.push({ id: "tailR_n0",  skiX:  ski.tailWidth / 2, skiY: tailContactY, type: "tailRNode", idx: 0, sign: 1,  isTip: false, frames: ["main", "tail"] });
+      cps.push({ id: "tailR_n0L", skiX: -ski.tailWidth / 2, skiY: tailContactY, type: "tailRNode", idx: 0, sign: -1, isTip: false, frames: ["main", "tail"] });
+    }
     return cps;
   }, [ski, tipContactY, tailContactY, waistY]);
   const cps = useMemo(buildCPs, [buildCPs]);
@@ -4942,9 +4948,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
     // Swallowtail: dashed "length" line across the prong tips, drawn on top so a topsheet can't hide it, and
     // pegged to the actual prong node (the furthest-extent node) so it tracks as you drag the prong.
-    if (ski.swallowtail && ski.tailNodesR && ski.tailNodesR.length) {
-      let prong = ski.tailNodesR[0];
-      for (const n of ski.tailNodesR) if (n.y > prong.y) prong = n;   // furthest-extent node
+    const _swR = ski.tailNodesR || [];
+    if ((ski.swallowtail || _swR.some(n => n.role === "prong" || n.role === "notch")) && _swR.length) {
+      let prong = _swR[0];
+      for (const n of _swR) if (n.y > prong.y) prong = n;   // furthest-extent node
       const px = Math.abs(prong.x) * (ski.tailWidth / 2);
       const py = ski.tailLength * (1 - prong.y);   // its along-ski position (0 when pinned to the back line)
       const sR = toMain(px, py), sL = toMain(-px, py), lbl = toMain(0, py - 7);
@@ -5318,9 +5325,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
       const isEndNode = (cp.idx === nodes.length - 1);
       const isContactNode = (cp.idx === 0);
+      const isSwallow = !isTip && (dragStart.ski.swallowtail || nodes.some(n => n.role === "prong" || n.role === "notch"));
       const updates = {};
 
-      if (!isTip && dragStart.ski.swallowtail && !isContactNode) {
+      if (isSwallow && !isContactNode) {
         const nd = nodes[cp.idx];
         if (nd.role === "notch" || nd.lockX) {
           // Notch: centerline, depth only. Never touches the length.
@@ -5356,7 +5364,14 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         // The contact point is at skiX = sign·wHalf. Moving FURTHER from centerline grows the width.
         // For right side (sign=+1): positive dSkiX moves outward; for left (sign=-1): negative dSkiX moves outward.
         const widthParam = isTip ? "tipWidth" : "tailWidth";
-        updates[widthParam] = clamp(Math.round(dragStart.ski[widthParam] + dSkiX * sign * 2), 50, 220);
+        const wMax = dragStart.ski.mode === "snowboard" ? 400 : 220;
+        updates[widthParam] = clamp(Math.round(dragStart.ski[widthParam] + dSkiX * sign * 2), 50, wMax);
+        // Twin board: keep tip and tail equal so the mirrored shape stays consistent.
+        if (dragStart.ski.tipTailSym && dragStart.ski.mode === "snowboard") {
+          const w = updates[widthParam]; updates.tipWidth = w; updates.tailWidth = w;
+          const len = isTip ? updates.tipLength : updates.tailLength;
+          if (len != null) { updates.tipLength = len; updates.tailLength = len; }
+        }
         // Bezier normalized coords for the contact node stay locked at (1, 0).
       } else if (isEndNode) {
         if (isTip) {
