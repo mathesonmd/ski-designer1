@@ -315,7 +315,7 @@ function splitSegment(a, b, t) {
   const r0 = lp(q0, q1), r1 = lp(q1, q2);
   const s0 = lp(r0, r1);   // split point (on the curve)
   return {
-    node: { x: s0.x, y: s0.y, txIn: r0.x - s0.x, tyIn: r0.y - s0.y, txOut: r1.x - s0.x, tyOut: r1.y - s0.y, corner: false },
+    node: { x: s0.x, y: s0.y, txIn: r0.x - s0.x, tyIn: r0.y - s0.y, txOut: r1.x - s0.x, tyOut: r1.y - s0.y, corner: true },
     aOut: { x: q0.x - a.x, y: q0.y - a.y },   // a's new outgoing handle
     bIn:  { x: q2.x - b.x, y: q2.y - b.y },    // b's new incoming handle
   };
@@ -4345,10 +4345,16 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           type: `${prefix}Node`, idx: i, sign, isTip,
           frames: ["main", zoomFrame],  // nodes in both
         });
-        // Tangent handle — only in zoom frame, and only for legacy single-tangent nodes. Dual-tangent nodes
-        // (in/out handles, used by swallowtails) are shaped by dragging the node + the Dimensions controls;
-        // their finer handle editing is a later layer, so we skip the legacy handle to avoid a NaN position.
-        if ((n.tx || n.ty) && n.txIn === undefined && n.txOut === undefined) {
+        // Tangent handles (zoom frame only). Dual-tangent nodes get an OUT handle (unless last node) and an
+        // IN handle (unless first); legacy single-tangent nodes get one.
+        if (n.txIn !== undefined || n.txOut !== undefined) {
+          if (i < nodes.length - 1 && ((n.txOut || 0) !== 0 || (n.tyOut || 0) !== 0)) {
+            cps.push({ id: `${prefix}_to${i}`, skiX: sign * (n.x + (n.txOut || 0)) * wHalf, skiY: yBase + (n.y + (n.tyOut || 0)) * ySpan, type: `${prefix}TangentOut`, idx: i, sign, isTip, frames: [zoomFrame], parentNodeIdx: i });
+          }
+          if (i > 0 && ((n.txIn || 0) !== 0 || (n.tyIn || 0) !== 0)) {
+            cps.push({ id: `${prefix}_ti${i}`, skiX: sign * (n.x + (n.txIn || 0)) * wHalf, skiY: yBase + (n.y + (n.tyIn || 0)) * ySpan, type: `${prefix}TangentIn`, idx: i, sign, isTip, frames: [zoomFrame], parentNodeIdx: i });
+          }
+        } else if (n.tx || n.ty) {
           const hSkiX = sign * (n.x + n.tx) * wHalf;
           const hSkiY = yBase + (n.y + n.ty) * ySpan;
           cps.push({
@@ -4863,9 +4869,14 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.clip();
       ctx.strokeStyle = C.handleLine; ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
-      nodes.forEach(n => {
-        if ((!n.tx && !n.ty) || n.txIn !== undefined || n.txOut !== undefined) return;
+      nodes.forEach((n, i) => {
         const nodeS = toFrame(sign * n.x * wHalf, yBase + n.y * ySpan);
+        if (n.txIn !== undefined || n.txOut !== undefined) {
+          if (i < nodes.length - 1 && (n.txOut || n.tyOut)) { const h = toFrame(sign * (n.x + (n.txOut || 0)) * wHalf, yBase + (n.y + (n.tyOut || 0)) * ySpan); ctx.beginPath(); ctx.moveTo(nodeS.x, nodeS.y); ctx.lineTo(h.x, h.y); ctx.stroke(); }
+          if (i > 0 && (n.txIn || n.tyIn)) { const h = toFrame(sign * (n.x + (n.txIn || 0)) * wHalf, yBase + (n.y + (n.tyIn || 0)) * ySpan); ctx.beginPath(); ctx.moveTo(nodeS.x, nodeS.y); ctx.lineTo(h.x, h.y); ctx.stroke(); }
+          return;
+        }
+        if (!n.tx && !n.ty) return;
         const handS = toFrame(sign * (n.x + n.tx) * wHalf, yBase + (n.y + n.ty) * ySpan);
         ctx.beginPath();
         ctx.moveTo(nodeS.x, nodeS.y);
@@ -5087,14 +5098,16 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         });
         return;
       }
-      if (cp && cp.type?.endsWith("Tangent")) {
-        const isTip = cp.isTip;
-        const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
-        const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
-        const mateKey = isTip ? (sideR ? "tipNodesL" : "tipNodesR") : (sideR ? "tailNodesL" : "tailNodesR");
-        const def = (isTip ? makeRoundedTip() : makeRoundedTail())[cp.idx];
-        if (def) setSki(s => { const arr = (s[param] || []).map(n => ({ ...n })); if (arr[cp.idx]) { arr[cp.idx].tx = def.tx; arr[cp.idx].ty = def.ty; } const next = { ...s, [param]: arr }; if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[mateKey] = arr.map(n => ({ ...n })); return next; });
-        return;
+      if (cp && cp.type?.includes("Tangent")) {
+        if (cp.type.endsWith("Tangent")) {   // legacy single tangent → reset to default
+          const isTip = cp.isTip;
+          const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
+          const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
+          const mateKey = isTip ? (sideR ? "tipNodesL" : "tipNodesR") : (sideR ? "tailNodesL" : "tailNodesR");
+          const def = (isTip ? makeRoundedTip() : makeRoundedTail())[cp.idx];
+          if (def) setSki(s => { const arr = (s[param] || []).map(n => ({ ...n })); if (arr[cp.idx]) { arr[cp.idx].tx = def.tx; arr[cp.idx].ty = def.ty; } const next = { ...s, [param]: arr }; if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[mateKey] = arr.map(n => ({ ...n })); return next; });
+        }
+        return;   // dual in/out handles: no reset, but swallow the double-click so it never adds a point
       }
     }
 
@@ -5227,7 +5240,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
       // Determine which node array we're editing
       let arrKey, nodes, wHalf, ySpan, sign = 1, isTip = false;
-      const t = cp.type.replace(/Node|Tangent/, "");
+      const t = cp.type.replace(/Node|TangentOut|TangentIn|Tangent/, "");
       if (t === "tipR")       { arrKey="tipNodesR";  nodes=dragStart.ski.tipNodesR;  wHalf=dragStart.ski.tipWidth/2;  ySpan=dragStart.ski.tipLength;  isTip=true; }
       else if (t === "tipL")  { arrKey="tipNodesL";  nodes=dragStart.ski.tipNodesL;  wHalf=dragStart.ski.tipWidth/2;  ySpan=dragStart.ski.tipLength;  isTip=true;  sign=-1; }
       else if (t === "tailR") { arrKey="tailNodesR"; nodes=dragStart.ski.tailNodesR; wHalf=dragStart.ski.tailWidth/2; ySpan=-dragStart.ski.tailLength; isTip=false; }
@@ -5239,24 +5252,29 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
       const newNodes = JSON.parse(JSON.stringify(nodes));
       if (cp.type.includes("Tangent")) {
-        // Tangent handle drag — pure bezier shape edit, no dimension changes. The handle follows the
-        // cursor 1:1 (no forced snapping — that fought the drag). We only REPORT the physical angle so
-        // you can see when you cross 90° (past which the curve can dimple), and flag when you're
-        // sitting within a couple degrees of a notable angle.
-        const ntx = nodes[cp.idx].tx + dNx;
-        const nty = nodes[cp.idx].ty + dNy;
-        // Physical direction of the handle on the ski (mm space). Screen angle: atan2(lateral, along).
-        const physAlong = nty * ySpan;              // along-ski component (mm)
-        const physLat = ntx * wHalf * sign;          // lateral component (mm)
-        const mag = Math.hypot(physAlong, physLat);
+        // Tangent handle drag — pure bezier shape edit, no dimension changes. Follows the cursor 1:1.
+        const nd = newNodes[cp.idx], isOut = cp.type.includes("TangentOut"), isIn = cp.type.includes("TangentIn");
+        let hx, hy;
+        if (isOut) {
+          nd.txOut = (nd.txOut || 0) + dNx; nd.tyOut = (nd.tyOut || 0) + dNy;
+          if (!nd.corner) { nd.txIn = -nd.txOut; nd.tyIn = -nd.tyOut; }   // smooth node: mirror the opposite handle
+          hx = nd.txOut; hy = nd.tyOut;
+        } else if (isIn) {
+          nd.txIn = (nd.txIn || 0) + dNx; nd.tyIn = (nd.tyIn || 0) + dNy;
+          if (!nd.corner) { nd.txOut = -nd.txIn; nd.tyOut = -nd.tyIn; }
+          hx = nd.txIn; hy = nd.tyIn;
+        } else {
+          nd.tx = (nd.tx || 0) + dNx; nd.ty = (nd.ty || 0) + dNy;
+          hx = nd.tx; hy = nd.ty;
+        }
+        // Report the physical handle angle (0° = straight along ski); flag near notable angles.
+        const mag = Math.hypot(hy * ySpan, hx * wHalf * sign);
         if (mag > 1e-6) {
-          let deg = Math.atan2(physLat, physAlong) * 180 / Math.PI;  // 0° = straight along ski toward end
+          let deg = Math.atan2(hx * wHalf * sign, hy * ySpan) * 180 / Math.PI;
           deg = ((deg % 360) + 360) % 360;
           const near = [0, 45, 90, 135, 180, 225, 270, 315, 360].some(d => Math.abs(((deg - d + 540) % 360) - 180) < 2.5);
           setHandleAngle({ deg: Math.round(deg), snapped: near });
         }
-        newNodes[cp.idx].tx = ntx;
-        newNodes[cp.idx].ty = nty;
         const updates = { [arrKey]: newNodes };
         if (arrKey === "tipNodesR"  && dragStart.ski.tipSymmetric)  updates.tipNodesL  = JSON.parse(JSON.stringify(newNodes));
         if (arrKey === "tailNodesR" && dragStart.ski.tailSymmetric) updates.tailNodesL = JSON.parse(JSON.stringify(newNodes));
