@@ -4961,21 +4961,26 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.setLineDash([]);
       // short end ticks so it reads as a dimension line
       [[sR, 1], [sL, -1]].forEach(([s]) => { ctx.beginPath(); ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2); ctx.fillStyle = C.contactLine || "#e8552a"; ctx.fill(); });
-      ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = `${isVertical ? 12 : 9}px 'JetBrains Mono', monospace`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("length", lbl.x, lbl.y);
+      // Labels — white with a dark outline so they read over any topsheet / wood / core, and sized up.
+      const drawLbl = (txt, sx, sy, size) => {
+        ctx.font = `bold ${size}px 'JetBrains Mono', monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+        ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(0,0,0,0.82)"; ctx.strokeText(txt, sx, sy);
+        ctx.fillStyle = "#ffffff"; ctx.fillText(txt, sx, sy);
+      };
+      drawLbl("length", lbl.x, lbl.y, isVertical ? 13 : 11);
       // Swallow depth: dimension from the length line to the innermost node (notch), along the centerline.
       let notch = _swR[_swR.length - 1];
-      for (const n of _swR) if ((n.role === "notch" || n.lockX) ) { notch = n; break; }
-      const depthMm = Math.round(ski.tailLength * (1 - notch.y));
+      for (const n of _swR) if (n.role === "notch" || n.lockX) { notch = n; break; }
+      const notchSkiY = ski.tailLength * (1 - notch.y);
+      const depthMm = Math.round(notchSkiY);
       if (depthMm > 1) {
-        const nS = toMain(0, ski.tailLength * (1 - notch.y)), bS = toMain(0, py);
-        ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+        const nS = toMain(0, notchSkiY), bS = toMain(0, py);
+        ctx.strokeStyle = C.contactLine || "#e8552a"; ctx.lineWidth = 1.4; ctx.setLineDash([3, 2]);
         ctx.beginPath(); ctx.moveTo(nS.x, nS.y); ctx.lineTo(bS.x, bS.y); ctx.stroke(); ctx.setLineDash([]);
-        ctx.beginPath(); ctx.arc(nS.x, nS.y, 2.5, 0, Math.PI * 2); ctx.fill();
-        ctx.font = `${isVertical ? 11 : 8}px 'JetBrains Mono', monospace`;
-        const dl = toMain(Math.max(6, px * 0.35), ski.tailLength * (1 - notch.y) * 0.5);
-        ctx.textAlign = "left"; ctx.fillText(`swallow ${depthMm}mm`, dl.x + 4, dl.y);
+        ctx.fillStyle = C.contactLine || "#e8552a"; ctx.beginPath(); ctx.arc(nS.x, nS.y, 3, 0, Math.PI * 2); ctx.fill();
+        // Label sits INSIDE the tail body (inboard of the notch) so nothing can crowd it.
+        const lp = toMain(0, notchSkiY + Math.min(32, ski.tailLength * 0.35));
+        drawLbl(`swallow ${depthMm}mm`, lp.x, lp.y, isVertical ? 14 : 12);
       }
       ctx.restore();
     }
