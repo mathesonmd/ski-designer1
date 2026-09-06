@@ -279,14 +279,45 @@ function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 // A 2-node shape is parameterized by exactly TWO tangent handles, which is much simpler than
 // the 3-node Illustrator-style approach and matches how skis are actually shaped in industry tools.
 function cubicBez(p0,p1,p2,p3,t){const u=1-t;return u*u*u*p0+3*u*u*t*p1+3*u*t*t*p2+t*t*t*p3;}
+// A shape node can carry either a single tangent { tx, ty } (legacy, used as both the outgoing control when
+// the node starts a segment and the incoming control when it ends one) OR independent handles
+// { txIn, tyIn, txOut, tyOut } (a pen-tool anchor: smooth when in = -out, a corner when they differ). These
+// helpers read whichever form is present, so the outline renders identically for old shapes and new ones.
+function tanOut(n) { if (n.txOut !== undefined || n.tyOut !== undefined) return { x: n.txOut || 0, y: n.tyOut || 0 }; return { x: n.tx || 0, y: n.ty || 0 }; }
+function tanIn(n)  { if (n.txIn  !== undefined || n.tyIn  !== undefined) return { x: n.txIn  || 0, y: n.tyIn  || 0 }; return { x: n.tx || 0, y: n.ty || 0 }; }
 function evalBez(n0, n1, t) {
-  // n0.tx, n0.ty: forward tangent at node 0 (from node 0 toward control point 1)
-  // n1.tx, n1.ty: backward tangent at node 1 (from node 1 toward control point 2)
-  const c1x = n0.x + n0.tx, c1y = n0.y + n0.ty;
-  const c2x = n1.x + n1.tx, c2y = n1.y + n1.ty;
+  const o = tanOut(n0), i = tanIn(n1);
+  const c1x = n0.x + o.x, c1y = n0.y + o.y;   // outgoing control at node 0
+  const c2x = n1.x + i.x, c2y = n1.y + i.y;   // incoming control at node 1
+  return { x: cubicBez(n0.x, c1x, c2x, n1.x, t), y: cubicBez(n0.y, c1y, c2y, n1.y, t) };
+}
+// Normalize a shape to explicit in/out handles (idempotent). Legacy end nodes keep their single tangent on
+// the side that faces the curve; interior legacy nodes are made smooth (in = -out).
+function normalizeShape(arr) {
+  if (!arr || !arr.length) return arr;
+  const n = arr.length;
+  return arr.map((nd, i) => {
+    if (nd.txIn !== undefined || nd.txOut !== undefined) return { x: nd.x, y: nd.y, txIn: nd.txIn || 0, tyIn: nd.tyIn || 0, txOut: nd.txOut || 0, tyOut: nd.tyOut || 0, corner: !!nd.corner, lockX: !!nd.lockX, role: nd.role };
+    const tx = nd.tx || 0, ty = nd.ty || 0;
+    if (i === 0)      return { x: nd.x, y: nd.y, txOut: tx, tyOut: ty, txIn: 0,   tyIn: 0,   corner: false };
+    if (i === n - 1)  return { x: nd.x, y: nd.y, txIn: tx,  tyIn: ty,  txOut: 0,  tyOut: 0,  corner: false };
+    return { x: nd.x, y: nd.y, txOut: tx, tyOut: ty, txIn: -tx, tyIn: -ty, corner: false };
+  });
+}
+// De Casteljau split of the cubic segment (a→b) at parameter t. Returns { node, aOut, bIn } where node is the
+// new anchor to insert between a and b, and aOut/bIn are the updated outgoing/incoming handles of a and b so
+// the curve is reproduced EXACTLY (no shape jump). All in normalized shape coords.
+function splitSegment(a, b, t) {
+  const ao = tanOut(a), bi = tanIn(b);
+  const p0 = { x: a.x, y: a.y }, p1 = { x: a.x + ao.x, y: a.y + ao.y }, p2 = { x: b.x + bi.x, y: b.y + bi.y }, p3 = { x: b.x, y: b.y };
+  const lp = (u, v) => ({ x: u.x + (v.x - u.x) * t, y: u.y + (v.y - u.y) * t });
+  const q0 = lp(p0, p1), q1 = lp(p1, p2), q2 = lp(p2, p3);
+  const r0 = lp(q0, q1), r1 = lp(q1, q2);
+  const s0 = lp(r0, r1);   // split point (on the curve)
   return {
-    x: cubicBez(n0.x, c1x, c2x, n1.x, t),
-    y: cubicBez(n0.y, c1y, c2y, n1.y, t),
+    node: { x: s0.x, y: s0.y, txIn: r0.x - s0.x, tyIn: r0.y - s0.y, txOut: r1.x - s0.x, tyOut: r1.y - s0.y, corner: false },
+    aOut: { x: q0.x - a.x, y: q0.y - a.y },   // a's new outgoing handle
+    bIn:  { x: q2.x - b.x, y: q2.y - b.y },    // b's new incoming handle
   };
 }
 
@@ -308,12 +339,20 @@ function makeRoundedTail() { return [
   { x: 1.0, y: 0.0, tx: 0,    ty: 0.65 },  // contact: tangent along ski (toward end)
   { x: 0.0, y: 1.0, tx: 0.45, ty: 0    },  // tail-end: tangent laterally inward
 ];}
-// Swallowtail fin: per-side curve from contact point (x=1, y=0) outward to notch at (x=0.40, y=1)
-function makeSwallowTailR() { return [
-  { x: 1.0,  y: 0.0, tx: 0,    ty: 0.50 },   // contact: vertical tangent, magnitude trimmed for stubbier fin
-  { x: 0.40, y: 1.0, tx: 0.35, ty:-0.05 },   // notch tip: lateral inward tangent
-];}
-function makeSwallowTailL() { return makeSwallowTailR(); }
+// Swallowtail (per side): contact → prong tip (a sharp corner at the widest back point) → notch on the
+// centerline (x=0), pulled inboard by `notchY`. The prong sits at y=1 (the tail-end line) so it holds the
+// length; the notch sits inboard and is locked to the centerline. Dual-tangent nodes: the prong is a corner
+// (independent in/out handles), the contact→prong sweep is smooth.
+function makeSwallowtail(prongX, notchY) {
+  const px = prongX != null ? prongX : 0.62, ny = notchY != null ? notchY : 0.58;
+  return [
+    { x: 1.0, y: 0.0, txIn: 0, tyIn: 0, txOut: 0, tyOut: 0.5 },                                  // contact
+    { x: px,  y: 1.0, txIn: 0.07, tyIn: -0.34, txOut: -0.20, tyOut: -0.05, corner: true },        // prong tip (corner, holds length at y=1)
+    { x: 0.0, y: ny,  txIn: 0.22, tyIn: 0.09, txOut: 0, tyOut: 0, lockX: true, role: "notch" },   // notch, on the centerline
+  ];
+}
+function makeSwallowTailR() { return makeSwallowtail(); }
+function makeSwallowTailL() { return makeSwallowtail(); }
 
 // Default core thickness profile. The wood core proper runs between the tip and tail CONTACT points;
 // past the contacts it stays flat & thin (filler territory), so we taper to 2mm at each contact and
@@ -4306,8 +4345,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           type: `${prefix}Node`, idx: i, sign, isTip,
           frames: ["main", zoomFrame],  // nodes in both
         });
-        // Tangent handle — only in zoom frame
-        if (n.tx !== 0 || n.ty !== 0) {
+        // Tangent handle — only in zoom frame, and only for legacy single-tangent nodes. Dual-tangent nodes
+        // (in/out handles, used by swallowtails) are shaped by dragging the node + the Dimensions controls;
+        // their finer handle editing is a later layer, so we skip the legacy handle to avoid a NaN position.
+        if ((n.tx || n.ty) && n.txIn === undefined && n.txOut === undefined) {
           const hSkiX = sign * (n.x + n.tx) * wHalf;
           const hSkiY = yBase + (n.y + n.ty) * ySpan;
           cps.push({
@@ -4823,7 +4864,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.strokeStyle = C.handleLine; ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
       nodes.forEach(n => {
-        if (n.tx === 0 && n.ty === 0) return;
+        if ((!n.tx && !n.ty) || n.txIn !== undefined || n.txOut !== undefined) return;
         const nodeS = toFrame(sign * n.x * wHalf, yBase + n.y * ySpan);
         const handS = toFrame(sign * (n.x + n.tx) * wHalf, yBase + (n.y + n.ty) * ySpan);
         ctx.beginPath();
@@ -5058,28 +5099,46 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
 
     const frame = findDragFrame(mx, my);
-    // In the tip/tail shaping frames, an empty-space double-click ADDS a bezier point (splits the longest
-    // segment). Combined with removing added points above, this gives full multi-point control — enough to
-    // shape swallowtails and other complex tails. Symmetric mode mirrors it to the other side.
     if (frame === "tip" || frame === "tail") {
+      // Empty-space double-click in a shaping frame ADDS a bezier point at the click: find the nearest point
+      // on the curve, then split that segment with De Casteljau so the curve is reproduced exactly and the
+      // new node gets correct in/out handles (no pinch, no shape jump). Mirrors to the other side if symmetric.
       const isTip = frame === "tip";
       const rKey = isTip ? "tipNodesR" : "tailNodesR", lKey = isTip ? "tipNodesL" : "tailNodesL";
-      setSki(s => {
-        const arr = (s[rKey] || (isTip ? makeRoundedTip() : makeRoundedTail())).map(n => ({ ...n }));
-        if (arr.length >= 8) return s;   // cap
-        let best = 0, bestLen = -1;
-        for (let i = 0; i < arr.length - 1; i++) { const dx = arr[i + 1].x - arr[i].x, dy = arr[i + 1].y - arr[i].y, l2 = dx * dx + dy * dy; if (l2 > bestLen) { bestLen = l2; best = i; } }
-        const a = arr[best], b = arr[best + 1];
-        const mid = evalBez(a, b, 0.5), q1 = evalBez(a, b, 0.42), q2 = evalBez(a, b, 0.58);
-        arr.splice(best + 1, 0, { x: mid.x, y: mid.y, tx: (q2.x - q1.x) * 0.7, ty: (q2.y - q1.y) * 0.7 });
-        const next = { ...s, [rKey]: arr };
-        if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[lKey] = arr.map(n => ({ ...n }));
-        return next;
-      });
+      const wHalf = ((isTip ? ski.tipWidth : ski.tailWidth) / 2) || 1;
+      const proj = isTip ? toTip : toTail;
+      const toSki = (nx, ny) => isTip
+        ? { x: nx * wHalf, y: (ski.length - ski.tipLength) + ny * ski.tipLength }
+        : { x: nx * wHalf, y: ski.tailLength * (1 - ny) };
+      const arr0 = normalizeShape((isTip ? ski.tipNodesR : ski.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
+      if (arr0.length < 8) {
+        let best = { d: Infinity, seg: 0, t: 0.5 };
+        for (let si = 0; si < arr0.length - 1; si++) {
+          for (let k = 1; k < 24; k++) {
+            const t = k / 24, p = evalBez(arr0[si], arr0[si + 1], t), sk = toSki(p.x, p.y), sc = proj(sk.x, sk.y);
+            const d = Math.hypot(mx - sc.x, my - sc.y);
+            if (d < best.d) best = { d, seg: si, t };
+          }
+        }
+        if (best.d < 28) {
+          setSki(s => {
+            const arr = normalizeShape((isTip ? s.tipNodesR : s.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
+            if (arr.length >= 8) return s;
+            const a = arr[best.seg], b = arr[best.seg + 1], sp = splitSegment(a, b, best.t);
+            a.txOut = sp.aOut.x; a.tyOut = sp.aOut.y; b.txIn = sp.bIn.x; b.tyIn = sp.bIn.y;
+            arr.splice(best.seg + 1, 0, sp.node);
+            const next = { ...s, [rKey]: arr };
+            if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[lKey] = arr.map(n => ({ ...n }));
+            return next;
+          });
+          return;
+        }
+      }
+      if (isTip) { setTipZoom(1); setTipPan({ x: 0, y: 0 }); } else { setTailZoom(1); setTailPan({ x: 0, y: 0 }); }
       return;
     }
     if (frame === "main") { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }
-  }, [findCP, cps, findDragFrame, setSki]);
+  }, [findCP, cps, findDragFrame, setSki, ski, toTip, toTail]);
 
   // Attach the wheel listener as NON-PASSIVE so preventDefault() actually stops page scroll.
   // React's synthetic onWheel can be passive in some setups, which would let the page scroll.
@@ -5222,7 +5281,20 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       const isContactNode = (cp.idx === 0);
       const updates = {};
 
-      if (isContactNode) {
+      if (!isTip && dragStart.ski.swallowtail && !isContactNode) {
+        // Swallowtail prong/notch — PURE shape, never touch ski length or tailLength (only the contact node
+        // and the Dimensions panel do). The notch (last node) is pinned to the centerline and moves in depth
+        // only; the prong holds the tail-end line. This is what lets you pull the swallow in without the
+        // dimensions drifting.
+        if (nodes[cp.idx].lockX || cp.idx === nodes.length - 1) {
+          newNodes[cp.idx].x = 0;
+          newNodes[cp.idx].y = clamp(nodes[cp.idx].y + dNy, 0.2, 0.98);
+        } else {
+          newNodes[cp.idx].x = clamp(nodes[cp.idx].x + dNx, 0.05, 1.0);
+          newNodes[cp.idx].y = clamp(nodes[cp.idx].y + dNy, 0.55, 1.0);
+        }
+        updates[arrKey] = newNodes;
+      } else if (isContactNode) {
         // Along-ski drag of CONTACT node:
         //   Tip: contact at skiY = ski.length - tipLength. Drag right (+dSkiY) moves toward tip → tipLength shrinks.
         //   Tail: contact at skiY = tailLength. Drag right (+dSkiY) moves toward tip → tailLength grows.
@@ -8887,6 +8959,24 @@ export default function App() {
                 {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", 80, 500)}
                 {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
+                {(() => {
+                  const on = !!ski.swallowtail;
+                  const setSwallow = (val) => setSki(s => val
+                    ? { ...s, swallowtail: true, tipTailSym: false, tailSymmetric: true, tailNodesR: makeSwallowtail(), tailNodesL: makeSwallowtail() }
+                    : { ...s, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() });
+                  return (
+                    <div style={{ marginBottom: 8, marginTop: 2 }}>
+                      <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tail shape</div>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {[["Rounded", false], ["Swallowtail", true]].map(([lbl, val]) => {
+                          const active = on === val;
+                          return <button key={lbl} onClick={() => setSwallow(val)} style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim, border: `1px solid ${active ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>{lbl}</button>;
+                        })}
+                      </div>
+                      {on && <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Drag the prong tips in the plan view for tail width and the centerline notch for swallow depth. The overall length stays fixed — set it in Tail Len above.</div>}
+                    </div>
+                  );
+                })()}
                 {inputField(t("dim.waistPos", "Waist Pos"), "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
                 <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
                   {[[t("dim.span", "span"), false], [t("dim.fullLength", "full length"), true]].map(([lbl, val]) => {
@@ -8998,13 +9088,13 @@ export default function App() {
             {inputField("Stance W", "stanceWidth", 400, 720)}
             {inputField("Setback", "setback", -40, 80)}
             <div style={{ marginBottom: 8, marginTop: 2 }}>
-              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Tip &amp; Tail Shape</div>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Symmetry (tip &amp; tail)</div>
               <div style={{ display: "flex", gap: 5 }}>
                 {[["Symmetric", true], ["Asymmetric", false]].map(([lbl, symVal]) => {
                   const active = !!ski.tipTailSym === symVal;
                   return (
                     <button key={lbl} onClick={() => setSki(s => symVal
-                      ? { ...s, tipTailSym: true, tipSymmetric: true, tailSymmetric: true }
+                      ? { ...s, tipTailSym: true, tipSymmetric: true, tailSymmetric: true, swallowtail: false, tailNodesR: makeRoundedTail(), tailNodesL: makeRoundedTail() }
                       : { ...s, tipTailSym: false, tipSymmetric: true, tailSymmetric: true, tailNodesR: JSON.parse(JSON.stringify(s.tipNodesR)), tailNodesL: JSON.parse(JSON.stringify(s.tipNodesL)) })}
                       style={{ flex: 1, padding: "5px 4px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
                         background: active ? C.heading : "transparent", color: active ? C.bgDeep : C.labelDim,
@@ -9015,7 +9105,7 @@ export default function App() {
                 })}
               </div>
               <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                {ski.tipTailSym ? "True twin: both ends the same shape. Shape the tip and the tail follows. Both sides always mirror." : "Directional: tip and tail can differ, but each end still mirrors left to right."}
+                {ski.tipTailSym ? "Symmetric (true twin): shape the tip and the tail follows. Both ends the same, both sides mirrored." : "Asymmetric (directional): the tail is now editable on its own — drag its nodes in the plan view. Each end still mirrors left to right. Needed for a swallowtail or any tail that differs from the nose."}
               </div>
             </div>
             <div style={{ marginBottom: 7 }}>
