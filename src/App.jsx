@@ -8094,21 +8094,45 @@ export default function App() {
       row(isB ? "Nose / tail rise" : "Tip / tail rise", `${ski.tipHeight != null ? ski.tipHeight : "\u2014"} / ${ski.tailHeight != null ? ski.tailHeight : "\u2014"} mm`),
       row("Est. weight", weight),
       row("Flex (underfoot)", `${fr.label} \u00b7 ${Math.round(flex.underfootK || 0)} N/mm`),
-      row("Torsion (est, relative)", `${tr.label} \u00b7 ${Math.round((flex.underfootGJ || 0) / 1e6)}`),
+      row("Torsion (est, relative)", `${tr.label} \u00b7 ${Math.round((flex.underfootGJ || 0) / 1e6)} N\u00b7m\u00b2 (rel)`),
       row("Peak EI", `${((flex.peakEI || 0) / 1e6).toFixed(0)} N\u00b7m\u00b2`),
     ].join("");
     const imgTag = svg ? `<img src="data:image/svg+xml;utf8,${encodeURIComponent(svg)}"/>` : "";
+    // ── Measured materials list (prep-ahead): each fabric/metal/sheet with its cut-oversize size and total
+    // area, the core blank, the running edge length, sidewall strips, and a wet-out epoxy estimate. ──
+    const maxW = Math.max(ski.tipWidth, ski.waistWidth, ski.tailWidth);
+    const mL = Math.ceil(ski.length + 50), mW = Math.ceil(maxW + 30);   // fabric/sheet blank incl. trim margin
+    const areaEach = bom.areaM2 || 0;
+    const agg = {};
+    for (const L of stack) {
+      let nm, cut, area;
+      if (L.kind === "fabric") { nm = ((FIBERS[L.mat] || {}).name || L.mat) + (L.gsm ? ` ${L.gsm}g` : ""); cut = `${mL} \u00d7 ${mW} mm`; area = areaEach; }
+      else if (L.kind === "uni") { const uw = L.width > 0 ? L.width : 20; nm = ((FIBERS[L.mat] || {}).name || L.mat) + " stringer"; cut = `${mL} \u00d7 ${Math.ceil(uw)} mm`; area = (ski.length * uw) / 1e6; }
+      else if (L.kind === "metal") { nm = (METALS[L.mat] || {}).name || "Metal sheet"; cut = `${mL} \u00d7 ${mW} mm`; area = areaEach; }
+      else if (L.kind === "veneer") { nm = ((VENEERS[L.mat] || {}).name || "Veneer") + " veneer"; cut = `${mL} \u00d7 ${mW} mm`; area = areaEach; }
+      else if (L.kind === "vds") { nm = "VDS rubber"; cut = `${mL} \u00d7 ${mW} mm`; area = areaEach; }
+      else continue;
+      const key = nm + "|" + cut;
+      if (!agg[key]) agg[key] = { nm, cut, count: 0, area: 0 };
+      agg[key].count++; agg[key].area += area;
+    }
+    const matRow = (nm, qty, cut, total) => `<tr><td>${esc(nm)}</td><td class="c">${qty}</td><td class="c">${cut}</td><td class="v">${total}</td></tr>`;
+    let matRows = Object.values(agg).map(g => matRow(g.nm, `${g.count} \u00d7 layer`, g.cut, g.area.toFixed(2) + " m\u00b2")).join("");
+    if (bom.blank) matRows += matRow("Wood core blank", "1", `${bom.blank.L} \u00d7 ${bom.blank.W} \u00d7 ${bom.blank.T} mm`, (bom.coreVolL || 0).toFixed(2) + " L");
+    matRows += matRow("Base (P-Tex)", "1", `${mL} \u00d7 ${mW} mm`, areaEach.toFixed(2) + " m\u00b2");
+    matRows += matRow("Steel edge", `${(bom.edgeLenM || 0).toFixed(2)} m`, (bom.edgeWrap === "contact" ? "contact\u2013contact" : "full wrap"), "\u2014");
+    if (bom.sidewallMassKg > 0) { const runLen = Math.max(0, ski.length - ski.tipLength - ski.tailLength); matRows += matRow("Sidewall strips", "2", `${Math.round(runLen)} mm each`, "\u2014"); }
+    if (bom.epoxyKg) matRows += matRow("Epoxy (wet-out est)", `~${bom.epoxyKg.toFixed(2)} kg`, "\u2014", "\u2014");
     const checklist = [
-      "Cut the outline (DXF/SVG from CNC Export, or the 1:1 tiled print).",
-      "Cut the base + steel edges to the same outline; bend/weld the edge.",
-      "Mill the core: variable-thickness profile above, matching the core thickness numbers.",
+      "Cut the outline (DXF/SVG from CNC Export, or the 1:1 tiled print). Cut the base + steel edges to match; bend/weld the edge.",
+      "Mill the core to the variable-thickness profile (tip/waist/tail numbers above).",
       isB ? "Drill the insert pattern per the stance layout." : "",
-      ski.swallowtail ? "Cut the swallowtail notch to the marked depth; length is measured to the prong tips." : "",
-      "Prep the mold to the side profile (camber + tip/tail rise above). Offset for material stack thickness.",
-      "Lay up base \u2192 top in the order listed, wetting out each fabric; place metal/inserts against the core.",
-      "Press to the mold and cure per your resin schedule; hold pressure the full cure.",
-      "Trim flash, tune the base and edges, finish the topsheet.",
-    ].filter(Boolean).map(s => `<li>${esc(s)}</li>`).join("");
+      ski.swallowtail ? "Cut the swallowtail notch to the marked depth (length is to the prong tips)." : "",
+      "Prep the mold to the side profile (camber + tip/tail rise); offset for the material stack thickness.",
+      "Lay up base \u2192 top in the order listed; wet out each fabric, place metal/inserts against the core.",
+      "Press to the mold and hold pressure through the full resin cure.",
+      "De-mold, trim flash, tune base + edges, finish the topsheet.",
+    ].filter(Boolean).map((s, i) => `<li>${esc(s)}</li>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Build Packet \u2014 ${name}</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;margin:0;padding:28px;background:#fff}
@@ -8119,7 +8143,9 @@ export default function App() {
   .col{flex:1;min-width:260px}
   h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#a24;border-bottom:2px solid #eee;padding-bottom:4px;margin:0 0 8px}
   table{width:100%;border-collapse:collapse;font-size:12.5px} td{padding:4px 6px;border-bottom:1px solid #f0efec;vertical-align:top}
-  td.n{width:26px;color:#a24;font-weight:700;text-align:right} td.k{color:#666} td.v{text-align:right;font-weight:600}
+  td.n{width:26px;color:#a24;font-weight:700;text-align:right} td.k{color:#666} td.v{text-align:right;font-weight:600} td.c{text-align:center;color:#555}
+  table.mat th{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#999;text-align:left;padding:4px 6px;border-bottom:1px solid #ddd}
+  table.mat td.c,table.mat td.v{white-space:nowrap}
   ol{font-size:12.5px;line-height:1.6;padding-left:20px;margin:0} ol li{margin-bottom:3px}
   .foot{margin-top:22px;color:#aaa;font-size:10px;border-top:1px solid #eee;padding-top:8px}
   @media print{body{padding:0} .noprint{display:none} img{border:none}}
@@ -8132,7 +8158,11 @@ export default function App() {
     <div class="col"><h2>Layup (top \u2192 base)</h2><table>${layupRows}</table></div>
     <div class="col"><h2>Key numbers</h2><table>${numbers}</table></div>
   </div>
-  <div style="margin-top:20px"><h2>Build checklist</h2><ol>${checklist}</ol></div>
+  <div style="margin-top:20px"><h2>Materials list \u2014 prep ahead</h2>
+    <table class="mat"><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:center">Cut size (oversize)</th><th style="text-align:right">Total</th></tr>${matRows}</table>
+    <div style="color:#999;font-size:10px;margin-top:5px">Cut sizes include a trim margin — nest and cut oversize. Fabric/metal totals are per-layer area × layer count. The core blank is milled-thickness stock.</div>
+  </div>
+  <div style="margin-top:20px"><h2>Build sequence</h2><ol>${checklist}</ol></div>
   <div class="foot">Flex and torsion are model estimates; torsion is relative until calibrated. Generated by Black Chapel ski designer v${APP_VERSION}.</div>
   <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 18px;font-size:13px;cursor:pointer">Print / Save PDF</button></div>
 </body></html>`;
@@ -9969,7 +9999,7 @@ export default function App() {
           {(() => { const tr = torsionRating(flex.torsK); return (
             <div style={{ background: tr.color + "18", border: `1px solid ${tr.color}55`, borderRadius: 4, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
               <span style={{ color: tr.color, fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>Torsion: {tr.label}</span>
-              <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(flex.underfootGJ / 1e6)} · relative</span>
+              <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(flex.underfootGJ / 1e6)} N\u00b7m\u00b2 rel</span>
             </div>
           ); })()}
           {stat("Underfoot", `${Math.round(flex.underfootK)} N/mm`, C.flexStroke)}
