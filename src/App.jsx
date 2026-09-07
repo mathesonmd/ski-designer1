@@ -5093,6 +5093,29 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
 
     const id = findCP(mx, my);
     if (id) {
+      // Alt-click a bezier node → convert it smooth ↔ corner (pen-tool style). Interior dual-tangent nodes only.
+      if (e.altKey) {
+        const cp = cps.find(c => c.id === id);
+        if (cp && cp.type && cp.type.endsWith("Node") && cp.idx > 0) {
+          const isTip = cp.isTip;
+          const sideR = cp.type.startsWith("tipR") || cp.type.startsWith("tailR");
+          const param = isTip ? (sideR ? "tipNodesR" : "tipNodesL") : (sideR ? "tailNodesR" : "tailNodesL");
+          const mateKey = isTip ? (sideR ? "tipNodesL" : "tipNodesR") : (sideR ? "tailNodesL" : "tailNodesR");
+          setSki(s => {
+            const arr = (s[param] || []).map(n => ({ ...n }));
+            const nd = arr[cp.idx];
+            if (!nd || cp.idx >= arr.length - 1) return s;                 // endpoints have a single handle
+            if (nd.txIn === undefined && nd.txOut === undefined) return s;  // legacy single-tangent, nothing to convert
+            if (nd.corner) { nd.corner = false; nd.txIn = -(nd.txOut || 0); nd.tyIn = -(nd.tyOut || 0); }  // → smooth: mirror out→in
+            else { nd.corner = true; }                                     // → corner: unlink the two handles
+            const next = { ...s, [param]: arr };
+            if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[mateKey] = arr.map(n => ({ ...n }));
+            return next;
+          });
+          e.preventDefault();
+          return;
+        }
+      }
       setDragging(id);
       setDragStart({
         mx, my,
@@ -5105,7 +5128,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       const startPan = frame === "tip" ? { ...tipPan } : frame === "tail" ? { ...tailPan } : { ...mainPan };
       setPanning({ frame, startMx: mx, startMy: my, startPan });
     }
-  }, [findCP, findDragFrame, ski, tipPan, tailPan, mainPan, isVertical]);
+  }, [findCP, findDragFrame, ski, tipPan, tailPan, mainPan, isVertical, cps, setSki]);
 
   // ── Scroll-wheel zoom (zoom the region under the cursor, keeping cursor point fixed) ──
   const handleWheel = useCallback(e => {
@@ -8034,6 +8057,89 @@ export default function App() {
     return `<div style="margin-top:22px;page-break-before:always"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:8px">BUILD CARD \u2014 ${String(ski.designName || "Untitled").replace(/[<>&]/g, "")}</div><img src="${uri}" style="width:100%;max-width:960px;display:block;border:1px solid #e6e2da;border-radius:6px"/></div>`;
   }, [ski, derived, flex, bom, builderBrand, bcLogoDims, studyArtwork, topsheet]);
 
+  // ── Build packet: one printable bench document (spec sheet + layup order + numbers + a cut/press/cure
+  // checklist), so a builder has everything in front of them without re-exporting each piece. ──
+  const openBuildPacket = useCallback(() => {
+    let svg = ""; try { svg = buildSpecSheetSVG(ski, derived, flex, bom, { name: builderBrand.name, logoSrc: builderBrand.logoSrc, logoDims: bcLogoDims }, { artwork: studyArtwork, topsheet }); } catch (e) {}
+    const esc = s => String(s == null ? "" : s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const name = esc(ski.designName || "Untitled");
+    const isB = (ski.mode || "ski") === "snowboard";
+    const stack = (ski.layup && ski.layup.stack) || [];
+    const layerName = (L) => {
+      if (L.kind === "base") return "Base (P-Tex) + steel edges";
+      if (L.kind === "topsheet") return "Topsheet";
+      if (L.kind === "core") return "Wood core" + ((L.wood || L.mat) ? " \u2014 " + ((typeof CORE_MATERIALS !== "undefined" && CORE_MATERIALS[L.wood || L.mat] || {}).name || (WOODS[L.wood || L.mat] || {}).name || (L.wood || L.mat)) : "");
+      if (L.kind === "metal") return ((METALS[L.mat] || {}).name || "Metal") + (L.thick ? ` (${L.thick} mm)` : "");
+      if (L.kind === "veneer") return ((VENEERS[L.mat] || {}).name || "Veneer") + " veneer";
+      if (L.kind === "vds") return "VDS rubber damping" + (L.thick ? ` (${L.thick} mm)` : "");
+      if (L.kind === "uni") return ((FIBERS[L.mat] || {}).name || "Stringer") + " UD stringer";
+      return ((FIBERS[L.mat] || {}).name || L.mat) + (L.gsm ? ` (${L.gsm} g/m\u00B2)` : "");
+    };
+    const layupRows = stack.map((L, i) => `<tr><td class="n">${stack.length - i}</td><td>${esc(layerName(L))}</td></tr>`).reverse().join("");
+    let fr = { label: "\u2014", color: "#888" }, tr = { label: "\u2014", color: "#888" };
+    try { fr = flexRating(flex.underfootK); } catch (e) {}
+    try { tr = torsionRating(flex.torsK); } catch (e) {}
+    const cp = ski.coreProfile || [], cAt = f => { try { return getCoreThickAt(cp, f).toFixed(1); } catch (e) { return "\u2014"; } };
+    const runS = ski.tailLength / ski.length, runE = (ski.length - ski.tipLength) / ski.length;
+    const radius = (derived.sidecutRadius < 999) ? derived.sidecutRadius.toFixed(1) + " m" : "\u2014";
+    const weight = bom.totalMassKg ? (bom.totalMassKg * 1000).toFixed(0) + " g each" : "\u2014";
+    const row = (k, v) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`;
+    const numbers = [
+      row("Length", `${ski.length} mm`),
+      row(isB ? "Nose / Waist / Tail" : "Tip / Waist / Tail", `${ski.tipWidth} \u00b7 ${ski.waistWidth} \u00b7 ${ski.tailWidth} mm`),
+      row("Sidecut radius", radius),
+      row("Effective edge", `${Math.round(derived.effectiveEdge || 0)} mm`),
+      row("Core thickness (tip/waist/tail)", `${cAt(runE)} / ${cAt((runS + runE) / 2)} / ${cAt(runS)} mm`),
+      row("Camber", (ski.camberHeight != null ? ski.camberHeight + " mm" : "\u2014")),
+      row(isB ? "Nose / tail rise" : "Tip / tail rise", `${ski.tipHeight != null ? ski.tipHeight : "\u2014"} / ${ski.tailHeight != null ? ski.tailHeight : "\u2014"} mm`),
+      row("Est. weight", weight),
+      row("Flex (underfoot)", `${fr.label} \u00b7 ${Math.round(flex.underfootK || 0)} N/mm`),
+      row("Torsion (est, relative)", `${tr.label} \u00b7 ${Math.round((flex.underfootGJ || 0) / 1e6)}`),
+      row("Peak EI", `${((flex.peakEI || 0) / 1e6).toFixed(0)} N\u00b7m\u00b2`),
+    ].join("");
+    const imgTag = svg ? `<img src="data:image/svg+xml;utf8,${encodeURIComponent(svg)}"/>` : "";
+    const checklist = [
+      "Cut the outline (DXF/SVG from CNC Export, or the 1:1 tiled print).",
+      "Cut the base + steel edges to the same outline; bend/weld the edge.",
+      "Mill the core: variable-thickness profile above, matching the core thickness numbers.",
+      isB ? "Drill the insert pattern per the stance layout." : "",
+      ski.swallowtail ? "Cut the swallowtail notch to the marked depth; length is measured to the prong tips." : "",
+      "Prep the mold to the side profile (camber + tip/tail rise above). Offset for material stack thickness.",
+      "Lay up base \u2192 top in the order listed, wetting out each fabric; place metal/inserts against the core.",
+      "Press to the mold and cure per your resin schedule; hold pressure the full cure.",
+      "Trim flash, tune the base and edges, finish the topsheet.",
+    ].filter(Boolean).map(s => `<li>${esc(s)}</li>`).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Build Packet \u2014 ${name}</title>
+<style>
+  *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1b1b;margin:0;padding:28px;background:#fff}
+  h1{font-size:20px;margin:0 0 2px} .sub{color:#777;font-size:12px;margin-bottom:16px}
+  .brand{float:right;text-align:right;color:#999;font-size:11px}
+  img{width:100%;max-width:980px;display:block;border:1px solid #e6e2da;border-radius:6px;margin:0 0 18px}
+  .cols{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+  .col{flex:1;min-width:260px}
+  h2{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#a24;border-bottom:2px solid #eee;padding-bottom:4px;margin:0 0 8px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px} td{padding:4px 6px;border-bottom:1px solid #f0efec;vertical-align:top}
+  td.n{width:26px;color:#a24;font-weight:700;text-align:right} td.k{color:#666} td.v{text-align:right;font-weight:600}
+  ol{font-size:12.5px;line-height:1.6;padding-left:20px;margin:0} ol li{margin-bottom:3px}
+  .foot{margin-top:22px;color:#aaa;font-size:10px;border-top:1px solid #eee;padding-top:8px}
+  @media print{body{padding:0} .noprint{display:none} img{border:none}}
+</style></head><body>
+  <div class="brand">${esc(builderBrand.name || "Black Chapel Studios")}<br/>${new Date().toLocaleDateString()}</div>
+  <h1>${name}</h1>
+  <div class="sub">${isB ? "Snowboard" : "Ski"} build packet</div>
+  ${imgTag}
+  <div class="cols">
+    <div class="col"><h2>Layup (top \u2192 base)</h2><table>${layupRows}</table></div>
+    <div class="col"><h2>Key numbers</h2><table>${numbers}</table></div>
+  </div>
+  <div style="margin-top:20px"><h2>Build checklist</h2><ol>${checklist}</ol></div>
+  <div class="foot">Flex and torsion are model estimates; torsion is relative until calibrated. Generated by Black Chapel ski designer v${APP_VERSION}.</div>
+  <div class="noprint" style="margin-top:16px;text-align:center"><button onclick="window.print()" style="padding:8px 18px;font-size:13px;cursor:pointer">Print / Save PDF</button></div>
+</body></html>`;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); }
+  }, [ski, derived, flex, bom, builderBrand, bcLogoDims, studyArtwork, topsheet]);
+
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true, stockL: 0, stockW: 0, centerInStock: true,
@@ -9070,6 +9176,7 @@ export default function App() {
               • {t("view.edit1", "Drag the round nodes on the plan view to reshape and adjust dimensions.")}<br />
               • {t("view.edit2", "Drag the diamond tangent handles in the tip/tail zoom panels for fine bezier control.")}<br />
               • {t("view.edit3", "Drag the square width handles at the contacts to set tip/tail width.")}<br />
+              • Double-click the tip/tail curve to add a point; Alt-click a node to switch it smooth ↔ corner.<br />
               • {t("view.edit4", "Scroll to zoom, drag empty space to pan; double-click to reset.")}
             </InfoBubble>
           }>
@@ -10079,6 +10186,10 @@ export default function App() {
           <button onClick={openSpecPreview}
             style={{ ...primaryBtn, marginBottom: 6 }}>
             Preview Build Card
+          </button>
+          <button onClick={openBuildPacket}
+            style={{ ...primaryBtn, marginBottom: 6, background: "transparent", border: `1px solid ${C.heading}`, color: C.heading }}>
+            Open Build Packet (spec + layup + checklist)
           </button>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => exportSpecSheet("png")}
