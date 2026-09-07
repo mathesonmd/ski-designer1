@@ -4075,6 +4075,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand, opts) {
     ["Tip / tail rise", `${ski.tipHeight} / ${ski.tailHeight} mm`],
     ["Camber", `${ski.camberHeight} mm`],
     ["Flex", `${rating.label} (${Math.round(flex.underfootK)} N/mm)`],
+    ["Torsion (est)", `${(() => { try { return torsionRating(flex.torsK).label; } catch (e) { return "\u2014"; } })()} (${Math.round((flex.underfootGJ || 0) / 1e6)} N\u00b7m\u00b2 rel)`],
     ...(isBoard ? [["Stance / setback", `${ski.stanceWidth || 0} / ${ski.setback || 0} mm`]] : []),
     ["Core", _coreName],
     ...(_fabs.length ? [["Fabric", _fabs.join(", ")]] : []),
@@ -7617,7 +7618,7 @@ function studyTableHTML(variants) {
     [t("tbl.bend", "3-pt bend"), (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
     [t("tbl.peakEI", "Peak EI"), (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
     [t("tbl.stiffness", "Stiffness (est)"), v => v.rating || "&mdash;"],
-    ["Torsion (est)", v => v.torsion || "&mdash;"],
+    ["Torsion (est)", (v, i) => (v.torsion || "&mdash;") + (v.underfootGJ ? ` \u00b7 ${Math.round(v.underfootGJ / 1e6)} N\u00b7m\u00b2` : "") + (i && v.underfootGJ && first.underfootGJ ? dlt(v.underfootGJ / 1e6, first.underfootGJ / 1e6, 0, 1) : "")],
     [t("tbl.weight", "Weight (est)"), (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
@@ -10038,7 +10039,8 @@ export default function App() {
               <br /><br /><b style={{ color: C.label }}>Materials.</b> Fabric and stringer moduli are laminate values (glass biax ~12, triax ~25, carbon biax ~24, triax ~58, UD ~135 GPa). Ply thickness = areal weight / (fibre density × ~0.5 fibre volume fraction). Metal, base, and edge from tables.
               <br /><br /><b style={{ color: C.label }}>Core.</b> Density is the volume-weighted mean of the constituents (mass is additive). Modulus uses the Voigt / parallel bound E = sum(fi·Ei), the correct bound for stringers running lengthwise; an entered measured density overrides for weight. Foam moduli are estimates, not density-derived.
               <br /><br /><b style={{ color: C.label }}>Calibration.</b> A test bend gives EI = P·L³ / (48·δ) for a centre load, or P·L³ / (3·δ) for a cantilever; the modelled EI is scaled to that ratio.
-              <br /><br /><b style={{ color: C.label }}>Limits.</b> Longitudinal bending only — no torsion, no core shear, isotropic-ply assumption. The rating maps the 3-point bending constant to bands. Treat uncalibrated numbers as comparative between designs, not absolute, until a test bend anchors them.
+              <br /><br /><b style={{ color: C.label }}>Torsion.</b> GJ uses the same transformed-section method with each layer's shear modulus (orientation-aware: ±45 biax stiff, 0° UD weak) and a z\u00B3 weighting. A bonded laminate twists between a solid plate and loose plies, so the absolute value is a "solid section" estimate — trustworthy as a relative comparison until measured data (e.g. SoothSki) calibrates it.
+              <br /><br /><b style={{ color: C.label }}>Limits.</b> Bending and torsion are estimates; no core shear, isotropic-ply assumption. Ratings map the constants to bands. Treat uncalibrated numbers as comparative between designs, not absolute, until a test bend (bending) or measured data (torsion) anchors them.
             </div>
           </details>
         </AccordionSection>
@@ -10432,7 +10434,7 @@ export default function App() {
         trigger={feedbackTrigger}
       />
       {show3D && <Ski3DModal ski={ski} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} onClose={() => setShow3D(false)} />}
-      {studyOpen && studyVariants.length >= 2 && (
+      {studyOpen && studyVariants.length >= 1 && (
         <div onClick={() => setStudyOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: 10, marginBottom: 16 }}>
