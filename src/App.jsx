@@ -182,22 +182,25 @@ const t = (k, fb) => (I18N[_LANG] && I18N[_LANG][k]) || I18N.en[k] || fb || k;
 // from the areal weight so a builder can enter the real weight of the cloth they buy (same nominal weight
 // from two makers can differ). Vf ~0.5 assumed.
 const FIBERS = {
-  glassBiax:   { name: "Glass Biax \u00B145",  E: 12000,  dens: 2.55, gsm: 600 },
-  glassTriax:  { name: "Glass Triax",          E: 25000,  dens: 2.55, gsm: 800 },
-  glassUni:    { name: "Glass UD 0\u00B0",     E: 40000,  dens: 2.55, gsm: 500 },
-  carbonBiax:  { name: "Carbon Biax \u00B145", E: 24000,  dens: 1.6,  gsm: 400 },
-  carbonTriax: { name: "Carbon Triax",         E: 58000,  dens: 1.6,  gsm: 450 },
-  carbonUni:   { name: "Carbon UD 0\u00B0",    E: 135000, dens: 1.6,  gsm: 300 },
-  flaxTwill:   { name: "Flax Twill",           E: 9000,   dens: 1.4,  gsm: 500 },
-  flaxBiax:    { name: "Flax Biax \u00B145",    E: 7000,   dens: 1.4,  gsm: 400 },
-  flaxUni:     { name: "Flax UD",              E: 11000,  dens: 1.4,  gsm: 450 },
+  glassBiax:   { name: "Glass Biax \u00B145",  E: 12000,  G: 11000,  dens: 2.55, gsm: 600 },
+  glassTriax:  { name: "Glass Triax",          E: 25000,  G: 8000,   dens: 2.55, gsm: 800 },
+  glassUni:    { name: "Glass UD 0\u00B0",     E: 40000,  G: 4500,   dens: 2.55, gsm: 500 },
+  carbonBiax:  { name: "Carbon Biax \u00B145", E: 24000,  G: 30000,  dens: 1.6,  gsm: 400 },
+  carbonTriax: { name: "Carbon Triax",         E: 58000,  G: 18000,  dens: 1.6,  gsm: 450 },
+  carbonUni:   { name: "Carbon UD 0\u00B0",    E: 135000, G: 5000,   dens: 1.6,  gsm: 300 },
+  flaxTwill:   { name: "Flax Twill",           E: 9000,   G: 3500,   dens: 1.4,  gsm: 500 },
+  flaxBiax:    { name: "Flax Biax \u00B145",    E: 7000,   G: 4000,   dens: 1.4,  gsm: 400 },
+  flaxUni:     { name: "Flax UD",              E: 11000,  G: 2000,   dens: 1.4,  gsm: 450 },
 };
+// Shear modulus for any layer. Fabrics carry an explicit orientation-aware G (±45 biax is stiff in shear,
+// 0° UD is weak); everything else is treated as isotropic with G = E / 2.6 (ν ≈ 0.3).
+const shearModOf = (mat, E) => (FIBERS[mat] && FIBERS[mat].G != null) ? FIBERS[mat].G : (E || 0) / 2.6;
 const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; return (gsm || f.gsm) / (1000 * f.dens * 0.5); };
 // ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
 // Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
 // applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
 const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SIDEWALLS: SIDEWALL_MATERIALS, SCALARS };
-const _CONST_PROPS = { FIBERS: ["E", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SIDEWALLS: ["E", "density"], SCALARS: ["E"] };
+const _CONST_PROPS = { FIBERS: ["E", "G", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SIDEWALLS: ["E", "density"], SCALARS: ["E"] };
 const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
 const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
 const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
@@ -472,7 +475,7 @@ const DEFAULT_SKI={
 // File extension `.bcski` (Black Chapel Ski). JSON envelope with metadata for forward-compat.
 const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
-const APP_VERSION = "0.9";
+const APP_VERSION = "1.0";
 
 // The Topsheet Designer's default layer stack (just a solid-dark background). A factory so each reset gets a
 // fresh object rather than a shared reference.
@@ -785,7 +788,14 @@ function computeEIAtStation(skiWidth,coreThick,layup,insertLayers){
   const ybar=sEA>0?sEAy/sEA:0;
   let EI=0;
   for(let i=0;i<layers.length;i++){const{E,b,t}=layers[i];const d=yc[i]-ybar;EI+=E*(b*t*t*t/12+b*t*d*d);}
-  return EI;
+  // Torsion: GJ ≈ (4/3) Σ Gᵢ·bᵢ·(z_top³ − z_bot³) about the mid-plane. The z³ weighting makes layers far from
+  // the middle (a metal or biax skin near the surface) dominate, and Gᵢ is orientation-aware for fabrics
+  // (±45 biax is stiff in shear, 0° UD is weak). This is a "solid section" estimate — trustworthy relatively;
+  // the absolute value is scaled by a calibration factor at the profile level.
+  const zMid=yBot/2;let GJ=0,zc=0;
+  for(const l of layers){const zb=zc-zMid,zt=zc+l.t-zMid;GJ+=shearModOf(l.mat,l.E)*l.b*(zt*zt*zt-zb*zb*zb);zc+=l.t;}
+  GJ*=4/3;
+  return {EI,GJ};
 }
 // ══════════════ BILL OF MATERIALS ══════════════
 // Rough shop densities (kg/m^3) for a swing-weight-ish core mass estimate.
@@ -900,28 +910,36 @@ function flexCalFactor(ski) {
   const P = fc.load * 9.81, L = fc.span, c = fc.type === "cantilever" ? 3 : 48;
   const EImeas = P * L * L * L / (c * fc.defl);            // N·mm² from beam theory
   let sum = 0, n = 0; const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
-  for (let i = 0; i <= 40; i++) { const pos = (tailC + (tipC - tailC) * i / 40) / ski.length; try { sum += computeEIAtStation(getWidthAtPos(ski, pos), getCoreThickAt(ski.coreProfile, pos), ski.layup); n++; } catch (e) {} }
+  for (let i = 0; i <= 40; i++) { const pos = (tailC + (tipC - tailC) * i / 40) / ski.length; try { sum += computeEIAtStation(getWidthAtPos(ski, pos), getCoreThickAt(ski.coreProfile, pos), ski.layup).EI; n++; } catch (e) {} }
   const EImodel = n ? sum / n : 1;
   return EImodel > 0 ? Math.max(0.2, Math.min(5, EImeas / EImodel)) : 1;
 }
 function computeFlexProfile(ski){
   const cal=flexCalFactor(ski);
+  const calT=ski.torsionCal||1;
   const N=250,stations=[];
   for(let i=0;i<=N;i++){
     const pos=i/N,w=getWidthAtPos(ski,pos),ct=getCoreThickAt(ski.coreProfile,pos);
-    const ei=computeEIAtStation(w,ct,ski.layup,insertLayersAt(ski,pos))*cal;
-    stations.push({pos,xmm:pos*ski.length,width:w,coreThick:ct,ei,kCant:3*ei/(1e6)});
+    const r=computeEIAtStation(w,ct,ski.layup,insertLayersAt(ski,pos));
+    const ei=r.EI*cal,gj=r.GJ*calT;
+    stations.push({pos,xmm:pos*ski.length,width:w,coreThick:ct,ei,gj,kCant:3*ei/(1e6)});
   }
   const span=ski.length-ski.tipLength-ski.tailLength,tailStart=ski.tailLength;
   let integral=0;const dx=span/N;
   for(let i=0;i<=N;i++){
     const x=i*dx,m=(x<=span/2)?x/2:(span-x)/2;
     const pos=(tailStart+x)/ski.length;
-    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos))*cal;
+    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos)).EI*cal;
     const f=ei>0?(m*m)/ei:0;integral+=(i===0||i===N?0.5:1.0)*f*dx;
   }
   const k3pt=integral>0?1/integral:0,midIdx=Math.round(N*0.5);
-  return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei)),cal};
+  return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei)),
+    peakGJ:Math.max(...stations.map(s=>s.gj)),underfootGJ:stations[midIdx].gj,torsK:stations[midIdx].gj/1e6,cal,calT};
+}
+function torsionRating(tk){
+  if(tk<70)return{label:"Low",color:"#9FB8A8"};if(tk<130)return{label:"Medium",color:"#B8C8B0"};
+  if(tk<200)return{label:"Firm",color:"#C8935A"};if(tk<290)return{label:"Stiff",color:"#D85A30"};
+  return{label:"Very Stiff",color:"#B83A20"};
 }
 function flexRating(k){
   if(k<400)return{label:"Very Soft",color:"#9FB8A8"};if(k<550)return{label:"Soft",color:"#B8C8B0"};
@@ -7510,6 +7528,7 @@ function computeVariantMetrics(snap) {
   const swName = (sw && sw.mat && sw.mat !== "none") ? (((SIDEWALL_MATERIALS[sw.mat] || {}).name || sw.mat) + (sw.thick ? ` \u00b7 ${sw.thick}mm` : "")) : "";
   const insMats = Array.isArray(snap.inserts) && snap.inserts.length ? [...new Set(snap.inserts.map(ins => (INSERT_MATERIALS[ins.material] || {}).name || ins.material).filter(Boolean))].join(", ") : "";
   let rating = ""; try { rating = flexRating(fp.underfootK).label; } catch (e) {}
+  let torsion = ""; try { torsion = torsionRating(fp.torsK).label; } catch (e) {}
   const lay = stack.filter(l => ["fabric", "uni", "metal", "veneer", "vds"].includes(l.kind)).map(l =>
     l.kind === "metal" ? ((METALS[l.mat] || {}).name || "metal") : l.kind === "veneer" ? (((VENEERS[l.mat] || {}).name || "wood") + " veneer") : l.kind === "vds" ? "VDS" : ((FIBERS[l.mat] || {}).name || l.mat)).join(", ");
   return {
@@ -7517,6 +7536,7 @@ function computeVariantMetrics(snap) {
     radius: isFinite(derV.sidecutRadius) ? derV.sidecutRadius : null,
     coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
     k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0, rating,
+    underfootGJ: fp.underfootGJ || 0, torsion,
     core: coreL ? (coreWoods(coreL).map(cw => (CORE_MATERIALS[cw.mat] || {}).name || cw.mat).filter(Boolean).join(" + ") || "wood") : "",
     sidewall: swName, inserts: insMats,
     layup: lay,
@@ -7574,6 +7594,7 @@ function studyTableHTML(variants) {
     [t("tbl.bend", "3-pt bend"), (v, i) => num(v.k3pt, 2, " N/mm") + (i ? dlt(v.k3pt, first.k3pt, 2, 0.005) : "")],
     [t("tbl.peakEI", "Peak EI"), (v, i) => (v.peakEI ? (v.peakEI / 1e6).toFixed(1) + " N\u00B7m\u00B2" : "&mdash;") + (i && v.peakEI && first.peakEI ? dlt(v.peakEI / 1e6, first.peakEI / 1e6, 1, 0.05) : "")],
     [t("tbl.stiffness", "Stiffness (est)"), v => v.rating || "&mdash;"],
+    ["Torsion (est)", v => v.torsion || "&mdash;"],
     [t("tbl.weight", "Weight (est)"), (v, i) => num(v.weight, 2, " kg") + (i ? dlt(v.weight, first.weight, 2, 0.005) : "")],
   ];
   let h = `<table style="border-collapse:collapse;width:100%;font-family:monospace;font-size:11px"><tr><td style="padding:5px 8px;border-bottom:2px solid #333"></td>`;
@@ -7606,6 +7627,64 @@ function studyDesignHTML(variants, opts) {
 
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
+
+  // ── Undo / redo ────────────────────────────────────────────────
+  // Debounced history of the design: a burst of drag updates collapses into one step, so a single Ctrl-Z
+  // undoes a whole drag rather than each frame. Undo/redo don't record themselves. (Topsheet, layers, and
+  // the study have their own state/save flow; this tracks the ski geometry + construction.)
+  const histRef = useRef({ past: [], future: [] });
+  const committedRef = useRef(ski);
+  const suppressHistRef = useRef(false);
+  const histTimerRef = useRef(null);
+  const [histVer, setHistVer] = useState(0);
+  useEffect(() => {
+    if (suppressHistRef.current) { suppressHistRef.current = false; committedRef.current = ski; return; }
+    if (ski === committedRef.current) return;
+    clearTimeout(histTimerRef.current);
+    histTimerRef.current = setTimeout(() => {
+      const h = histRef.current;
+      h.past.push(committedRef.current);
+      if (h.past.length > 80) h.past.shift();
+      h.future = [];
+      committedRef.current = ski;
+      setHistVer(v => v + 1);
+    }, 400);
+  }, [ski]);
+  const undoDesign = () => {
+    clearTimeout(histTimerRef.current);
+    const h = histRef.current;
+    if (ski !== committedRef.current) { h.past.push(committedRef.current); h.future = []; committedRef.current = ski; }  // flush a pending change first
+    if (!h.past.length) return;
+    const prev = h.past.pop();
+    h.future.unshift(ski);
+    suppressHistRef.current = true; committedRef.current = prev;
+    setSki(prev); setHistVer(v => v + 1);
+  };
+  const redoDesign = () => {
+    clearTimeout(histTimerRef.current);
+    const h = histRef.current;
+    if (!h.future.length) return;
+    const next = h.future.shift();
+    h.past.push(ski);
+    suppressHistRef.current = true; committedRef.current = next;
+    setSki(next); setHistVer(v => v + 1);
+  };
+  const canUndo = histRef.current.past.length > 0 || ski !== committedRef.current;
+  const canRedo = histRef.current.future.length > 0;
+  const undoRef = useRef(); const redoRef = useRef();
+  undoRef.current = undoDesign; redoRef.current = redoDesign;
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target && e.target.tagName) || "";
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;  // let fields handle their own undo
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const k = (e.key || "").toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); undoRef.current(); }
+      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redoRef.current(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // One cohesive stylesheet for the whole UI: consistent hover/active feedback on every button, a focus
   // ring on inputs, smooth transitions, and themed thin scrollbars. Injected once so the look is uniform
   // across every panel regardless of the inline styles each control was built with.
@@ -8705,6 +8784,8 @@ export default function App() {
                 );
               })}
             </div>
+            <button onClick={undoDesign} disabled={!canUndo} title="Undo (Ctrl+Z)" style={{ ...headerBtn, padding: "6px 10px", opacity: canUndo ? 1 : 0.4, cursor: canUndo ? "pointer" : "default" }}>↶</button>
+            <button onClick={redoDesign} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" style={{ ...headerBtn, padding: "6px 10px", opacity: canRedo ? 1 : 0.4, cursor: canRedo ? "pointer" : "default" }}>↷</button>
             <button onClick={handleSave} style={headerBtn}>{t("btn.save", "Save")}</button>
             <button onClick={handleLoadClick} style={headerBtn}>{t("btn.load", "Load")}</button>
             <button onClick={handleNewDesign} style={headerBtn}>{t("btn.new", "New")}</button>
@@ -8952,6 +9033,10 @@ export default function App() {
           {/* Save/Load/New live in the top header on desktop; shown here only in the mobile drawer. */}
           {isCompact && (
             <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                <button onClick={undoDesign} disabled={!canUndo} style={{ ...secondaryBtn, opacity: canUndo ? 1 : 0.4 }}>↶ Undo</button>
+                <button onClick={redoDesign} disabled={!canRedo} style={{ ...secondaryBtn, opacity: canRedo ? 1 : 0.4 }}>↷ Redo</button>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
                 <button onClick={handleSave} style={{ ...primaryBtn }}>{t("btn.save", "Save")}</button>
                 <button onClick={handleLoadClick} style={{ ...secondaryBtn }}>{t("btn.load", "Load")}</button>
@@ -9774,10 +9859,17 @@ export default function App() {
             <div style={{ color: rating.color, fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{rating.label}</div>
             <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2 }}>Underfoot flex rating</div>
           </div>
+          {(() => { const tr = torsionRating(flex.torsK); return (
+            <div style={{ background: tr.color + "18", border: `1px solid ${tr.color}55`, borderRadius: 4, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+              <span style={{ color: tr.color, fontSize: 12, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>Torsion: {tr.label}</span>
+              <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(flex.underfootGJ / 1e6)} · relative</span>
+            </div>
+          ); })()}
           {stat("Underfoot", `${Math.round(flex.underfootK)} N/mm`, C.flexStroke)}
           {stat("Peak", `${Math.round(flex.peakK)} N/mm`, C.flexStroke)}
           {stat("3pt Bend", `${flex.k3pt.toFixed(2)} N/mm`, C.flexStroke)}
           {stat("Peak EI", `${(flex.peakEI / 1e6).toFixed(0)} N\u00B7m\u00B2`, C.eiStroke)}
+          {stat("Torsion GJ", `${(flex.underfootGJ / 1e6).toFixed(0)} N\u00B7m\u00B2 (rel)`, C.eiStroke)}
           {stat("Dims", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
           {stat("Eff Edge", `${Math.round(derived.effectiveEdge)} mm`)}
           {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
