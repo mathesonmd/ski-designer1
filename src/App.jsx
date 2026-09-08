@@ -932,9 +932,45 @@ function computeFlexProfile(ski){
     const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos)).EI*cal;
     const f=ei>0?(m*m)/ei:0;integral+=(i===0||i===N?0.5:1.0)*f*dx;
   }
-  const k3pt=integral>0?1/integral:0,midIdx=Math.round(N*0.5);
+  const k3pt=integral>0?1/integral:0;
+  // Stance-aware: report flex where the rider actually stands (the binding mount center) rather than the
+  // geometric middle. For an inline skwal or a set-back monoski that's not 0.5.
+  const mnt=getMount(ski);
+  const stancePos=mnt.on?Math.max(0.08,Math.min(0.92,mnt.centerMm/ski.length)):0.5;
+  const midIdx=Math.round(N*stancePos);
   return{stations,k3pt,peakK:Math.max(...stations.map(s=>s.kCant)),underfootK:stations[midIdx].kCant,peakEI:Math.max(...stations.map(s=>s.ei)),
-    peakGJ:Math.max(...stations.map(s=>s.gj)),underfootGJ:stations[midIdx].gj,torsK:stations[midIdx].gj/1e6,cal,calT};
+    peakGJ:Math.max(...stations.map(s=>s.gj)),underfootGJ:stations[midIdx].gj,torsK:stations[midIdx].gj/1e6,stancePos,cal,calT};
+}
+// Binding mount config with sensible defaults. style: "single" (ski) | "inline" (skwal) | "dual" (monoski).
+function getMount(ski){
+  const m=ski.mount||{},isB=(ski.mode||"ski")==="snowboard";
+  const style=m.style||(isB?"inline":"single");
+  return{
+    on:!!m.on, style,
+    centerMm:m.centerMm!=null?m.centerMm:Math.round(ski.length*0.5),
+    gapMm:m.gapMm!=null?m.gapMm:(style==="dual"?120:300),
+    angleDeg:m.angleDeg!=null?m.angleDeg:0,
+    patW:m.patW!=null?m.patW:40, patL:m.patL!=null?m.patL:100,
+    inserts:!!m.inserts,
+  };
+}
+// Boot centers + drill holes in board coords {x: lateral from centerline, y: along from tail}. Each boot's
+// pattern rectangle (patW × patL) is rotated by the binding angle (0° = boot along the board).
+function mountGeometry(ski){
+  const m=getMount(ski);
+  if(!m.on) return null;
+  const th=m.angleDeg*Math.PI/180, c=Math.cos(th), s=Math.sin(th);
+  let centers;
+  if(m.style==="single") centers=[{x:0,y:m.centerMm}];
+  else if(m.style==="dual") centers=[{x:-m.gapMm/2,y:m.centerMm},{x:m.gapMm/2,y:m.centerMm}];
+  else centers=[{x:0,y:m.centerMm-m.gapMm/2},{x:0,y:m.centerMm+m.gapMm/2}];   // inline (skwal)
+  const rot=(ctr,hx,hy)=>({x:ctr.x+(hy*s+hx*c),y:ctr.y+(hy*c-hx*s)});
+  const boots=centers.map(ctr=>({
+    ctr,
+    holes:[[-m.patW/2,-m.patL/2],[m.patW/2,-m.patL/2],[m.patW/2,m.patL/2],[-m.patW/2,m.patL/2]].map(([hx,hy])=>rot(ctr,hx,hy)),
+    dir:[rot(ctr,0,-m.patL*0.62),rot(ctr,0,m.patL*0.62)],
+  }));
+  return {m,boots};
 }
 function torsionRating(tk){
   if(tk<70)return{label:"Low",color:"#9FB8A8"};if(tk<130)return{label:"Medium",color:"#B8C8B0"};
@@ -1690,7 +1726,21 @@ function buildInsertsDXF(ski, tf) {
   return out;
 }
 
-// ══════════════ CONTACT-TO-CONTACT EDGE GEOMETRY ══════════════
+// Appends binding-mount geometry to a DXF on the MOUNT layer (ski/skwal/monoski): a small cross at each
+// boot center, the drill-pattern circles, and a boot-direction tick. `tf(x,y)` matches buildInsertsDXF.
+function buildMountDXF(ski, tf) {
+  const mg = mountGeometry(ski);
+  if (!mg) return "";
+  const T = tf || ((x, y) => ({ x, y }));
+  let out = "";
+  mg.boots.forEach(b => {
+    const c = T(b.ctr.x, b.ctr.y), a1 = T(b.ctr.x - 7, b.ctr.y), a2 = T(b.ctr.x + 7, b.ctr.y), d1 = T(b.dir[0].x, b.dir[0].y), d2 = T(b.dir[1].x, b.dir[1].y);
+    out += dxfLine('MOUNT', a1.x, a1.y, a2.x, a2.y);
+    out += dxfLine('MOUNT', d1.x, d1.y, d2.x, d2.y);
+    b.holes.forEach(h => { const p = T(h.x, h.y); out += dxfCircle('MOUNT', p.x, p.y, 2.4); });
+  });
+  return out;
+}
 // Returns { right, left } — two OPEN polylines running from tail-contact to tip-contact, each
 // offset inward from the ski's side edge by `edgeInset` (using the local inward normal so the
 // offset tracks the sidecut curve correctly). Used when the user selects "Contact-to-Contact"
@@ -2145,6 +2195,7 @@ function exportPlanDXF(ski){
 
   // Binding inserts (snowboard mode) on the INSERTS layer — pass P so they orient with the outline.
   dxf += buildInsertsDXF(ski, (x, y) => P({ x, y }));
+  dxf += buildMountDXF(ski, (x, y) => P({ x, y }));
 
   // Measurements table — beyond the geometry AND the contact labels so nothing overlaps it.
   const projPts = pts.map(P);
@@ -2932,6 +2983,7 @@ function exportCombinedDXF(ski){
 
   // ── BINDING INSERTS ── snowboard mode; compose the combined swap then the orientation rotation.
   dxf += buildInsertsDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
+  dxf += buildMountDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
 
   // ── MEASUREMENTS TABLE ── placed to the right of the rotated composition, text horizontal.
   const allGeom = [
@@ -5004,6 +5056,28 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.restore();
     }
 
+    // ── Binding mount marks: boot-center cross + direction line + drill pattern, drawn on top. ──
+    (() => {
+      const mg = mountGeometry(ski);
+      if (!mg) return;
+      ctx.save();
+      const col = C.contactLine || "#e8552a";
+      mg.boots.forEach(b => {
+        const cs = toMain(b.ctr.x, b.ctr.y);
+        // boot direction line
+        const d0 = toMain(b.dir[0].x, b.dir[0].y), d1 = toMain(b.dir[1].x, b.dir[1].y);
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(d0.x, d0.y); ctx.lineTo(d1.x, d1.y); ctx.stroke();
+        // boot center cross
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(cs.x - 6, cs.y); ctx.lineTo(cs.x + 6, cs.y); ctx.moveTo(cs.x, cs.y - 6); ctx.lineTo(cs.x, cs.y + 6); ctx.stroke();
+        // drill holes
+        ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+        b.holes.forEach(h => { const hs = toMain(h.x, h.y); ctx.beginPath(); ctx.arc(hs.x, hs.y, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+      });
+      ctx.restore();
+    })();
+
     cps.forEach(cp => {
       if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, mainClipRect);
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
@@ -6312,6 +6386,7 @@ const SIDEBAR_GROUPS = [
     { key: "snowboard", title: "Snowboard", terms: "stance setback insert binding board pack", mode: "snowboard" },
     { key: "sideProfile", title: "Side Profile", terms: "rocker camber tip rise tail rise profile height elevation" },
     { key: "symmetry", title: "Symmetry", terms: "symmetric mirror tip tail nodes bezier asymmetric" },
+    { key: "bindingMount", title: "Binding Mount", terms: "binding mount stance skwal monoski insert drill pattern boot center flex" },
     { key: "coreFill", title: "Core", terms: "core inset v-cut vcut fill notch spear swallowtail sidewall" },
     { key: "layup", title: "Layup / Materials", terms: "layup fiber fabric glass carbon biax triax metal titanal wood core flex stiffness ud stringer epoxy flax" },
   ]},
@@ -8460,12 +8535,12 @@ export default function App() {
     views: true,
     presets: true,
     splitboard: true,     // only shown in splitboard mode; relevant section, open there
-    symmetry: false,
+    symmetry: false, bindingMount: false,
     dimensions: true,
     snowboard: true,
     coreFill: false,
     sideProfile: false,
-    symmetry: false,
+    symmetry: false, bindingMount: false,
     layup: false,
     inserts: false,
     topsheet: false,
@@ -9982,6 +10057,34 @@ export default function App() {
         </AccordionSection>
 
         {groupHeader(SIDEBAR_GROUPS[3])}
+        <AccordionSection isOpen={sectionsOpen.bindingMount !== false} onToggle={() => toggleSection("bindingMount")} title="Binding Mount">
+          {(() => {
+            const m = getMount(ski);
+            const setM = (patch) => setSki(s => ({ ...s, mount: { ...getMount(s), ...patch } }));
+            const seg = (lbl, val) => (<button key={lbl} onClick={() => setM({ style: val })} style={{ flex: 1, padding: "5px 4px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", background: m.style === val ? C.heading : "transparent", color: m.style === val ? C.bgDeep : C.labelDim, border: `1px solid ${m.style === val ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>{lbl}</button>);
+            const mf = (label, key, min, max) => (<div style={{ marginBottom: 6, flex: 1 }}><div style={{ color: C.labelDim, fontSize: 9.5, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>{label}</div><input type="number" value={m[key]} min={min} max={max} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setM({ [key]: Math.max(min, Math.min(max, Math.round(v))) }); }} style={{ width: "100%", padding: "5px 7px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }} /></div>);
+            return (<>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: m.on ? 8 : 0, cursor: "pointer", color: C.label, fontSize: 12 }}>
+                <input type="checkbox" checked={m.on} onChange={e => setM({ on: e.target.checked })} /> Show binding mount
+              </label>
+              {m.on && (<>
+                <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Type</div>
+                <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>{seg("Single \u00b7 ski", "single")}{seg("Inline \u00b7 skwal", "inline")}{seg("Dual \u00b7 mono", "dual")}</div>
+                {mf("Boot center (mm from tail)", "centerMm", 40, Math.max(60, ski.length - 40))}
+                {m.style !== "single" && mf(m.style === "dual" ? "Boot spacing, side-to-side (mm)" : "Stride gap, front-to-back (mm)", "gapMm", 40, 600)}
+                {mf("Binding angle (\u00b0 off board axis)", "angleDeg", 0, 90)}
+                <div style={{ display: "flex", gap: 6 }}>{mf("Pattern W (mm)", "patW", 10, 120)}{mf("Pattern L (mm)", "patL", 20, 300)}</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, cursor: "pointer", color: C.labelDim, fontSize: 11 }}>
+                  <input type="checkbox" checked={m.inserts} onChange={e => setM({ inserts: e.target.checked })} /> Molded inserts (vs direct-drill)
+                </label>
+                <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                  Boot center(s) + drill pattern show in the plan view and export on a MOUNT layer, and the flex reading moves to this stance. {m.inserts ? "Inserts: same geometry, molded threaded inserts." : "Direct-drill: the binding's own pattern, screwed into the board (skwal/ski/mono standard)."}
+                </div>
+              </>)}
+            </>);
+          })()}
+        </AccordionSection>
+
         <AccordionSection isOpen={sectionsOpen.flex} onToggle={() => toggleSection("flex")}
           title={t("sec.flex", "Flex Analysis")}
           accent={
