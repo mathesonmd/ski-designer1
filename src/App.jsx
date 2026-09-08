@@ -1193,6 +1193,7 @@ function computeDerived(ski){
 // board. Channel mode returns one centered lengthwise slot per foot instead of discrete holes.
 function computeInserts(ski){
   if (ski.mode !== "snowboard") return { holes: [], slots: [], packs: [] };
+  if (ski.insertPattern === "none") return { holes: [], slots: [], packs: [] };   // skwal / direct-mount: no insert grid
   const tailC = ski.tailLength;
   const tipC = ski.length - ski.tipLength;
   const eeCenter = (tailC + tipC) / 2;               // effective-edge center along Y
@@ -1390,7 +1391,7 @@ const SNOWBOARD_PRESETS=[
     rT,null,rTa,null,true,true,{tipHeight:45,tailHeight:38,camberHeight:4,waistPosition:0.50}),
   makePreset("Directional",{mode:"snowboard",length:1600,tipWidth:300,waistWidth:255,tailWidth:290,tipLength:275,tailLength:205,stanceWidth:570,setback:30,insertPattern:"2x4"},
     rT,null,rTa,null,true,true,{tipHeight:50,tailHeight:32,camberHeight:3,waistPosition:0.48}),
-  makePreset("Skwal",{mode:"snowboard",length:1650,tipWidth:140,waistWidth:118,tailWidth:128,tipLength:260,tailLength:90,mount:{on:true,style:"inline",centerMm:800,gapMm:300,angleDeg:5}},
+  makePreset("Skwal",{mode:"snowboard",length:1650,tipWidth:140,waistWidth:118,tailWidth:128,tipLength:260,tailLength:90,insertPattern:"none",mount:{on:true,style:"inline",centerMm:800,gapMm:300,angleDeg:5}},
     rT,null,rTa,null,true,true,{tipHeight:42,tailHeight:22,camberHeight:3,waistPosition:0.50}),
 ];
 // ══════════════ EXPORTS ══════════════
@@ -9571,7 +9572,7 @@ export default function App() {
                 Insert Pattern
               </div>
               <div style={{ display: "flex", gap: 5 }}>
-                {[["2x4", "2×4"], ["4x4", "4×4"], ["channel", "Channel"]].map(([val, lbl]) => {
+                {[["2x4", "2×4"], ["4x4", "4×4"], ["channel", "Channel"], ["none", "None"]].map(([val, lbl]) => {
                   const active = (ski.insertPattern || "2x4") === val;
                   return (
                     <button key={val} onClick={() => setSki(s => ({ ...s, insertPattern: val }))}
@@ -9584,10 +9585,12 @@ export default function App() {
                 })}
               </div>
               <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                {(ski.insertPattern || "2x4") === "channel"
-                  ? "Burton-style centered channel per foot."
-                  : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
-                {" "}Stance {(ski.stanceWidth/10).toFixed(1)}cm · setback from effective-edge center.
+                {ski.insertPattern === "none"
+                  ? "No insert grid — direct-mount bindings (skwal/alpine). Set the layout under Binding Mount."
+                  : (ski.insertPattern || "2x4") === "channel"
+                    ? "Burton-style centered channel per foot."
+                    : (ski.insertPattern === "4x4" ? "40×40mm grid. Older standard." : "40mm across × 20mm along. Modern standard.")}
+                {ski.insertPattern !== "none" && <>{" "}Stance {(ski.stanceWidth/10).toFixed(1)}cm · setback from effective-edge center.</>}
               </div>
             </div>
           </AccordionSection>
