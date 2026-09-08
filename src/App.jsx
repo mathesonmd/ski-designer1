@@ -5401,7 +5401,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           const newSkiLen = clamp(Math.round(dragStart.ski.length - dSkiY), 1200, 2200);
           const actualDelta = dragStart.ski.length - newSkiLen;
           updates.length = newSkiLen;
-          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength - actualDelta), 60, 400);
+          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength - actualDelta), dragStart.ski.mode === "snowboard" ? 10 : 60, 400);
           newNodes[cp.idx].x = clamp(nd.x + dNx, 0.05, 1.0);
           newNodes[cp.idx].y = 1;
         } else {
@@ -5416,9 +5416,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         //   Tip: contact at skiY = ski.length - tipLength. Drag right (+dSkiY) moves toward tip → tipLength shrinks.
         //   Tail: contact at skiY = tailLength. Drag right (+dSkiY) moves toward tip → tailLength grows.
         if (isTip) {
-          updates.tipLength = clamp(Math.round(dragStart.ski.tipLength - dSkiY), 80, 500);
+          updates.tipLength = clamp(Math.round(dragStart.ski.tipLength - dSkiY), dragStart.ski.mode === "snowboard" ? 40 : 80, 500);
         } else {
-          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength + dSkiY), 60, 400);
+          updates.tailLength = clamp(Math.round(dragStart.ski.tailLength + dSkiY), dragStart.ski.mode === "snowboard" ? 10 : 60, 400);
         }
         // Lateral drag of CONTACT node: change tip/tail width.
         // The contact point is at skiX = sign·wHalf. Moving FURTHER from centerline grows the width.
@@ -5446,7 +5446,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           const delta = dSkiY;  // mm by which the back of the ski moves forward
           const newSkiLen = clamp(Math.round(dragStart.ski.length - delta), 1200, 2200);
           const actualDelta = dragStart.ski.length - newSkiLen;  // actually applied delta after clamping
-          const newTailLen = clamp(Math.round(dragStart.ski.tailLength - actualDelta), 60, 400);
+          const newTailLen = clamp(Math.round(dragStart.ski.tailLength - actualDelta), dragStart.ski.mode === "snowboard" ? 10 : 60, 400);
           updates.length = newSkiLen;
           updates.tailLength = newTailLen;
         }
@@ -9307,8 +9307,8 @@ export default function App() {
                 {!ski.asymSidecut && inputField(t("dim.waist", "Waist"), "waistWidth", waistMin, waistMax)}
                 {inputField(t("dim.tailW", "Tail W"), "tailWidth", 60, wMax)}
                 {!ski.asymSidecut && <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />}
-                {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", 80, 500)}
-                {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", 60, 400)}
+                {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", board ? 40 : 80, 500)}
+                {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", board ? 10 : 60, 400)}
                 <RunningEdgeField ski={ski} setSki={setSki} C={C} />
                 {(ski.mode || "ski") !== "snowboard" && (() => {
                   const on = !!ski.swallowtail;
