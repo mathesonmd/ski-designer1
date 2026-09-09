@@ -1391,8 +1391,14 @@ const SNOWBOARD_PRESETS=[
     rT,null,rTa,null,true,true,{tipHeight:45,tailHeight:38,camberHeight:4,waistPosition:0.50}),
   makePreset("Directional",{mode:"snowboard",length:1600,tipWidth:300,waistWidth:255,tailWidth:290,tipLength:275,tailLength:205,stanceWidth:570,setback:30,insertPattern:"2x4"},
     rT,null,rTa,null,true,true,{tipHeight:50,tailHeight:32,camberHeight:3,waistPosition:0.48}),
-  makePreset("Skwal",{mode:"snowboard",length:1650,tipWidth:140,waistWidth:118,tailWidth:128,tipLength:260,tailLength:90,insertPattern:"none",mount:{on:true,style:"inline",centerMm:800,gapMm:300,angleDeg:5}},
+  makePreset("Skwal",{mode:"snowboard",length:1650,tipWidth:140,waistWidth:118,tailWidth:128,tipLength:260,tailLength:90,stanceWidth:300,setback:0,insertPattern:"4x4"},
     rT,null,rTa,null,true,true,{tipHeight:42,tailHeight:22,camberHeight:3,waistPosition:0.50}),
+  makePreset("Alpine SL",{mode:"snowboard",length:1600,tipWidth:210,waistWidth:188,tailWidth:202,tipLength:175,tailLength:130,stanceWidth:490,setback:60,insertPattern:"4x4"},
+    rT,null,rTa,null,true,true,{tipHeight:36,tailHeight:26,camberHeight:5,waistPosition:0.46}),
+  makePreset("Alpine GS",{mode:"snowboard",length:1850,tipWidth:208,waistWidth:186,tailWidth:200,tipLength:210,tailLength:150,stanceWidth:520,setback:80,insertPattern:"4x4"},
+    rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:28,camberHeight:5,waistPosition:0.46}),
+  makePreset("Boardercross",{mode:"snowboard",length:1650,tipWidth:282,waistWidth:255,tailWidth:270,tipLength:255,tailLength:195,stanceWidth:565,setback:40,insertPattern:"4x4"},
+    rT,null,rTa,null,true,true,{tipHeight:48,tailHeight:34,camberHeight:4,waistPosition:0.48}),
 ];
 // ══════════════ EXPORTS ══════════════
 function downloadFile(content,filename,mime){
@@ -1743,6 +1749,25 @@ function buildMountDXF(ski, tf) {
     out += dxfLine('MOUNT', a1.x, a1.y, a2.x, a2.y);
     out += dxfLine('MOUNT', d1.x, d1.y, d2.x, d2.y);
     b.holes.forEach(h => { const p = T(h.x, h.y); out += dxfCircle('MOUNT', p.x, p.y, 2.4); });
+  });
+  return out;
+}
+
+// Alignment / registration marks on an ALIGN layer: a centerline plus cross-marks (and small pin holes) at
+// the tail contact, midfoot, and tip contact. Cut/marked into the core, base, and mould, they let a builder
+// stack everything true in the press. `tf(x,y)` matches buildInsertsDXF.
+function buildAlignDXF(ski, tf) {
+  if (!ski.alignMarks) return "";
+  const T = tf || ((x, y) => ({ x, y }));
+  const L = ski.length, tailC = ski.tailLength, tipC = L - ski.tipLength, mid = (tailC + tipC) / 2;
+  let out = "";
+  const c0 = T(0, 0), c1 = T(0, L);
+  out += dxfLine('ALIGN', c0.x, c0.y, c1.x, c1.y);   // centerline
+  [tailC, mid, tipC].forEach(y => {
+    const h1 = T(-9, y), h2 = T(9, y), v1 = T(0, y - 9), v2 = T(0, y + 9), ctr = T(0, y);
+    out += dxfLine('ALIGN', h1.x, h1.y, h2.x, h2.y);
+    out += dxfLine('ALIGN', v1.x, v1.y, v2.x, v2.y);
+    out += dxfCircle('ALIGN', ctr.x, ctr.y, 1.5);
   });
   return out;
 }
@@ -2201,6 +2226,7 @@ function exportPlanDXF(ski){
   // Binding inserts (snowboard mode) on the INSERTS layer — pass P so they orient with the outline.
   dxf += buildInsertsDXF(ski, (x, y) => P({ x, y }));
   dxf += buildMountDXF(ski, (x, y) => P({ x, y }));
+  dxf += buildAlignDXF(ski, (x, y) => P({ x, y }));
 
   // Measurements table — beyond the geometry AND the contact labels so nothing overlaps it.
   const projPts = pts.map(P);
@@ -2989,6 +3015,7 @@ function exportCombinedDXF(ski){
   // ── BINDING INSERTS ── snowboard mode; compose the combined swap then the orientation rotation.
   dxf += buildInsertsDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
   dxf += buildMountDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
+  dxf += buildAlignDXF(ski, (x, y) => R({ x: y, y: x + baseYoff }));
 
   // ── MEASUREMENTS TABLE ── placed to the right of the rotated composition, text horizontal.
   const allGeom = [
@@ -9565,7 +9592,7 @@ export default function App() {
 
         {(ski.mode || "ski") === "snowboard" && (
           <AccordionSection isOpen={sectionsOpen.snowboard !== false} onToggle={() => toggleSection("snowboard")} title={t("sec.stance", "Stance & Inserts")}>
-            {inputField("Stance W", "stanceWidth", 400, 720)}
+            {inputField("Stance W", "stanceWidth", 240, 720)}
             {inputField("Setback", "setback", -40, 80)}
             <div style={{ marginBottom: 7 }}>
               <div style={{ color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
@@ -10225,6 +10252,11 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.cncExport} onToggle={() => toggleSection("cncExport")} title={t("sec.cnc", "CNC Export")}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 9, cursor: "pointer", color: C.label, fontSize: 11.5 }}>
+            <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
+            Alignment marks (ALIGN layer)
+          </label>
+          {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Centerline + cross-marks & pin holes at the contacts and midfoot, on every layer, so the core, base, and mould register in the press.</div>}
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
