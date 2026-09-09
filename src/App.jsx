@@ -331,16 +331,16 @@ function splitSegment(a, b, t) {
 //   - widens slightly forward of contact (because the vertical tangent maintains width briefly)
 //   - rounds smoothly to a point at the nose centerline
 function makeRoundedTip() { return [
-  { x: 1.0, y: 0.0, tx: 0,    ty: 0.65 },  // contact: tangent points straight along ski
-  { x: 0.0, y: 1.0, tx: 0.45, ty: 0    },  // nose: tangent points laterally inward
+  { x: 1.0, y: 0.0, tx: 0,    ty: 0.82 },  // contact: full width carried well up the shovel
+  { x: 0.0, y: 1.0, tx: 0.82, ty: 0    },  // nose: broad lateral tangent = a full, rounded modern tip
 ];}
 function makeRoundedTail() { return [
   // Node 0 = contact point at (1, 0): sidecut full width, at the start of the tail run.
   //   Tangent points along the ski (toward the tail-end), magnitude 0.65 — same as tip.
   // Node 1 = tail-end at (0, 1): centerline, at the back of the ski.
   //   Tangent points laterally inward (back from tail-end), magnitude 0.45 — same as tip.
-  { x: 1.0, y: 0.0, tx: 0,    ty: 0.65 },  // contact: tangent along ski (toward end)
-  { x: 0.0, y: 1.0, tx: 0.45, ty: 0    },  // tail-end: tangent laterally inward
+  { x: 1.0, y: 0.0, tx: 0,    ty: 0.82 },  // contact: full width carried well into the tail
+  { x: 0.0, y: 1.0, tx: 0.86, ty: 0    },  // tail-end: broad lateral tangent = a full, rounded modern tail
 ];}
 // Swallowtail (per side): contact → prong tip (a sharp corner at the widest back point) → notch on the
 // centerline (x=0), pulled inboard by `notchY`. The prong sits at y=1 (the tail-end line) so it holds the
@@ -3504,7 +3504,7 @@ function buildCoreCAM(ski, opt) {
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge", "alignToolDia"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -3829,10 +3829,10 @@ function buildCoreCAM(ski, opt) {
   if (o.drillAlign) {
     const aholes = alignHoles(ski);
     if (aholes.length) {
-      const holeD = (ski.alignDowelDia || 12.7) * uL;
-      const aTool = o.alignToolNum != null ? o.alignToolNum : 2;
-      const aToolDisp = o.alignToolDia != null ? o.alignToolDia : 6.35;
-      const aToolD = aToolDisp * uL;
+      const holeD = (ski.alignDowelDia || 12.7);         // design value, already mm
+      const aTool = o.alignToolNum != null ? o.alignToolNum : 3;
+      const aToolD = (o.alignToolDia != null ? o.alignToolDia : 6.35);   // converted to mm with the other CAM lengths
+      const aToolDisp = disp.alignToolDia != null ? disp.alignToolDia : (inch ? +(6.35 / 25.4).toFixed(4) : 6.35);
       const orbitR = Math.max(0, holeD / 2 - aToolD / 2);
       PB(); PC("===== ALIGNMENT DOWEL HOLES (" + (ski.alignDowelDia || 12.7) + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
       P(`G0 Z${f(safeZ)}`);
@@ -7690,7 +7690,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
-  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
+  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia", "alignToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
@@ -8420,7 +8420,7 @@ export default function App() {
     try {
       const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
       const opt = camOpt.op === "outline"
-        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen }
+        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks, alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
@@ -8431,7 +8431,7 @@ export default function App() {
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, drillAlign: !!ski.alignMarks, alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts]);
@@ -8458,7 +8458,7 @@ export default function App() {
   const openSetupSheet = useCallback(() => {
     const s = camResult.stats; if (!s) return;
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
-    const opName = { outline: "Outline through-cut", taper: "Surface taper", mold: "Mold surfacing", slat: "Slat molds", bore: "Insert bores", pocket: "Pocket" }[camOpt.op] || camOpt.op;
+    const opName = { outline: "Core profile (perimeter)", taper: "Core taper", mold: "Mold surfacing", slat: "Slat molds", bore: "Insert bores", pocket: "Pocket" }[camOpt.op] || camOpt.op;
     const post = (POST_PROFILES[camOpt.postKey] || {}).name || camOpt.postKey;
     const tool = `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
     const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
@@ -10768,7 +10768,7 @@ export default function App() {
                 <div style={{ marginBottom: 8 }}>
                   <div style={camLabel}>② Operation (one file each)</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 5 }}>
-                    {[["outline", "Outline"], ["taper", "Taper"], ["mold", "Mold"], ["slat", "Slats"], ["bore", "Bore"], ["pocket", "Pocket"], ["base", "Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
+                    {[["outline", "Core Profile"], ["taper", "Core Taper"], ["mold", "Mold"], ["slat", "Slats"], ["bore", "Bore"], ["pocket", "Pocket"], ["base", "Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
@@ -10796,7 +10796,7 @@ export default function App() {
                       <div style={{ color: camOpt.op === "taper" ? C.labelDim : C.heading, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                         {camOpt.op === "taper"
                           ? "Bored in THIS op — two holes on the centerline at the midpoints between waist and each contact. A smaller bit helical-bores; an equal bit plunges. Also on the plan view + DXF/SVG."
-                          : "\u2192 Drilled during the Taper (core profile) op. Set the sizes here, then switch to Taper to see the toolpaths. Also shown on the plan view + DXF/SVG."}
+                          : "\u2192 Drilled during the Core Profile op. Set the sizes here, then switch to Core Profile to see the toolpaths. Also shown on the plan view + DXF/SVG."}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                         <div><div style={camSmall}>Dowel \u00D8 {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
