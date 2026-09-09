@@ -3822,29 +3822,31 @@ function buildCoreCAM(ski, opt) {
       }
     }
   }
-  // ── Alignment dowel holes: register the core on dowels glued to the base. Cut with a smaller endmill
-  // (helical bore) so a large dowel hole clears chips cleanly — the way a 1/4" endmill opens a 1/2" hole.
-  // Core cut only (not base/mold or a slat sheet). ──
-  if (!isBase && !o.slatPolys) {
+  // ── Alignment dowel holes (core-profile op only): drill at the time of profiling so the core registers on
+  // dowels glued to the base. CAM's internal axes are (x = length, y = width), so swap from the (lateral,
+  // along) hole coords. Tool number + diameter come from the CAM options; the hole diameter is the design's
+  // dowel size. A smaller bit helical-bores a larger hole (a 1/4" bit opening a 1/2" dowel hole). ──
+  if (o.drillAlign) {
     const aholes = alignHoles(ski);
     if (aholes.length) {
-      const holeD = ski.alignDowelDia || 6;
-      const aTool = ski.alignToolNum != null ? ski.alignToolNum : 2;
-      const aToolD = (ski.alignToolDia != null ? ski.alignToolDia : 6.35) * uL;   // to machine units
-      const orbitR = Math.max(0, holeD / 2 * uL - aToolD / 2);
-      PB(); PC("===== ALIGNMENT DOWEL HOLES (" + holeD + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
+      const holeD = (ski.alignDowelDia || 6) * uL;
+      const aTool = o.alignToolNum != null ? o.alignToolNum : 2;
+      const aToolDisp = o.alignToolDia != null ? o.alignToolDia : 6.35;
+      const aToolD = aToolDisp * uL;
+      const orbitR = Math.max(0, holeD / 2 - aToolD / 2);
+      PB(); PC("===== ALIGNMENT DOWEL HOLES (" + (ski.alignDowelDia || 6) + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
       P(`G0 Z${f(safeZ)}`);
-      toolChange(aTool); PC("Dowel-hole tool: " + (ski.alignToolDia != null ? ski.alignToolDia : 6.35) + " mm endmill");
+      toolChange(aTool); PC("Dowel-hole tool: " + aToolDisp + " " + uu + " endmill");
       if (!o.baseOp) P(`S${o.spindle} M3`);
-      const zTop = MZ(o.stockThick), zBot = MZ(-1), segs = 24;
+      const zTop = MZ(o.stockThick), zBot = MZ(-(inch ? 0.04 : 1)), segs = 24;
       aholes.forEach(h => {
-        if (orbitR <= 0.2) {                        // tool ≈ hole → straight plunge
-          g0(h.x, h.y); g0z(zTop); P(`G1 Z${f(zBot)} F${f(o.plunge)}`); tk(zBot); cuts++;
-        } else {                                    // helical bore, approximated with linear segments
-          g0(h.x + orbitR, h.y); g0z(zTop);
+        const along = h.y, lat = h.x;               // CAM x = along-length, y = lateral
+        if (orbitR <= 0.2) { g0(along, lat); g0z(zTop); P(`G1 Z${f(zBot)} F${f(o.plunge)}`); tk(zBot); cuts++; }
+        else {
+          g0(along + orbitR, lat); g0z(zTop);
           const depth = zTop - zBot, revs = Math.max(1, Math.ceil(depth / Math.max(0.5, o.stepdown))), total = revs * segs;
-          for (let i = 1; i <= total; i++) { const a = (i / segs) * 2 * Math.PI, z = zTop - (i / total) * depth; g1(h.x + orbitR * Math.cos(a), h.y + orbitR * Math.sin(a), z, o.feed); }
-          for (let i = 1; i <= segs; i++) { const a = (i / segs) * 2 * Math.PI; g1(h.x + orbitR * Math.cos(a), h.y + orbitR * Math.sin(a), zBot, o.feed); }   // finish circle
+          for (let i = 1; i <= total; i++) { const a = (i / segs) * 2 * Math.PI, z = zTop - (i / total) * depth; g1(along + orbitR * Math.cos(a), lat + orbitR * Math.sin(a), z, o.feed); }
+          for (let i = 1; i <= segs; i++) { const a = (i / segs) * 2 * Math.PI; g1(along + orbitR * Math.cos(a), lat + orbitR * Math.sin(a), zBot, o.feed); }
         }
         P(`G0 Z${f(safeZ)}`);
       });
@@ -8340,6 +8342,7 @@ export default function App() {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true, stockL: 0, stockW: 0, centerInStock: true,
       outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
+      alignToolNum: 3, alignToolDia: 6.35,   // dowel-hole tool (defaults to a 1/4" endmill; helical-bores the dowel dia)
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
@@ -8428,7 +8431,7 @@ export default function App() {
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, drillAlign: !!ski.alignMarks, alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts]);
@@ -10313,21 +10316,13 @@ export default function App() {
             <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
             Alignment marks (ALIGN layer)
           </label>
-          {ski.alignMarks && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 7, flexWrap: "wrap" }}>
-            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Dowel dia</span>
+          {ski.alignMarks && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 7 }}>
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Dowel dia (mm)</span>
             <input type="number" min={2} max={20} step={0.5} value={ski.alignDowelDia != null ? ski.alignDowelDia : 6}
               onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: Math.max(2, Math.min(20, v)) })); }}
-              style={{ width: 56, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
-            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>· Tool #</span>
-            <input type="number" min={1} max={99} step={1} value={ski.alignToolNum != null ? ski.alignToolNum : 2}
-              onChange={e => { const v = parseInt(e.target.value, 10); if (isFinite(v)) setSki(s => ({ ...s, alignToolNum: Math.max(1, Math.min(99, v)) })); }}
-              style={{ width: 46, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
-            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>bit dia</span>
-            <input type="number" min={1} max={20} step={0.05} value={ski.alignToolDia != null ? ski.alignToolDia : 6.35}
-              onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignToolDia: Math.max(1, Math.min(20, v)) })); }}
-              style={{ width: 56, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+              style={{ width: 64, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
           </div>}
-          {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Two holes on the centerline, at the midpoints between waist and each contact — shown in the plan view, on the DXF (ALIGN layer), and bored in the core CAM. When the bit is smaller than the hole it helical-bores (a 1/4" bit opening a 1/2" dowel hole); when equal it plunges. Glue matching dowels to the base so the core drops on true.</div>}
+          {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Two holes on the centerline, at the midpoints between waist and each contact — shown in the plan view and on the DXF/SVG (ALIGN layer) at the dowel diameter. To drill them on the CNC, use the Core Profile op in the CAM workspace (tool # and bit set there). Glue matching dowels to the base so the core drops on true.</div>}
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
@@ -10788,6 +10783,18 @@ export default function App() {
                   ))}
                 </div>
                 <FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />
+                {camOpt.op === "taper" && ski.alignMarks && (
+                  <div style={{ border: `1px solid ${C.heading}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>Alignment dowel holes</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Bored at the two centerline points during this op ({ski.alignDowelDia || 6} mm dowel dia — set in CNC Export). A smaller bit helical-bores the hole; an equal bit plunges.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <div><div style={camSmall}>Hole tool #</div><input type="number" value={camOpt.alignToolNum} step={1} onChange={e => setCam("alignToolNum", parseInt(e.target.value, 10) || 0)} style={camInput} /></div>
+                      <div><div style={camSmall}>Bit \u00D8 {uu}</div><input type="number" value={camOpt.alignToolDia} step={st} onChange={e => setCam("alignToolDia", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                    </div>
+                  </div>
+                )}
                 {(isMold || camOpt.op === "taper") && (
                   <div style={{ border: `1px solid ${camOpt.roughing ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>Passes</div>
