@@ -1753,21 +1753,33 @@ function buildMountDXF(ski, tf) {
   return out;
 }
 
-// Alignment / registration marks on an ALIGN layer: a centerline plus cross-marks (and small pin holes) at
-// the tail contact, midfoot, and tip contact. Cut/marked into the core, base, and mould, they let a builder
-// stack everything true in the press. `tf(x,y)` matches buildInsertsDXF.
+// Alignment dowel holes: on the centerline, at the midpoints between the waist and each contact (the method
+// of drilling the core and dropping it onto dowels glued to the base). Count/positions kept simple + shared
+// between the DXF, the CAM drill pass, and the plan view. Returns [] when alignment marks are off.
+function alignHoles(ski) {
+  if (!ski.alignMarks) return [];
+  const L = ski.length, tailC = ski.tailLength, tipC = L - ski.tipLength;
+  const span = Math.max(1, tipC - tailC);
+  const wp = ski.waistPosition != null ? ski.waistPosition : 0.48;
+  const waistX = ski.waistFullLength ? wp * L : tailC + wp * span;
+  return [
+    { x: 0, y: (waistX + tailC) / 2 },   // between waist and tail contact
+    { x: 0, y: (waistX + tipC) / 2 },    // between waist and tip contact
+  ];
+}
 function buildAlignDXF(ski, tf) {
-  if (!ski.alignMarks) return "";
+  const holes = alignHoles(ski);
+  if (!holes.length) return "";
   const T = tf || ((x, y) => ({ x, y }));
-  const L = ski.length, tailC = ski.tailLength, tipC = L - ski.tipLength, mid = (tailC + tipC) / 2;
+  const dia = ski.alignDowelDia || 6;
   let out = "";
-  const c0 = T(0, 0), c1 = T(0, L);
+  const c0 = T(0, 0), c1 = T(0, ski.length);
   out += dxfLine('ALIGN', c0.x, c0.y, c1.x, c1.y);   // centerline
-  [tailC, mid, tipC].forEach(y => {
-    const h1 = T(-9, y), h2 = T(9, y), v1 = T(0, y - 9), v2 = T(0, y + 9), ctr = T(0, y);
-    out += dxfLine('ALIGN', h1.x, h1.y, h2.x, h2.y);
-    out += dxfLine('ALIGN', v1.x, v1.y, v2.x, v2.y);
-    out += dxfCircle('ALIGN', ctr.x, ctr.y, 1.5);
+  holes.forEach(h => {
+    const cx = T(h.x, h.y - 9), cy = T(h.x, h.y + 9), lx = T(h.x - 9, h.y), rx = T(h.x + 9, h.y), ctr = T(h.x, h.y);
+    out += dxfLine('ALIGN', lx.x, lx.y, rx.x, rx.y);
+    out += dxfLine('ALIGN', cx.x, cx.y, cy.x, cy.y);
+    out += dxfCircle('ALIGN', ctr.x, ctr.y, dia / 2);
   });
   return out;
 }
@@ -3810,6 +3822,34 @@ function buildCoreCAM(ski, opt) {
       }
     }
   }
+  // ── Alignment dowel holes: register the core on dowels glued to the base. Cut with a smaller endmill
+  // (helical bore) so a large dowel hole clears chips cleanly — the way a 1/4" endmill opens a 1/2" hole.
+  // Core cut only (not base/mold or a slat sheet). ──
+  if (!isBase && !o.slatPolys) {
+    const aholes = alignHoles(ski);
+    if (aholes.length) {
+      const holeD = ski.alignDowelDia || 6;
+      const aTool = ski.alignToolNum != null ? ski.alignToolNum : 2;
+      const aToolD = (ski.alignToolDia != null ? ski.alignToolDia : 6.35) * uL;   // to machine units
+      const orbitR = Math.max(0, holeD / 2 * uL - aToolD / 2);
+      PB(); PC("===== ALIGNMENT DOWEL HOLES (" + holeD + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
+      P(`G0 Z${f(safeZ)}`);
+      toolChange(aTool); PC("Dowel-hole tool: " + (ski.alignToolDia != null ? ski.alignToolDia : 6.35) + " mm endmill");
+      if (!o.baseOp) P(`S${o.spindle} M3`);
+      const zTop = MZ(o.stockThick), zBot = MZ(-1), segs = 24;
+      aholes.forEach(h => {
+        if (orbitR <= 0.2) {                        // tool ≈ hole → straight plunge
+          g0(h.x, h.y); g0z(zTop); P(`G1 Z${f(zBot)} F${f(o.plunge)}`); tk(zBot); cuts++;
+        } else {                                    // helical bore, approximated with linear segments
+          g0(h.x + orbitR, h.y); g0z(zTop);
+          const depth = zTop - zBot, revs = Math.max(1, Math.ceil(depth / Math.max(0.5, o.stepdown))), total = revs * segs;
+          for (let i = 1; i <= total; i++) { const a = (i / segs) * 2 * Math.PI, z = zTop - (i / total) * depth; g1(h.x + orbitR * Math.cos(a), h.y + orbitR * Math.sin(a), z, o.feed); }
+          for (let i = 1; i <= segs; i++) { const a = (i / segs) * 2 * Math.PI; g1(h.x + orbitR * Math.cos(a), h.y + orbitR * Math.sin(a), zBot, o.feed); }   // finish circle
+        }
+        P(`G0 Z${f(safeZ)}`);
+      });
+    }
+  }
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
   let _gc = G.join("\n"), _lines = G.length;
   if (o.arcOut) { const dec = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); _gc = arcFitGcode(_gc, 0.02 / uL, dec, pst.lineNum); _lines = _gc.split("\n").length; }
@@ -5106,6 +5146,23 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         // drill holes
         ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 1.4;
         b.holes.forEach(h => { const hs = toMain(h.x, h.y); ctx.beginPath(); ctx.arc(hs.x, hs.y, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+      });
+      ctx.restore();
+    })();
+
+    // ── Alignment dowel holes: circle at the dowel diameter + a small cross, drawn on top. ──
+    (() => {
+      const holes = alignHoles(ski);
+      if (!holes.length) return;
+      const dia = ski.alignDowelDia || 6;
+      ctx.save();
+      const col = "#5bb3d8";
+      holes.forEach(h => {
+        const cs = toMain(h.x, h.y), edge = toMain(h.x + dia / 2, h.y);
+        const rpx = Math.max(3, Math.abs(edge.x - cs.x));
+        ctx.strokeStyle = col; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(cs.x, cs.y, rpx, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cs.x - rpx - 3, cs.y); ctx.lineTo(cs.x + rpx + 3, cs.y); ctx.moveTo(cs.x, cs.y - rpx - 3); ctx.lineTo(cs.x, cs.y + rpx + 3); ctx.stroke();
       });
       ctx.restore();
     })();
@@ -10256,7 +10313,21 @@ export default function App() {
             <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
             Alignment marks (ALIGN layer)
           </label>
-          {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Centerline + cross-marks & pin holes at the contacts and midfoot, on every layer, so the core, base, and mould register in the press.</div>}
+          {ski.alignMarks && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 7, flexWrap: "wrap" }}>
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Dowel dia</span>
+            <input type="number" min={2} max={20} step={0.5} value={ski.alignDowelDia != null ? ski.alignDowelDia : 6}
+              onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: Math.max(2, Math.min(20, v)) })); }}
+              style={{ width: 56, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>· Tool #</span>
+            <input type="number" min={1} max={99} step={1} value={ski.alignToolNum != null ? ski.alignToolNum : 2}
+              onChange={e => { const v = parseInt(e.target.value, 10); if (isFinite(v)) setSki(s => ({ ...s, alignToolNum: Math.max(1, Math.min(99, v)) })); }}
+              style={{ width: 46, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>bit dia</span>
+            <input type="number" min={1} max={20} step={0.05} value={ski.alignToolDia != null ? ski.alignToolDia : 6.35}
+              onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignToolDia: Math.max(1, Math.min(20, v)) })); }}
+              style={{ width: 56, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+          </div>}
+          {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Two holes on the centerline, at the midpoints between waist and each contact — shown in the plan view, on the DXF (ALIGN layer), and bored in the core CAM. When the bit is smaller than the hole it helical-bores (a 1/4" bit opening a 1/2" dowel hole); when equal it plunges. Glue matching dowels to the base so the core drops on true.</div>}
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Export Orientation</div>
             <div style={{ display: "flex", gap: 4 }}>
