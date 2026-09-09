@@ -10783,29 +10783,29 @@ export default function App() {
                   ))}
                 </div>
                 <FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />
-                {camOpt.op === "taper" && (
-                  <div style={{ border: `1px solid ${ski.alignMarks ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12 }}>
-                      <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
-                      Drill alignment dowel holes
-                    </label>
-                    {ski.alignMarks && (() => {
-                      const inchU = camOpt.units === "inch";
-                      const dowelMm = ski.alignDowelDia != null ? ski.alignDowelDia : 12.7;
-                      const dowelDisp = inchU ? +(dowelMm / 25.4).toFixed(4) : dowelMm;
-                      return (<>
-                        <div style={{ color: C.labelDim, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                          Two holes on the centerline, bored during this op at the midpoints between waist and each contact. A smaller bit helical-bores the hole; an equal bit plunges. Also drawn in the plan view and on the DXF/SVG.
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                          <div><div style={camSmall}>Dowel \u00D8 {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
-                          <div><div style={camSmall}>Hole tool #</div><input type="number" value={camOpt.alignToolNum} step={1} onChange={e => setCam("alignToolNum", parseInt(e.target.value, 10) || 0)} style={camInput} /></div>
-                          <div><div style={camSmall}>Bit \u00D8 {uu}</div><input type="number" value={camOpt.alignToolDia} step={st} onChange={e => setCam("alignToolDia", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                        </div>
-                      </>);
-                    })()}
-                  </div>
-                )}
+                <div style={{ border: `1px solid ${ski.alignMarks ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12 }}>
+                    <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
+                    Alignment dowel holes
+                  </label>
+                  {ski.alignMarks && (() => {
+                    const inchU = camOpt.units === "inch";
+                    const dowelMm = ski.alignDowelDia != null ? ski.alignDowelDia : 12.7;
+                    const dowelDisp = inchU ? +(dowelMm / 25.4).toFixed(4) : dowelMm;
+                    return (<>
+                      <div style={{ color: camOpt.op === "taper" ? C.labelDim : C.heading, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {camOpt.op === "taper"
+                          ? "Bored in THIS op — two holes on the centerline at the midpoints between waist and each contact. A smaller bit helical-bores; an equal bit plunges. Also on the plan view + DXF/SVG."
+                          : "\u2192 Drilled during the Taper (core profile) op. Set the sizes here, then switch to Taper to see the toolpaths. Also shown on the plan view + DXF/SVG."}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        <div><div style={camSmall}>Dowel \u00D8 {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
+                        <div><div style={camSmall}>Hole tool #</div><input type="number" value={camOpt.alignToolNum} step={1} onChange={e => setCam("alignToolNum", parseInt(e.target.value, 10) || 0)} style={camInput} /></div>
+                        <div><div style={camSmall}>Bit \u00D8 {uu}</div><input type="number" value={camOpt.alignToolDia} step={st} onChange={e => setCam("alignToolDia", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      </div>
+                    </>);
+                  })()}
+                </div>
                 {(isMold || camOpt.op === "taper") && (
                   <div style={{ border: `1px solid ${camOpt.roughing ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>Passes</div>
