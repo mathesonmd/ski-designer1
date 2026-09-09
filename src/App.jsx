@@ -3504,7 +3504,7 @@ function buildCoreCAM(ski, opt) {
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge", "alignToolDia"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -3832,7 +3832,7 @@ function buildCoreCAM(ski, opt) {
       const holeD = (ski.alignDowelDia || 12.7);         // design value, already mm
       const aTool = o.alignToolNum != null ? o.alignToolNum : 3;
       const aToolD = (o.alignToolDia != null ? o.alignToolDia : 6.35);   // converted to mm with the other CAM lengths
-      const aToolDisp = disp.alignToolDia != null ? disp.alignToolDia : (inch ? +(6.35 / 25.4).toFixed(4) : 6.35);
+      const aToolDisp = inch ? +(aToolD / 25.4).toFixed(4) : aToolD;
       const orbitR = Math.max(0, holeD / 2 - aToolD / 2);
       PB(); PC("===== ALIGNMENT DOWEL HOLES (" + (ski.alignDowelDia || 12.7) + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
       P(`G0 Z${f(safeZ)}`);
@@ -7690,7 +7690,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
-  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia", "alignToolDia",
+  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
@@ -10792,16 +10792,18 @@ export default function App() {
                     const inchU = camOpt.units === "inch";
                     const dowelMm = ski.alignDowelDia != null ? ski.alignDowelDia : 12.7;
                     const dowelDisp = inchU ? +(dowelMm / 25.4).toFixed(4) : dowelMm;
+                    const bitMm = camOpt.alignToolDia != null ? camOpt.alignToolDia : 6.35;
+                    const bitDisp = inchU ? +(bitMm / 25.4).toFixed(4) : bitMm;
                     return (<>
-                      <div style={{ color: camOpt.op === "taper" ? C.labelDim : C.heading, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                        {camOpt.op === "taper"
+                      <div style={{ color: camOpt.op === "outline" ? C.labelDim : C.heading, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {camOpt.op === "outline"
                           ? "Bored in THIS op — two holes on the centerline at the midpoints between waist and each contact. A smaller bit helical-bores; an equal bit plunges. Also on the plan view + DXF/SVG."
                           : "\u2192 Drilled during the Core Profile op. Set the sizes here, then switch to Core Profile to see the toolpaths. Also shown on the plan view + DXF/SVG."}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                        <div><div style={camSmall}>Dowel \u00D8 {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
+                        <div><div style={camSmall}>Dowel {"\u00D8"} {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
                         <div><div style={camSmall}>Hole tool #</div><input type="number" value={camOpt.alignToolNum} step={1} onChange={e => setCam("alignToolNum", parseInt(e.target.value, 10) || 0)} style={camInput} /></div>
-                        <div><div style={camSmall}>Bit \u00D8 {uu}</div><input type="number" value={camOpt.alignToolDia} step={st} onChange={e => setCam("alignToolDia", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                        <div><div style={camSmall}>Bit {"\u00D8"} {uu}</div><input type="number" value={bitDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setCam("alignToolDia", inchU ? +(v * 25.4).toFixed(3) : v); }} style={camInput} /></div>
                       </div>
                     </>);
                   })()}
