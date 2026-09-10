@@ -1579,6 +1579,24 @@ function printTiledPlan(ski, paper, opts) {
         marks += `<text x="${x.toFixed(2)}" y="${(rockBase + 3.4).toFixed(2)}" font-size="2.7" fill="#0a8a5f" font-family="monospace" text-anchor="middle">${h.toFixed(1)}</text>`;
       }
     }
+    // Alignment dowel holes + registration ticks: the holes in the plan (and on the base cut line, which
+    // shares this frame), plus short ticks crossing each edge and extending outside the outline so the layers
+    // — including the topsheet past its bleed — can be lined up edge-to-edge in the stack.
+    if (opts.align !== false && ski.alignMarks) {
+      const dia = ski.alignDowelDia || 12.7, botY = rockPts.length ? rockBase : (profPts.length ? profBase : (planCy + maxHalf));
+      try {
+        alignHoles(ski).forEach(h => {
+          const c = toP({ x: 0, y: h.y });
+          marks += `<circle cx="${c.x.toFixed(2)}" cy="${c.y.toFixed(2)}" r="${(dia / 2).toFixed(2)}" fill="none" stroke="#5bb3d8" stroke-width="0.35"/>`;
+          marks += `<path d="M${(c.x - dia / 2 - 2).toFixed(2)},${c.y.toFixed(2)} h${(dia + 4).toFixed(2)} M${c.x.toFixed(2)},${(c.y - dia / 2 - 2).toFixed(2)} v${(dia + 4).toFixed(2)}" stroke="#5bb3d8" stroke-width="0.35"/>`;
+          // edge registration ticks (both edges), extending 6mm beyond the outline half-width at this station
+          let hw = maxHalf; try { hw = getWidthAtPos(ski, h.y / ski.length) / 2; } catch (e) {}
+          [1, -1].forEach(sg => { const e = toP({ x: sg * hw, y: h.y }); const o = toP({ x: sg * (hw + 6), y: h.y }); marks += `<line x1="${e.x.toFixed(2)}" y1="${e.y.toFixed(2)}" x2="${o.x.toFixed(2)}" y2="${o.y.toFixed(2)}" stroke="#5bb3d8" stroke-width="0.4"/>`; });
+        });
+        // centerline through the plan band
+        marks += `<line x1="${(margin).toFixed(2)}" y1="${planCy.toFixed(2)}" x2="${(ski.length + margin).toFixed(2)}" y2="${planCy.toFixed(2)}" stroke="#5bb3d8" stroke-width="0.2" stroke-dasharray="4,3"/>`;
+      } catch (e) {}
+    }
   }
   const pg = paper === "letter" ? { w: 279.4, h: 215.9 } : { w: 297, h: 210 };
   const pm = 5, pw = pg.w - 2 * pm, ph = pg.h - 2 * pm, ov = 10;
@@ -1762,9 +1780,11 @@ function alignHoles(ski) {
   const span = Math.max(1, tipC - tailC);
   const wp = ski.waistPosition != null ? ski.waistPosition : 0.48;
   const waistX = ski.waistFullLength ? wp * L : tailC + wp * span;
+  const off = ski.alignOffset || 0;                       // fore/aft shift in mm (+ toward the tip)
+  const clampY = y => Math.max(tailC + 15, Math.min(tipC - 15, y + off));
   return [
-    { x: 0, y: (waistX + tailC) / 2 },   // between waist and tail contact
-    { x: 0, y: (waistX + tipC) / 2 },    // between waist and tip contact
+    { x: 0, y: clampY((waistX + tailC) / 2) },   // between waist and tail contact
+    { x: 0, y: clampY((waistX + tipC) / 2) },    // between waist and tip contact
   ];
 }
 function buildAlignDXF(ski, tf) {
@@ -3272,6 +3292,21 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8, pair = fa
   const bleedPaths = `<path d="${pathOf(bleedA)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` + (pair ? `<path d="${pathOf(bleedB)}" fill="none" stroke="#c8935a" stroke-width="0.4" stroke-dasharray="4,2"/>` : "");
   const centerlines = `<line x1="${minX.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yA.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` + (pair ? `<line x1="${minX.toFixed(1)}" y1="${yB.toFixed(1)}" x2="${maxX.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="#000" stroke-width="0.2" stroke-dasharray="6,4"/>` : "");
 
+  // Alignment registration ticks: at each dowel-hole station, a tick crossing both edges and extending past
+  // the bleed (outside the trim) so the topsheet can be lined up edge-to-edge in the layup stack.
+  let alignTicks = "";
+  if (ski.alignMarks) {
+    try {
+      const outer = bleedMaxLat + 5;
+      alignHoles(ski).forEach(h => {
+        let hw = bleedMaxLat; try { hw = getWidthAtPos(ski, h.y / ski.length) / 2; } catch (e) {}
+        const tick = (yc, sg) => `<line x1="${h.y.toFixed(1)}" y1="${(yc + sg * hw).toFixed(1)}" x2="${h.y.toFixed(1)}" y2="${(yc + sg * outer).toFixed(1)}" stroke="#5bb3d8" stroke-width="0.5"/>`;
+        alignTicks += tick(yA, 1) + tick(yA, -1);
+        if (pair) alignTicks += tick(yB, 1) + tick(yB, -1);
+      });
+    } catch (e) {}
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vbW.toFixed(1)}mm" height="${vbH.toFixed(1)}mm" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}">
   <title>Black Chapel Studios \u2014 Topsheet Print Template ${ski.length}mm${pair ? " (pair)" : ""}</title>
@@ -3281,6 +3316,7 @@ function buildTopsheetTemplateSVG(ski, topsheet, imgDims, bleedMM = 8, pair = fa
   <g id="bleed">${bleedPaths}</g>
   <g id="cut">${cutPaths}</g>
   <g id="centerline">${centerlines}</g>
+  <g id="alignticks">${alignTicks}</g>
   <g id="cropmarks">${crop}</g>
   <g id="labels" fill="#000" font-family="monospace">
     <text x="${minX.toFixed(1)}" y="${(minY - 5).toFixed(1)}" font-size="${fs.toFixed(1)}">CUT LINE (solid) \u00B7 BLEED ${bleedMM}mm (dashed) \u00B7 1:1 mm${pair ? " \u00B7 PAIR" : ""}</text>
@@ -7817,6 +7853,7 @@ function studyDesignHTML(variants, opts) {
 
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
+  const [printOpts, setPrintOpts] = useState({ core: true, profile: true, rocker: true, align: true });
 
   // ── Undo / redo ────────────────────────────────────────────────
   // Debounced history of the design: a burst of drag updates collapses into one step, so a single Ctrl-Z
@@ -10302,11 +10339,28 @@ export default function App() {
         {groupHeader(SIDEBAR_GROUPS[4])}
         <AccordionSection isOpen={sectionsOpen.printExport !== false} onToggle={() => toggleSection("printExport")} title={t("sec.print", "Print / Templates")}>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
-            Full-size plan tiled across A4 or Letter pages. Print at actual size, tape the sheets together, and cut a jig or template by hand. Includes the outline, centerline, core outline, and a 100 mm scale-check square so you can confirm the print scale.
+            Full-size plan tiled across A4 or Letter pages. Print at actual size, tape the sheets together, and cut a jig or template by hand. A 100 mm scale-check square confirms the print scale.
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Include on the printout</div>
+          {[["Outline + contacts + centerline", null], ["Core outline", "core"], ["Side profile strip (core thickness)", "profile"], ["Rocker / mold strip", "rocker"], ["Alignment marks + edge ticks", "align"]].map(([lab, key]) => (
+            <label key={lab} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3, cursor: key ? "pointer" : "default", color: key ? C.label : C.labelDim, fontSize: 11 }}>
+              <input type="checkbox" checked={key ? printOpts[key] !== false : true} disabled={!key} onChange={key ? (e => setPrintOpts(o => ({ ...o, [key]: e.target.checked }))) : undefined} />
+              {lab}{!key && " (always)"}
+            </label>
+          ))}
+          {printOpts.align !== false && ski.alignMarks && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0 2px 22px" }}>
+              <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Holes fore/aft (mm)</span>
+              <input type="number" step={5} value={ski.alignOffset || 0}
+                onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignOffset: Math.round(v) })); }}
+                style={{ width: 60, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+              <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>+ toward tip</span>
+            </div>
+          )}
+          {printOpts.align !== false && !ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 9.5, margin: "2px 0 4px 22px", fontStyle: "italic", fontFamily: "'JetBrains Mono', monospace" }}>Turn on alignment in CNC Export or the CAM workspace to place the holes.</div>}
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             {[["Print A4", "a4"], ["Print Letter", "letter"]].map(([lab, pp]) => (
-              <button key={pp} onClick={() => printTiledPlan(ski, pp, { core: true })} style={{ ...secondaryBtn, flex: 1 }}>{lab}</button>
+              <button key={pp} onClick={() => printTiledPlan(ski, pp, printOpts)} style={{ ...secondaryBtn, flex: 1 }}>{lab}</button>
             ))}
           </div>
         </AccordionSection>
@@ -10316,11 +10370,16 @@ export default function App() {
             <input type="checkbox" checked={!!ski.alignMarks} onChange={e => setSki(s => ({ ...s, alignMarks: e.target.checked }))} />
             Alignment marks (ALIGN layer)
           </label>
-          {ski.alignMarks && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 7 }}>
+          {ski.alignMarks && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: -2, marginBottom: 7, flexWrap: "wrap" }}>
             <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>Dowel dia (mm)</span>
             <input type="number" min={2} max={20} step={0.5} value={ski.alignDowelDia != null ? ski.alignDowelDia : 12.7}
               onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: Math.max(2, Math.min(20, v)) })); }}
               style={{ width: 64, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+            <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>fore/aft</span>
+            <input type="number" step={5} value={ski.alignOffset || 0}
+              onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignOffset: Math.round(v) })); }}
+              style={{ width: 56, padding: "4px 6px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }} />
+            <span style={{ color: C.labelDim, fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace" }}>mm (+ tip)</span>
           </div>}
           {ski.alignMarks && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 9, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Two holes on the centerline, at the midpoints between waist and each contact — shown in the plan view and on the DXF/SVG (ALIGN layer) at the dowel diameter. To drill them on the CNC, use the Core Profile op in the CAM workspace (tool # and bit set there). Glue matching dowels to the base so the core drops on true.</div>}
           <div style={{ marginBottom: 9 }}>
@@ -10804,6 +10863,10 @@ export default function App() {
                         <div><div style={camSmall}>Dowel {"\u00D8"} {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
                         <div><div style={camSmall}>Hole tool #</div><input type="number" value={camOpt.alignToolNum} step={1} onChange={e => setCam("alignToolNum", parseInt(e.target.value, 10) || 0)} style={camInput} /></div>
                         <div><div style={camSmall}>Bit {"\u00D8"} {uu}</div><input type="number" value={bitDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setCam("alignToolDia", inchU ? +(v * 25.4).toFixed(3) : v); }} style={camInput} /></div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <div style={camSmall}>Fore/aft {uu} (+ tip)</div>
+                        <input type="number" value={inchU ? +((ski.alignOffset || 0) / 25.4).toFixed(3) : (ski.alignOffset || 0)} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignOffset: Math.round(inchU ? v * 25.4 : v) })); }} style={{ ...camInput, width: 90 }} />
                       </div>
                     </>);
                   })()}
