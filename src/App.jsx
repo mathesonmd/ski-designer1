@@ -263,6 +263,37 @@ function seedStack(layup) {
   return s;
 }
 
+// ── Layup recipes: proven base→top stacks by construction type, grounded in how market skis are built and
+// what the ski-building community documents. Named by construction (not a specific ski) since exact gsm /
+// orientation are proprietary; each notes example market skis of that type. Applying one replaces the stack. ──
+const _fab = (mat, gsm) => ({ id: _sid(), kind: "fabric", mat, gsm });
+const _uni = (mat, gsm, width) => ({ id: _sid(), kind: "uni", mat, gsm, width });
+const _met = (mat) => ({ id: _sid(), kind: "metal", mat });
+const _cor = (wood) => ({ id: _sid(), kind: "core", wood });
+const _base = () => ({ id: _sid(), kind: "base" });
+const _top = () => ({ id: _sid(), kind: "topsheet" });
+const _vds = () => ({ id: _sid(), kind: "vds", thick: 0.3 });
+const LAYUP_RECIPES = [
+  { name: "Fiberglass Sandwich", wood: "poplar", desc: "Triax (0/\u00B145) skins over wood \u2014 the metal-free all-mountain standard.", ex: "most non-metal all-mtn skis",
+    build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _fab("glassTriax", 750), _top()] },
+  { name: "Titanal Sandwich (2-sheet)", wood: "ash", desc: "Two 0.4mm Titanal sheets around the core, triax outside \u2014 damp, planted race/all-mtn.", ex: "Enforcer, Brahma/Bonafide, Head",
+    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _cor("ash"), _met("titanal"), _fab("glassTriax", 750), _top()] },
+  { name: "Single Titanal", wood: "poplar", desc: "One 0.6mm Titanal sheet up top for damping without full metal weight.", ex: "one-sheet-Ti all-mtn",
+    build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _met("titanalH"), _fab("glassBiax", 600), _top()] },
+  { name: "Carbon / Glass Hybrid", wood: "poplar", desc: "Biax glass skins + UD carbon stringers by the core \u2014 light and lively, keeps torsion.", ex: "Shaggy's standard, Folsom 90/10",
+    build: () => [_base(), _fab("glassBiax", 600), _uni("carbonUni", 300, 60), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
+  { name: "Full Carbon", wood: "paulownia", desc: "Biax (\u00B145) + UD (0\u00B0) carbon over a light core \u2014 lightest, touring/race.", ex: "DPS Alchemist, Shaggy's Pure Carbon",
+    build: () => [_base(), _fab("carbonBiax", 400), _uni("carbonUni", 300, 60), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("carbonBiax", 400), _top()] },
+  { name: "Titanal + Carbon", wood: "poplar", desc: "One Titanal sheet (damp) + UD carbon (pop), triax/biax skins \u2014 damp but lighter.", ex: "modern hybrid all-mtn",
+    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
+  { name: "Flax / Eco (natural fiber)", wood: "poplar", desc: "Flax biax skins over a light core \u2014 naturally damp and sustainable, softer flex.", ex: "WNDR, natural-fiber eco skis",
+    build: () => [_base(), _fab("flaxBiax", 500), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("flaxBiax", 500), _top()] },
+  { name: "Park Twin (soft glass)", wood: "poplar", desc: "Biax glass skins \u2014 softer and more playful than triax, forgiving for a symmetric twin.", ex: "Line Chronic, ON3P park, Armada",
+    build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassBiax", 600), _top()] },
+  { name: "Damp Race (Ti + VDS)", wood: "ash", desc: "Two Titanal sheets with VDS rubber damping layers, triax skins \u2014 max damping for GS/race.", ex: "GS race plates, damp chargers",
+    build: () => [_base(), _fab("glassTriax", 750), _vds(), _met("titanal"), _cor("ash"), _met("titanal"), _vds(), _fab("glassTriax", 750), _top()] },
+];
+
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 
 // ══════════════ BEZIER (2-node smooth shape) ══════════════
@@ -9922,6 +9953,17 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title={t("sec.layup", "Layup / Materials")}>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Layup recipe</div>
+            <select value="" onChange={e => { const r = LAYUP_RECIPES[+e.target.value]; if (r) setSki(s => ({ ...s, layup: { ...s.layup, stack: r.build(), wood: r.wood } })); }}
+              style={{ width: "100%", padding: "6px 8px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+              <option value="">Apply a construction recipe…</option>
+              {LAYUP_RECIPES.map((r, i) => <option key={r.name} value={i}>{r.name} — {r.ex}</option>)}
+            </select>
+            <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+              Replaces the stack with a proven base→top sequence for that construction type (named by build, not a specific ski — exact specs are proprietary), then tune it. Flex + torsion update live.
+            </div>
+          </div>
           {(() => {
             const stack = ski.layup.stack;
             if (!stack) return null;
