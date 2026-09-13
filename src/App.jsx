@@ -293,6 +293,26 @@ const LAYUP_RECIPES = [
   { name: "Damp Race (Ti + VDS)", wood: "ash", desc: "Two Titanal sheets with VDS rubber damping layers, triax skins \u2014 max damping for GS/race.", ex: "GS race plates, damp chargers",
     build: () => [_base(), _fab("glassTriax", 750), _vds(), _met("titanal"), _cor("ash"), _met("titanal"), _vds(), _fab("glassTriax", 750), _top()] },
 ];
+// Snowboard layups are their own thing: biax = soft/buttery park, triax = torsional pop, the triax-top /
+// biax-base blend is the common all-mtn mix, carbon stringers add pop, flax for a damp eco ride.
+const SNOWBOARD_LAYUP_RECIPES = [
+  { name: "Park Twin (Biax)", wood: "poplar", desc: "Biax (\u00B145) both sides \u2014 soft, buttery and forgiving for jibs and a symmetric twin.", ex: "most park / jib boards",
+    build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassBiax", 600), _top()] },
+  { name: "All-Mountain (Triax)", wood: "poplar", desc: "Triax (45/0/-45) both sides \u2014 more torsional stiffness and pop, responsive everywhere.", ex: "all-mtn freestyle / freeride",
+    build: () => [_base(), _fab("glassTriax", 700), _cor("poplar"), _fab("glassTriax", 700), _top()] },
+  { name: "Blended (Triax top / Biax base)", wood: "poplar", desc: "Triax up top, biax underneath \u2014 the common blend: response on top, forgiving underfoot.", ex: "CAPiTA-style all-mtn",
+    build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassTriax", 700), _top()] },
+  { name: "Freeride + Carbon", wood: "poplar", desc: "Triax skins + UD carbon stringers over the core \u2014 pop, rebound and edge power for charging.", ex: "directional freeride",
+    build: () => [_base(), _fab("glassTriax", 700), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassTriax", 700), _top()] },
+  { name: "Carbon Pop (light)", wood: "paulownia", desc: "Biax glass + carbon biax over a light core \u2014 lively, aggressive pop, low weight.", ex: "poppy park / all-mtn",
+    build: () => [_base(), _fab("glassBiax", 500), _fab("carbonBiax", 400), _cor("paulownia"), _fab("carbonBiax", 400), _fab("glassBiax", 500), _top()] },
+  { name: "Alpine / Carve (stiff)", wood: "ash", desc: "Triax + UD carbon over a stiff hardwood core \u2014 precise and rigid for hardboot carving / SKWAL.", ex: "Kessler/SG-style, skwal",
+    build: () => [_base(), _fab("glassTriax", 750), _uni("carbonUni", 300, 80), _cor("ash"), _uni("carbonUni", 300, 80), _fab("glassTriax", 750), _top()] },
+  { name: "Powder (light directional)", wood: "paulownia", desc: "Biax glass + a carbon stringer over a light core \u2014 low swing weight for a surfy directional.", ex: "directional powder boards",
+    build: () => [_base(), _fab("glassBiax", 500), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("glassBiax", 500), _top()] },
+  { name: "Eco / Flax (damp)", wood: "poplar", desc: "Flax biax skins \u2014 naturally damp and sustainable, a smooth, quiet ride.", ex: "natural-fiber eco boards",
+    build: () => [_base(), _fab("flaxBiax", 500), _cor("poplar"), _fab("flaxBiax", 500), _top()] },
+];
 
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 
@@ -9953,17 +9973,25 @@ export default function App() {
         </AccordionSection>
 
         <AccordionSection isOpen={sectionsOpen.layup} onToggle={() => toggleSection("layup")} title={t("sec.layup", "Layup / Materials")}>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Layup recipe</div>
-            <select value="" onChange={e => { const r = LAYUP_RECIPES[+e.target.value]; if (r) setSki(s => ({ ...s, layup: { ...s.layup, stack: r.build(), wood: r.wood } })); }}
-              style={{ width: "100%", padding: "6px 8px", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-              <option value="">Apply a construction recipe…</option>
-              {LAYUP_RECIPES.map((r, i) => <option key={r.name} value={i}>{r.name} — {r.ex}</option>)}
-            </select>
-            <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-              Replaces the stack with a proven base→top sequence for that construction type (named by build, not a specific ski — exact specs are proprietary), then tune it. Flex + torsion update live.
-            </div>
-          </div>
+          {(() => {
+            const board = (ski.mode || "ski") === "snowboard";
+            const recipes = board ? SNOWBOARD_LAYUP_RECIPES : LAYUP_RECIPES;
+            return (
+              <div style={{ marginBottom: 12, padding: "9px 10px 10px", borderRadius: 6, border: `1px solid ${C.heading}44`, borderLeft: `3px solid ${C.heading}`, background: `linear-gradient(180deg, ${C.heading}14, transparent)` }}>
+                <div style={{ color: C.heading, fontSize: 11, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13 }}>{"\u25C8"}</span>{board ? "BOARD LAYUP RECIPES" : "SKI LAYUP RECIPES"}
+                </div>
+                <select value="" onChange={e => { const r = recipes[+e.target.value]; if (r) setSki(s => ({ ...s, layup: { ...s.layup, stack: r.build(), wood: r.wood } })); }}
+                  style={{ width: "100%", padding: "8px 10px", background: C.inputBg, border: `1.5px solid ${C.heading}`, borderRadius: 5, color: C.heading, fontSize: 12.5, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                  <option value="" style={{ color: C.labelDim }}>{board ? "Apply a board construction\u2026" : "Apply a ski construction\u2026"}</option>
+                  {recipes.map((r, i) => <option key={r.name} value={i} style={{ color: C.label }}>{r.name}{" \u2014 "}{r.ex}</option>)}
+                </select>
+                <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                  Drops in a proven base→top stack for that construction (named by build, not a specific model — exact specs are proprietary). Flex + torsion update live.
+                </div>
+              </div>
+            );
+          })()}
           {(() => {
             const stack = ski.layup.stack;
             if (!stack) return null;
