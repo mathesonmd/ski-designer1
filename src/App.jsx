@@ -1154,7 +1154,7 @@ function computeOutline(ski) {
     // tapered to zero at each contact so it blends into the running edge. Both edges wave in phase, so the
     // ski widens at the bumps and adds contact points. Off = smooth sidecut.
     const serr = (y) => {
-      if (!ski.serratedEdge || !(ski.serrationCount > 0) || !(ski.serrationDepth > 0) || y <= tailCY || y >= tipCY) return 0;
+      if (ski.mode !== "snowboard" || !ski.serratedEdge || !(ski.serrationCount > 0) || !(ski.serrationDepth > 0) || y <= tailCY || y >= tipCY) return 0;
       const ph = (y - tailCY) / (tipCY - tailCY);
       return Math.sin(ph * Math.PI) * ski.serrationDepth * Math.sin(ph * ski.serrationCount * 2 * Math.PI);
     };
@@ -9364,7 +9364,7 @@ export default function App() {
               ["1", t("gs.t.preset", "Pick a Preset"), t("gs.sk1b", "Open Presets and choose a starting shape (All-Mtn is a safe first ski), or Browse the Database for a reference. It fills in sensible dimensions to tweak.")],
               ["2", t("gs.t.dims", "Set Dimensions"), t("gs.sk2b", "In Dimensions, set overall length, tip / waist / tail width, tip / tail length, and sidecut. The plan view updates live.")],
               ["3", t("gs.t.tipTailSki", "Shape the tip & tail"), t("gs.sk3b", "Drag the round nodes on the plan view to move contacts and widths; drag the diamond handles in the tip / tail zoom panels to fine-tune the curve. Scroll to zoom, drag to pan.")],
-              ["4", t("gs.t.sideProfile", "Side Profile"), t("gs.sk4b", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber and a serrated edge are available too.")],
+              ["4", t("gs.t.sideProfile", "Side Profile"), t("gs.sk4b", "Set camber and tip / tail rise — the rocker line your press mold follows. Multi-zone camber is available too.")],
               ["5", t("gs.t.layupFlex", "Layup & Flex"), t("gs.layupFlexB", "In Layup / Materials the layer stack is your build top-to-bottom — change any layer's material from its own dropdown, reorder plies, set fabric weights, blend the core, or add foam and metal inserts. The Flex panel updates live; calibrate it to a real test bend if you have one.")],
               ["6", t("gs.t.checkFlex", "Check the Flex"), t("gs.sk6b", "Read the flex rating. Adjust core thickness, width, or materials until it rides right for the skier.")],
               ["7", t("gs.t.printCut", "Print or cut"), t("gs.printCutB", "No CNC? Print / Templates gives a 1:1 tiled plan + profile to build a jig by hand. With a CNC, use CNC Export (DXF / SVG / STL) or the CAM workspace for G-code.")],
@@ -9617,18 +9617,6 @@ export default function App() {
                     ? t("dim.waistHelpFull", "0.5 = geometric center of the ski (fraction of full length).")
                     : t("dim.waistHelpSpan", "0.5 = midway between the contact points (fraction of running edge).")}
                 </div>
-                <div style={{ border: `1px solid ${ski.serratedEdge ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6, padding: "8px 10px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: ski.serratedEdge ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
-                    <input type="checkbox" checked={!!ski.serratedEdge} onChange={e => setSki(s => ({ ...s, serratedEdge: e.target.checked }))} /> {t("dim.serrated", "SERRATED EDGE (wavy)")}{ski.serratedEdge ? t("state.on", " · ON") : ""}
-                  </label>
-                  {ski.serratedEdge && (<>
-                    <div style={{ marginTop: 8 }}>{inputField(t("dim.bumps", "Bumps (count)"), "serrationCount", 2, 24, 1)}</div>
-                    {inputField(t("dim.bumpDepth", "Bump depth (mm)"), "serrationDepth", 0.5, 6, 0.5)}
-                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      {t("dim.serratedHelp", "A wave on the sidecut between the contacts for extra grip, tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.")}
-                    </div>
-                  </>)}
-                </div>
                 {/* ── Asymmetric (advanced) — all left/right asymmetry contained here so symmetric skis are untouched ── */}
                 <div style={{ border: `1px solid ${(ski.asymSidecut || ski.asymContact) ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6 }}>
                   <button onClick={() => setAsymOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", cursor: "pointer", padding: "8px 10px", color: (ski.asymSidecut || ski.asymContact) ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
@@ -9824,6 +9812,20 @@ export default function App() {
           title={t("sec.edgesCore", "Edges & Core")}>
           <div style={{ color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>EDGES</div>
           {inputField("Edge Inset (mm)", "edgeInset", 0, 10, 0.5)}
+          {(ski.mode || "ski") === "snowboard" && (
+                <div style={{ border: `1px solid ${ski.serratedEdge ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6, padding: "8px 10px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: ski.serratedEdge ? C.heading : C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
+                    <input type="checkbox" checked={!!ski.serratedEdge} onChange={e => setSki(s => ({ ...s, serratedEdge: e.target.checked }))} /> {t("dim.serrated", "SERRATED EDGE (wavy)")}{ski.serratedEdge ? t("state.on", " · ON") : ""}
+                  </label>
+                  {ski.serratedEdge && (<>
+                    <div style={{ marginTop: 8 }}>{inputField(t("dim.bumps", "Bumps (count)"), "serrationCount", 2, 24, 1)}</div>
+                    {inputField(t("dim.bumpDepth", "Bump depth (mm)"), "serrationDepth", 0.5, 6, 0.5)}
+                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {t("dim.serratedHelp", "A wave on the sidecut between the contacts for extra grip, tapered to blend into the running edge at each end. Cut it on the router; a drag knife rounds off any bump tighter than its blade offset.")}
+                    </div>
+                  </>)}
+                </div>
+          )}
           <div style={{ marginBottom: 9 }}>
             <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Edge Wrap</div>
             <div style={{ display: "flex", gap: 4 }}>
