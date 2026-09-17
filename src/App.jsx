@@ -7521,6 +7521,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [mode, setMode] = useState("select");         // select | rect | ellipse | line | pen
+  const [cur, setCur] = useState("grab");              // dynamic cursor: move over a layer, grab over empty
   const [draw, setDraw] = useState(null);             // in-progress drag-create
   const [penAnchors, setPenAnchors] = useState([]);    // in-progress bezier pen anchors {x,y,ix,iy,ox,oy}
   const [penCur, setPenCur] = useState(null);          // pen cursor (for preview + snap)
@@ -7606,7 +7607,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
     if (mode !== "select") { setDraw({ x0: mm.x, y0: mm.y, x1: mm.x, y1: mm.y }); return; }
     const s0 = layers.find(l => l.id === sel);
     if (s0 && s0.type !== "bg" && rotHandleAt(s0, p)) { dragRef.current = { rot: s0.id, cx: ox + s0.x * eff, cy: oy + s0.y * eff }; return; }
-    if (s0 && s0.type !== "bg" && s0.type !== "bootline") { const ch = cornerHandles(s0); for (let i = 0; i < ch.length; i++) { if (Math.hypot(p.x - ch[i].x, p.y - ch[i].y) < 11) { const b = layerBox(s0); dragRef.current = { resize: s0.id, startDiag: Math.max(1, Math.hypot(b.w / 2, b.h / 2)), base: { ...s0, pts: s0.pts ? s0.pts.map(pt => ({ ...pt })) : undefined } }; return; } } }
+    if (s0 && s0.type !== "bg" && s0.type !== "bootline") { const ch = cornerHandles(s0); for (let i = 0; i < ch.length; i++) { if (Math.hypot(p.x - ch[i].x, p.y - ch[i].y) < 11) { const b = layerBox(s0); const isRect = s0.type === "shape" && s0.shape === "path" && s0.pts && s0.pts.length === 4 && s0.closed && s0.pts.every(pt => !pt.ix && !pt.iy && !pt.ox && !pt.oy); if (isRect) { const opp = s0.pts[(i + 2) % 4], a = (s0.rot || 0) * Math.PI / 180, A = { x: s0.x + opp.x * Math.cos(a) - opp.y * Math.sin(a), y: s0.y + opp.x * Math.sin(a) + opp.y * Math.cos(a) }; dragRef.current = { resize: s0.id, rectBox: true, anchor: A, rot: (s0.rot || 0) }; } else { dragRef.current = { resize: s0.id, startDiag: Math.max(1, Math.hypot(b.w / 2, b.h / 2)), base: { ...s0, pts: s0.pts ? s0.pts.map(pt => ({ ...pt })) : undefined } }; } return; } } }
     if (s0 && s0.type === "shape" && s0.shape === "path") { const a = (s0.rot || 0) * Math.PI / 180, cx = ox + s0.x * eff, cy = oy + s0.y * eff; const tf = (px, py) => ({ x: cx + (px * Math.cos(a) - py * Math.sin(a)) * eff, y: cy + (px * Math.sin(a) + py * Math.cos(a)) * eff }); for (let i = 0; i < s0.pts.length; i++) { const pt = s0.pts[i]; if (pt.ox || pt.oy) { const H = tf(pt.x + pt.ox, pt.y + pt.oy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "o" }; return; } } if (pt.ix || pt.iy) { const H = tf(pt.x + pt.ix, pt.y + pt.iy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "i" }; return; } } const A = tf(pt.x, pt.y); if (Math.hypot(p.x - A.x, p.y - A.y) < 9) { dragRef.current = { pathA: s0.id, idx: i }; return; } } }
     if (s0 && s0.type === "bg" && s0.kind === "gradient") { const h = toSC(s0.gx * tL, s0.gy * tW); if (Math.hypot(p.x - h.x, p.y - h.y) < 14) { dragRef.current = { grad: true }; return; } }
     for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mm.x >= b.x - 2 && mm.x <= b.x + b.w + 2 && mm.y >= b.y - 2 && mm.y <= b.y + b.h + 2) { setSel(l.id); dragRef.current = { id: l.id, ox: mm.x - l.x, oy: mm.y - l.y }; return; } }
@@ -7616,11 +7617,22 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
     const p = ptr(e);
     if (mode === "pen" && !dragRef.current) { setPenCur(toMM(p.x, p.y)); return; }
     if (draw) { const mm = toMM(p.x, p.y); setDraw(d => ({ ...d, x1: mm.x, y1: mm.y, sq: e.shiftKey })); return; }
-    const d = dragRef.current; if (!d) return;
+    const d = dragRef.current;
+    if (!d) {
+      // Not dragging — set the cursor by what's under the pointer: resize on a corner handle, move on a
+      // layer body, grab on empty space (which pans). This tells you whether you'll move the rectangle or
+      // drag the whole image.
+      if (mode !== "select") { setCur("crosshair"); return; }
+      const mmc = toMM(p.x, p.y); let c = "grab"; const s0 = layers.find(l => l.id === sel);
+      if (s0 && s0.type !== "bg") { if (rotHandleAt(s0, p)) c = "grab"; else { const ch = cornerHandles(s0); if (ch.some(h => Math.hypot(p.x - h.x, p.y - h.y) < 11)) c = "nwse-resize"; } }
+      if (c === "grab") { for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mmc.x >= b.x - 2 && mmc.x <= b.x + b.w + 2 && mmc.y >= b.y - 2 && mmc.y <= b.y + b.h + 2) { c = "move"; break; } } }
+      setCur(c); return;
+    }
     if (d.pen != null) { const mm = toMM(p.x, p.y); setPenAnchors(a => a.map((an, i) => i === d.pen ? { ...an, ox: mm.x - an.x, oy: mm.y - an.y, ix: an.x - mm.x, iy: an.y - mm.y } : an)); setPenCur(mm); return; }
     if (d.pan) setPan({ x: p.x - d.sx, y: p.y - d.sy });
     else if (d.grad) { const mm = toMM(p.x, p.y); upd("bg", { gx: Math.max(0, Math.min(1, mm.x / tL)), gy: Math.max(0, Math.min(1, mm.y / tW)) }); }
     else if (d.rot) { const ang = Math.atan2(p.y - d.cy, p.x - d.cx) * 180 / Math.PI + 90; upd(d.rot, { rot: Math.round(ang) }); }
+    else if (d.resize && d.rectBox) { const mm = toMM(p.x, p.y), A = d.anchor, cx = (A.x + mm.x) / 2, cy = (A.y + mm.y) / 2, ar = d.rot * Math.PI / 180, dx = mm.x - A.x, dy = mm.y - A.y, lw = Math.max(4, Math.abs(dx * Math.cos(ar) + dy * Math.sin(ar))), lh = Math.max(4, Math.abs(-dx * Math.sin(ar) + dy * Math.cos(ar))), hw = lw / 2, hh = lh / 2, pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([px, py]) => ({ x: px, y: py, ix: 0, iy: 0, ox: 0, oy: 0 })); setLayers(ls => ls.map(l => l.id === d.resize ? { ...l, x: cx, y: cy, pts } : l)); }
     else if (d.resize) { const mm = toMM(p.x, p.y), base = d.base, factor = Math.max(0.05, Math.hypot(mm.x - base.x, mm.y - base.y) / d.startDiag); setLayers(ls => ls.map(l => { if (l.id !== d.resize) return l; if (l.type === "img") return { ...l, wmm: Math.max(4, base.wmm * factor) }; if (l.type === "text") return { ...l, size: Math.max(6, base.size * factor) }; if (l.type === "shape") { if (l.shape === "path") return { ...l, pts: base.pts.map(pt => ({ x: pt.x * factor, y: pt.y * factor, ix: pt.ix * factor, iy: pt.iy * factor, ox: pt.ox * factor, oy: pt.oy * factor })) }; if (l.shape === "line") return { ...l, w: Math.max(4, base.w * factor) }; return { ...l, w: Math.max(4, base.w * factor), h: Math.max(4, base.h * factor) }; } return l; })); }
     else if (d.pathA != null) { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => { if (l.id !== d.pathA) return l; const a = -(l.rot || 0) * Math.PI / 180, dx = mm.x - l.x, dy = mm.y - l.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); const pts = l.pts.slice(); pts[d.idx] = { ...pts[d.idx], x: lx, y: ly }; return { ...l, pts }; })); }
     else if (d.pathH) { const mm = toMM(p.x, p.y); setLayers(ls => ls.map(l => { if (l.id !== d.pathH) return l; const a = -(l.rot || 0) * Math.PI / 180, dx = mm.x - l.x, dy = mm.y - l.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a); const an = l.pts[d.idx], hx = lx - an.x, hy = ly - an.y; const pts = l.pts.slice(); pts[d.idx] = d.which === "o" ? { ...an, ox: hx, oy: hy, ix: -hx, iy: -hy } : { ...an, ix: hx, iy: hy, ox: -hx, oy: -hy }; return { ...l, pts }; })); }
@@ -7749,7 +7761,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
             </div>
           </div>
           <div ref={wrapRef} style={{ flex: 1, minHeight: 260, background: "#0d0b09", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden" }}>
-            <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onWheel={onWheel} onDoubleClick={() => mode === "pen" && finishPen(true)} style={{ display: "block", cursor: drawing ? "crosshair" : "grab", touchAction: "none" }} />
+            <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onWheel={onWheel} onDoubleClick={() => mode === "pen" && finishPen(true)} style={{ display: "block", cursor: drawing ? "crosshair" : (mode !== "select" ? "crosshair" : cur), touchAction: "none" }} />
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div><div style={lab}>Export DPI</div><div style={{ display: "flex", gap: 4 }}>{[150, 200, 300].map(d => <button key={d} onClick={() => setDpi(d)} style={btn(dpi === d)}>{d}</button>)}</div></div>
