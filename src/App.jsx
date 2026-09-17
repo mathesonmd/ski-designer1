@@ -273,25 +273,30 @@ const _cor = (wood) => ({ id: _sid(), kind: "core", wood });
 const _base = () => ({ id: _sid(), kind: "base" });
 const _top = () => ({ id: _sid(), kind: "topsheet" });
 const _vds = () => ({ id: _sid(), kind: "vds", thick: 0.3 });
+const _veil = () => ({ id: _sid(), kind: "fabric", mat: "glassBiax", gsm: 120 });   // thin glass veil — a bond medium between Titanal and the core (per Mirsad / JunkSupply)
 const LAYUP_RECIPES = [
   { name: "Fiberglass Sandwich", wood: "poplar", desc: "Triax (0/\u00B145) skins over wood \u2014 the metal-free all-mountain standard.", ex: "most non-metal all-mtn skis",
     build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _fab("glassTriax", 750), _top()] },
-  { name: "Titanal Sandwich (2-sheet)", wood: "ash", desc: "Two 0.4mm Titanal sheets around the core, triax outside \u2014 damp, planted race/all-mtn.", ex: "Enforcer, Brahma/Bonafide, Head",
-    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _cor("ash"), _met("titanal"), _fab("glassTriax", 750), _top()] },
+  { name: "Titanal Sandwich (2-sheet)", wood: "ash", desc: "Two 0.4mm Titanal sheets around the core with a thin glass veil between metal and core (bond), triax outside \u2014 damp, planted.", ex: "Enforcer, Brahma/Bonafide, Head",
+    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _veil(), _cor("ash"), _veil(), _met("titanal"), _fab("glassTriax", 750), _top()] },
   { name: "Single Titanal", wood: "poplar", desc: "One 0.6mm Titanal sheet up top for damping without full metal weight.", ex: "one-sheet-Ti all-mtn",
-    build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _met("titanalH"), _fab("glassBiax", 600), _top()] },
+    build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _veil(), _met("titanalH"), _fab("glassBiax", 600), _top()] },
   { name: "Carbon / Glass Hybrid", wood: "poplar", desc: "Biax glass skins + UD carbon stringers by the core \u2014 light and lively, keeps torsion.", ex: "Shaggy's standard, Folsom 90/10",
     build: () => [_base(), _fab("glassBiax", 600), _uni("carbonUni", 300, 60), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
   { name: "Full Carbon", wood: "paulownia", desc: "Biax (\u00B145) + UD (0\u00B0) carbon over a light core \u2014 lightest, touring/race.", ex: "DPS Alchemist, Shaggy's Pure Carbon",
     build: () => [_base(), _fab("carbonBiax", 400), _uni("carbonUni", 300, 60), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("carbonBiax", 400), _top()] },
+  { name: "Carbon Biax + Flax UD", wood: "poplar", desc: "Carbon biax (\u00B145) skins for torsion + full-width flax UD (0\u00B0) \u2014 a stiff-but-damp eco/performance hybrid.", ex: "carbon-flax hybrids",
+    build: () => [_base(), _fab("carbonBiax", 400), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("carbonBiax", 400), _top()] },
+  { name: "Flax Biax + Carbon UD", wood: "poplar", desc: "Flax biax (\u00B145) skins for damp torsion + carbon UD (0\u00B0) for stiffness and pop.", ex: "flax-carbon hybrids",
+    build: () => [_base(), _fab("flaxBiax", 500), _uni("carbonUni", 300, 0), _cor("poplar"), _uni("carbonUni", 300, 0), _fab("flaxBiax", 500), _top()] },
   { name: "Titanal + Carbon", wood: "poplar", desc: "One Titanal sheet (damp) + UD carbon (pop), triax/biax skins \u2014 damp but lighter.", ex: "modern hybrid all-mtn",
-    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
+    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _veil(), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
   { name: "Flax / Eco (natural fiber)", wood: "poplar", desc: "Flax biax skins over a light core \u2014 naturally damp and sustainable, softer flex.", ex: "WNDR, natural-fiber eco skis",
     build: () => [_base(), _fab("flaxBiax", 500), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("flaxBiax", 500), _top()] },
   { name: "Park Twin (soft glass)", wood: "poplar", desc: "Biax glass skins \u2014 softer and more playful than triax, forgiving for a symmetric twin.", ex: "Line Chronic, ON3P park, Armada",
     build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassBiax", 600), _top()] },
-  { name: "Damp Race (Ti + VDS)", wood: "ash", desc: "Two Titanal sheets with VDS rubber damping layers, triax skins \u2014 max damping for GS/race.", ex: "GS race plates, damp chargers",
-    build: () => [_base(), _fab("glassTriax", 750), _vds(), _met("titanal"), _cor("ash"), _met("titanal"), _vds(), _fab("glassTriax", 750), _top()] },
+  { name: "Damp Race (Ti + VDS)", wood: "ash", desc: "Two Titanal sheets with VDS rubber between metal and core \u2014 damping plus a clean bond, triax skins, max damping for GS/race.", ex: "GS race plates, damp chargers",
+    build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _vds(), _cor("ash"), _vds(), _met("titanal"), _fab("glassTriax", 750), _top()] },
 ];
 // Snowboard layups are their own thing: biax = soft/buttery park, triax = torsional pop, the triax-top /
 // biax-base blend is the common all-mtn mix, carbon stringers add pop, flax for a damp eco ride.
@@ -312,6 +317,10 @@ const SNOWBOARD_LAYUP_RECIPES = [
     build: () => [_base(), _fab("glassBiax", 500), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("glassBiax", 500), _top()] },
   { name: "Eco / Flax (damp)", wood: "poplar", desc: "Flax biax skins \u2014 naturally damp and sustainable, a smooth, quiet ride.", ex: "natural-fiber eco boards",
     build: () => [_base(), _fab("flaxBiax", 500), _cor("poplar"), _fab("flaxBiax", 500), _top()] },
+  { name: "Carbon Biax + Flax UD", wood: "poplar", desc: "Carbon biax skins for torsion + full-width flax UD \u2014 stiff, damp, eco-leaning hybrid.", ex: "carbon-flax hybrids",
+    build: () => [_base(), _fab("carbonBiax", 400), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("carbonBiax", 400), _top()] },
+  { name: "Flax Biax + Carbon UD", wood: "poplar", desc: "Flax biax skins (damp torsion) + carbon UD for stiffness and pop.", ex: "flax-carbon hybrids",
+    build: () => [_base(), _fab("flaxBiax", 500), _uni("carbonUni", 300, 0), _cor("poplar"), _uni("carbonUni", 300, 0), _fab("flaxBiax", 500), _top()] },
 ];
 
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
@@ -7710,7 +7719,11 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
           </>)}
           {s && s.type === "text" && (<>
             <div style={lab}>Text</div><textarea value={s.text} onChange={e => upd(s.id, { text: e.target.value })} rows={String(s.text).includes("\n") ? 4 : 1} style={{ ...inp, resize: "vertical", minHeight: 32, lineHeight: 1.35 }} />
-            <div style={lab}>Font (type any installed name)</div><input list="ts-fonts" value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={inp} /><datalist id="ts-fonts">{fonts.map(fn => <option key={fn} value={fn} />)}</datalist>
+            <div style={lab}>Font</div>
+            <select value={s.font} onChange={e => upd(s.id, { font: e.target.value })} style={{ ...inp, cursor: "pointer" }}>
+              {!fonts.includes(s.font) && s.font && <option value={s.font} style={{ fontFamily: `'${s.font}', sans-serif` }}>{s.font}</option>}
+              {fonts.map(fn => <option key={fn} value={fn} style={{ fontFamily: `'${fn}', sans-serif` }}>{fn}</option>)}
+            </select>
             <button onClick={loadSystemFonts} style={{ ...btn(false), width: "100%", marginTop: 4 }}>Load system fonts</button>
             {numField("Size mm", s.size, 10, 300, 1, v => upd(s.id, { size: v }))}{colorField("Color", s.color, v => upd(s.id, { color: v }))}{numField("Rotate°", s.rot || 0, -180, 180, 1, v => upd(s.id, { rot: v }))}
           </>)}
@@ -7764,11 +7777,19 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
   const [txt, setTxt] = useState(value == null ? "" : String(value));
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setTxt(value == null ? "" : String(value)); }, [value]);
+  const clampV = v => { if (min != null) v = Math.max(min, v); if (max != null) v = Math.min(max, v); return v; };
   return (
     <input type="number" value={txt} min={min} max={max} step={step} style={style}
       onFocus={e => { focused.current = true; if (onFocus) onFocus(e); }}
-      onChange={e => { setTxt(e.target.value); const v = parseFloat(e.target.value); if (!isNaN(v)) onCommit(v); }}
-      onBlur={e => { focused.current = false; const v = parseFloat(e.target.value); const fin = isNaN(v) ? 0 : v; onCommit(fin); setTxt(String(fin)); if (onBlur) onBlur(e); }} />
+      onChange={e => {
+        setTxt(e.target.value);
+        // Only push a change live while a value is COMPLETE and in range — so partial numbers (typing "1"
+        // toward "1780") never hit the design or the undo history. Out-of-range and partials commit on blur.
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v) && (min == null || v >= min) && (max == null || v <= max)) onCommit(v);
+      }}
+      onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+      onBlur={e => { focused.current = false; const v = parseFloat(e.target.value); const fin = clampV(isNaN(v) ? (min != null ? min : 0) : v); onCommit(fin); setTxt(String(fin)); if (onBlur) onBlur(e); }} />
   );
 }
 
