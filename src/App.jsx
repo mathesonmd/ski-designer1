@@ -7575,6 +7575,15 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
     if (l.type === "text") { const lines = String(l.text).split("\n"); const w = Math.max(1, ...lines.map(s => s.length)) * l.size * 0.6, h = lines.length * l.size * 1.2; return { x: l.x - w / 2, y: l.y - h / 2, w, h }; }
     return null;
   };
+  // Hit-test a layer at a mm point, accounting for its rotation: un-rotate the point around the layer
+  // centre, then test against its (unrotated) box. Otherwise a rotated shape's clickable area doesn't match
+  // what's drawn, so you miss it and pan instead.
+  const hitLayer = (l, mm) => {
+    const b = layerBox(l); if (!b) return false;
+    let px = mm.x, py = mm.y;
+    if (l.rot) { const a = -l.rot * Math.PI / 180, dx = mm.x - l.x, dy = mm.y - l.y; px = l.x + dx * Math.cos(a) - dy * Math.sin(a); py = l.y + dx * Math.sin(a) + dy * Math.cos(a); }
+    return px >= b.x - 2 && px <= b.x + b.w + 2 && py >= b.y - 2 && py <= b.y + b.h + 2;
+  };
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return; cv.width = box.w; cv.height = box.h;
     const ctx = cv.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, box.w, box.h);
@@ -7610,7 +7619,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
     if (s0 && s0.type !== "bg" && s0.type !== "bootline") { const ch = cornerHandles(s0); for (let i = 0; i < ch.length; i++) { if (Math.hypot(p.x - ch[i].x, p.y - ch[i].y) < 11) { const b = layerBox(s0); const isRect = s0.type === "shape" && s0.shape === "path" && s0.pts && s0.pts.length === 4 && s0.closed && s0.pts.every(pt => !pt.ix && !pt.iy && !pt.ox && !pt.oy); if (isRect) { const opp = s0.pts[(i + 2) % 4], a = (s0.rot || 0) * Math.PI / 180, A = { x: s0.x + opp.x * Math.cos(a) - opp.y * Math.sin(a), y: s0.y + opp.x * Math.sin(a) + opp.y * Math.cos(a) }; dragRef.current = { resize: s0.id, rectBox: true, anchor: A, rot: (s0.rot || 0) }; } else { dragRef.current = { resize: s0.id, startDiag: Math.max(1, Math.hypot(b.w / 2, b.h / 2)), base: { ...s0, pts: s0.pts ? s0.pts.map(pt => ({ ...pt })) : undefined } }; } return; } } }
     if (s0 && s0.type === "shape" && s0.shape === "path") { const a = (s0.rot || 0) * Math.PI / 180, cx = ox + s0.x * eff, cy = oy + s0.y * eff; const tf = (px, py) => ({ x: cx + (px * Math.cos(a) - py * Math.sin(a)) * eff, y: cy + (px * Math.sin(a) + py * Math.cos(a)) * eff }); for (let i = 0; i < s0.pts.length; i++) { const pt = s0.pts[i]; if (pt.ox || pt.oy) { const H = tf(pt.x + pt.ox, pt.y + pt.oy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "o" }; return; } } if (pt.ix || pt.iy) { const H = tf(pt.x + pt.ix, pt.y + pt.iy); if (Math.hypot(p.x - H.x, p.y - H.y) < 8) { dragRef.current = { pathH: s0.id, idx: i, which: "i" }; return; } } const A = tf(pt.x, pt.y); if (Math.hypot(p.x - A.x, p.y - A.y) < 9) { dragRef.current = { pathA: s0.id, idx: i }; return; } } }
     if (s0 && s0.type === "bg" && s0.kind === "gradient") { const h = toSC(s0.gx * tL, s0.gy * tW); if (Math.hypot(p.x - h.x, p.y - h.y) < 14) { dragRef.current = { grad: true }; return; } }
-    for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mm.x >= b.x - 2 && mm.x <= b.x + b.w + 2 && mm.y >= b.y - 2 && mm.y <= b.y + b.h + 2) { setSel(l.id); dragRef.current = { id: l.id, ox: mm.x - l.x, oy: mm.y - l.y }; return; } }
+    for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; if (hitLayer(l, mm)) { setSel(l.id); dragRef.current = { id: l.id, ox: mm.x - l.x, oy: mm.y - l.y }; return; } }
     dragRef.current = { pan: true, sx: p.x - pan.x, sy: p.y - pan.y };
   };
   const onMove = e => {
@@ -7625,7 +7634,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
       if (mode !== "select") { setCur("crosshair"); return; }
       const mmc = toMM(p.x, p.y); let c = "grab"; const s0 = layers.find(l => l.id === sel);
       if (s0 && s0.type !== "bg") { if (rotHandleAt(s0, p)) c = "grab"; else { const ch = cornerHandles(s0); if (ch.some(h => Math.hypot(p.x - h.x, p.y - h.y) < 11)) c = "nwse-resize"; } }
-      if (c === "grab") { for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; const b = layerBox(l); if (b && mmc.x >= b.x - 2 && mmc.x <= b.x + b.w + 2 && mmc.y >= b.y - 2 && mmc.y <= b.y + b.h + 2) { c = "move"; break; } } }
+      if (c === "grab") { for (let i = layers.length - 1; i >= 0; i--) { const l = layers[i]; if (l.type === "bg") continue; if (hitLayer(l, mmc)) { c = "move"; break; } } }
       setCur(c); return;
     }
     if (d.pen != null) { const mm = toMM(p.x, p.y); setPenAnchors(a => a.map((an, i) => i === d.pen ? { ...an, ox: mm.x - an.x, oy: mm.y - an.y, ix: an.x - mm.x, iy: an.y - mm.y } : an)); setPenCur(mm); return; }
