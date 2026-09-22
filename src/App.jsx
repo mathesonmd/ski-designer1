@@ -2521,52 +2521,61 @@ function exportCoreSTL(ski) {
 
 // Lazy-load the OpenCascade CAD kernel (replicad + its ~5MB WASM) from a CDN, once, only when the user
 // first exports a STEP. Kept out of the initial bundle so it never slows normal use.
-let _rcPromise = null;
-function loadReplicad() {
-  if (!_rcPromise) _rcPromise = (async () => {
-    const V = "1.1.0", base = `https://esm.sh/replicad-opencascadejs@${V}/dist/`;
-    const rc = await import(/* @vite-ignore */ `https://esm.sh/replicad@${V}`);
-    // Cloudflare's build layer (unenv) polyfills `process`/`module` into the bundle, which makes the
-    // Emscripten WASM loader think it's running under Node and call module.require('fs') — hence the
-    // "[unenv] module.require is not implemented" failure. Hide those globals while the kernel loads and
-    // initialises so it takes the browser path, then restore them.
-    const g = globalThis;
-    const pDesc = Object.getOwnPropertyDescriptor(g, "process");
-    const mDesc = Object.getOwnPropertyDescriptor(g, "module");
-    let OC;
-    try {
-      try { Object.defineProperty(g, "process", { value: undefined, configurable: true, writable: true }); } catch (e) {}
-      try { Object.defineProperty(g, "module", { value: undefined, configurable: true, writable: true }); } catch (e) {}
-      const initOC = (await import(/* @vite-ignore */ base + "replicad_single.js")).default;
-      OC = await initOC({ locateFile: () => base + "replicad_single.wasm" });
-    } finally {
-      try { if (pDesc) Object.defineProperty(g, "process", pDesc); } catch (e) {}
-      try { if (mDesc) Object.defineProperty(g, "module", mDesc); } catch (e) {}
-    }
-    rc.setOC(OC);
-    return rc;
-  })();
-  return _rcPromise;
+// The OpenCascade CAD kernel runs in a Web Worker, not on the main thread. The worker has its own clean
+// global scope, free of the `process`/`module` polyfills Cloudflare's build (unenv) injects into the page
+// bundle — those are what made the Emscripten loader think it was in Node and call module.require('fs').
+// The worker loads replicad + its ~5MB WASM from a CDN once, then builds the loft from cross-sections the
+// main thread sends it, and returns the STEP bytes.
+let _stepWorker = null;
+function getStepWorker() {
+  if (_stepWorker) return _stepWorker;
+  const V = "1.1.0", base = "https://esm.sh/replicad-opencascadejs@" + V + "/dist/";
+  const code = `
+import * as rc from "https://esm.sh/replicad@${V}";
+import initOC from "${base}replicad_single.js";
+let ready;
+function init(){ if(!ready) ready=(async()=>{ const OC=await initOC({locateFile:()=>"${base}replicad_single.wasm"}); rc.setOC(OC); })(); return ready; }
+self.onmessage=async(e)=>{
+  try{
+    await init();
+    const d=e.data;
+    const secs=d.sections.map(s=>rc.sketchRectangle(s.w,s.t,{plane:"YZ",origin:[s.x,0,s.t/2]}));
+    let solid=secs[0].loftWith(secs.slice(1),{ruled:false});
+    if(d.rotate) solid=solid.rotate(90,[0,0,0],[0,0,1]);
+    const buf=await solid.blobSTEP().arrayBuffer();
+    self.postMessage({ok:true,buf},[buf]);
+  }catch(err){ self.postMessage({ok:false,error:String((err&&err.message)||err)}); }
+};
+`;
+  _stepWorker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })), { type: "module" });
+  return _stepWorker;
 }
 
 // Export the wood core as a true B-rep STEP solid — the same core the STL represents (flat bottom, top
-// following the core taper, core-inset planform), but as an exact, editable solid built by lofting smooth
-// cross-sections through a real CAD kernel. Opens cleanly as a solid body in Fusion, SolidWorks, etc. for
-// CAM or editing — no mesh conversion. (Tip/tail V-cuts aren't reflected yet; those export via STL.)
+// following the core taper, core-inset planform), but as an exact, editable solid lofted by a real CAD
+// kernel. Opens as a solid body in Fusion, SolidWorks, etc. for CAM or editing — no mesh conversion.
+// (Tip/tail V-cuts aren't reflected yet; those export via STL.)
 async function exportCoreSTEP(ski) {
-  const rc = await loadReplicad();
   const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0, cx = L / 2;
   const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
   const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
   const xLo = Math.max(0, tailContactX - endExt), xHi = Math.min(L, tipContactX + endExt);
   const hw = x => Math.max(1, getWidthAtPos(ski, x / L) / 2 - coreInset);
   const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
-  const N = 100, secs = [];
-  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N, w = 2 * hw(x), t = th(x); secs.push(rc.sketchRectangle(w, t, { plane: "YZ", origin: [x - cx, 0, t / 2] })); }
-  let solid = secs[0].loftWith(secs.slice(1), { ruled: false });
-  if ((ski.exportOrientation || "vertical") !== "horizontal") solid = solid.rotate(90, [0, 0, 0], [0, 0, 1]); // length up +Y, matching the STL
-  const blob = solid.blobSTEP();
-  downloadFile(await blob.arrayBuffer(), `bcs-ski-core-3d-${ski.length}mm.step`, "application/step");
+  const N = 100, sections = [];
+  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N; sections.push({ w: 2 * hw(x), t: th(x), x: x - cx }); }
+  const rotate = (ski.exportOrientation || "vertical") !== "horizontal";
+  const worker = getStepWorker();
+  const buf = await new Promise((resolve, reject) => {
+    const to = setTimeout(() => { cleanup(); reject(new Error("Timed out loading the CAD kernel (network?).")); }, 60000);
+    const cleanup = () => { clearTimeout(to); worker.removeEventListener("message", onMsg); worker.removeEventListener("error", onErr); };
+    const onMsg = e => { cleanup(); if (e.data && e.data.ok) resolve(e.data.buf); else reject(new Error((e.data && e.data.error) || "STEP build failed")); };
+    const onErr = e => { cleanup(); _stepWorker = null; reject(new Error("Could not load the CAD kernel: " + (e.message || "worker error"))); };
+    worker.addEventListener("message", onMsg);
+    worker.addEventListener("error", onErr);
+    worker.postMessage({ sections, rotate });
+  });
+  downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.step`, "application/step");
 }
 
 function exportCorePlanDXF(ski){
