@@ -2521,6 +2521,17 @@ function exportCoreSTL(ski) {
 
 // Lazy-load the OpenCascade CAD kernel (replicad + its ~5MB WASM) from a CDN, once, only when the user
 // first exports a STEP. Kept out of the initial bundle so it never slows normal use.
+// Douglas-Peucker: thins the smooth rail points (a real sidecut keeps ~40-60) while preserving sharp
+// features (V-cut apex, interlock corners), so the extrude + boolean stay fast without visible loss.
+function dpSimplify(pts, eps) {
+  if (pts.length < 3) return pts;
+  const a = pts[0], b = pts[pts.length - 1], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+  let dmax = 0, idx = 0;
+  for (let i = 1; i < pts.length - 1; i++) { const d = Math.abs((pts[i][0] - a[0]) * dy - (pts[i][1] - a[1]) * dx) / len; if (d > dmax) { dmax = d; idx = i; } }
+  if (dmax > eps) { const l = dpSimplify(pts.slice(0, idx + 1), eps), r = dpSimplify(pts.slice(idx), eps); return [...l.slice(0, -1), ...r]; }
+  return [a, b];
+}
+
 // The OpenCascade CAD kernel runs in a Web Worker, not on the main thread. The worker has its own clean
 // global scope, free of the `process`/`module` polyfills Cloudflare's build (unenv) injects into the page
 // bundle — those are what made the Emscripten loader think it was in Node and call module.require('fs').
@@ -2542,10 +2553,13 @@ function init(){ if(!ready) ready=(async()=>{ try{ if(globalThis.process) delete
 self.onmessage=async(e)=>{
   try{
     await init();
-    const d=e.data;
-    const secs=d.sections.map(s=>rc.sketchRectangle(s.w,s.t,{plane:"YZ",origin:[s.x,0,s.t/2]}));
-    let solid=secs[0].loftWith(secs.slice(1),{ruled:false});
-    for(const c of (d.cuts||[])){ const pr=rc.draw().movePointerTo(c.tri[0]).lineTo(c.tri[1]).lineTo(c.tri[2]).close().sketchOnPlane("XY",c.z0).extrude(c.h); solid=solid.cut(pr); }
+    const d=e.data, top=d.maxT+5;
+    const dr=rc.draw(d.outline[0]);
+    for(let i=1;i<d.outline.length;i++) dr.lineTo(d.outline[i]);
+    const slab=dr.close().sketchOnPlane("XY").extrude(d.maxT);
+    const cs=d.taper.map(s=>rc.sketchRectangle(d.wide, top-s.t, {plane:"YZ", origin:[s.x,0,(s.t+top)/2]}));
+    const cutter=cs[0].loftWith(cs.slice(1),{ruled:false});
+    let solid=slab.cut(cutter);
     if(d.rotate) solid=solid.rotate(90,[0,0,0],[0,0,1]);
     const buf=await solid.blobSTEP().arrayBuffer();
     self.postMessage({ok:true,buf},[buf]);
@@ -2556,35 +2570,25 @@ self.onmessage=async(e)=>{
   return _stepWorker;
 }
 
-// Export the wood core as a true B-rep STEP solid — the same core the STL represents (flat bottom, top
-// following the core taper, core-inset planform, and tip/tail V-cuts), but as an exact, editable solid: the
-// body is lofted through smooth cross-sections and each inward notch / swallowtail is a clean boolean cut.
-// Opens as a solid body in Fusion, SolidWorks, etc. for CAM or editing — no mesh conversion.
+// Export the wood core as a true B-rep STEP solid. Uses the SAME plan outline the rest of the tool draws
+// (applyVCutToCore — core inset, V-cut spears/notches, and interlock scallops all included), extruded to a
+// slab and then top-tapered by a boolean cut so the top follows the core-side thickness curve over a flat
+// bottom. An exact, editable solid body for Fusion, SolidWorks, etc. — CAM or edit, no mesh conversion.
 async function exportCoreSTEP(ski) {
-  const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0, cx = L / 2;
-  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
-  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
-  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
-  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
-  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
-  const hw = x => Math.max(1, getWidthAtPos(ski, x / L) / 2 - coreInset);
+  const L = ski.length, cx = L / 2;
+  let poly; try { poly = applyVCutToCore(ski); } catch (e) { poly = null; }
+  if (!poly || poly.length < 4) throw new Error("Could not compute the core outline for this design.");
+  // Centered plan outline [x,y], consecutive duplicates removed so the extrude wire is clean.
+  const raw = poly.map(p => [p.x - cx, p.y]), outline = [];
+  for (const p of raw) { const q = outline[outline.length - 1]; if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 0.05) outline.push(p); }
+  if (outline.length > 3 && Math.hypot(outline[0][0] - outline[outline.length - 1][0], outline[0][1] - outline[outline.length - 1][1]) < 0.05) outline.pop();
+  const simp = dpSimplify(outline, 0.1);   // thin smooth rails, keep V-cut/interlock features — keeps the kernel fast
+  const xs = poly.map(p => p.x), minX = Math.min(...xs), maxX = Math.max(...xs);
+  const maxHW = Math.max(1, ...poly.map(p => Math.abs(p.y)));
   const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
-  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
-  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : Math.max(0, tailContactX - endExt);
-  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : Math.min(L, tipContactX + endExt);
-  // Outer half-width, honoring an OUTWARD spear (o -> 0 past the contact toward the apex).
-  const outer = x => {
-    if (vTip && tipExt > 0 && x > tipContactX) { const apex = tipContactX + tipExt; return x > apex ? 0 : hw(tipContactX) * (apex - x) / tipExt; }
-    if (vTail && tailExt > 0 && x < tailContactX) { const apex = tailContactX - tailExt; return x < apex ? 0 : hw(tailContactX) * (x - apex) / tailExt; }
-    return hw(x);
-  };
-  const N = 140, sections = [];
-  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N, o = Math.max(0.4, outer(x)); sections.push({ w: 2 * o, t: th(x), x: x - cx }); }
-  // INWARD notches / swallowtails: a triangular prism (apex -> the two end corners, extended past the end
-  // so the cut is clean) subtracted through the full thickness.
-  const maxT = Math.max(...(ski.coreProfile || []).map(p => p.thick || 0), 1) + 4, cuts = [];
-  if (vTip && tipExt < 0) { const apex = tipContactX + tipExt, hwc = hw(tipContactX), Xe = tipContactX + 10, Ye = hwc * (Xe - apex) / (tipContactX - apex); cuts.push({ tri: [[apex - cx, 0], [Xe - cx, Ye], [Xe - cx, -Ye]], z0: -1, h: maxT + 1 }); }
-  if (vTail && tailExt < 0) { const apex = tailContactX - tailExt, hwc = hw(tailContactX), Xe = tailContactX - 10, Ye = hwc * (apex - Xe) / (apex - tailContactX); cuts.push({ tri: [[apex - cx, 0], [Xe - cx, Ye], [Xe - cx, -Ye]], z0: -1, h: maxT + 1 }); }
+  const maxT = Math.max(...(ski.coreProfile || []).map(p => p.thick || 0), 1);
+  const M = 80, taper = [];
+  for (let i = 0; i <= M; i++) { const x = (minX - 5) + ((maxX + 5) - (minX - 5)) * i / M; taper.push({ x: x - cx, t: th(Math.max(0, Math.min(L, x))) }); }
   const rotate = (ski.exportOrientation || "vertical") !== "horizontal";
   const worker = getStepWorker();
   const buf = await new Promise((resolve, reject) => {
@@ -2594,7 +2598,7 @@ async function exportCoreSTEP(ski) {
     const onErr = ev => { cleanup(); _stepWorker = null; reject(new Error("Could not load the CAD kernel: " + (ev.message || "worker error"))); };
     worker.addEventListener("message", onMsg);
     worker.addEventListener("error", onErr);
-    worker.postMessage({ sections, cuts, rotate });
+    worker.postMessage({ outline: simp, taper, maxT, wide: 2 * maxHW + 40, rotate });
   });
   downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.step`, "application/step");
 }
