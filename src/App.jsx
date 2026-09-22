@@ -2529,12 +2529,16 @@ function exportCoreSTL(ski) {
 let _stepWorker = null;
 function getStepWorker() {
   if (_stepWorker) return _stepWorker;
-  const V = "1.1.0", base = "https://esm.sh/replicad-opencascadejs@" + V + "/dist/";
+  const V = "1.1.0", base = "https://cdn.jsdelivr.net/npm/replicad-opencascadejs@" + V + "/dist/", rcUrl = "https://cdn.jsdelivr.net/npm/replicad@" + V + "/dist/replicad.js";
+  // Load from jsdelivr's RAW path, not esm.sh: esm.sh injects a `process` shim into the modules it serves,
+  // which flips the Emscripten kernel's node-detection (`globalThis.process?.versions?.node`) true and makes
+  // it call require('node:fs') — the unenv error. Raw files inject nothing, and inside this Worker's clean
+  // global scope `process` is undefined, so the kernel correctly takes the browser path.
   const code = `
-import * as rc from "https://esm.sh/replicad@${V}";
+import * as rc from "${rcUrl}";
 import initOC from "${base}replicad_single.js";
 let ready;
-function init(){ if(!ready) ready=(async()=>{ const OC=await initOC({locateFile:()=>"${base}replicad_single.wasm"}); rc.setOC(OC); })(); return ready; }
+function init(){ if(!ready) ready=(async()=>{ try{ if(globalThis.process) delete globalThis.process; }catch(e){ try{ globalThis.process=undefined; }catch(e2){} } const OC=await initOC({locateFile:()=>"${base}replicad_single.wasm"}); rc.setOC(OC); })(); return ready; }
 self.onmessage=async(e)=>{
   try{
     await init();
