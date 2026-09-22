@@ -2911,8 +2911,19 @@ function spliceInterlockNotches(poly, tipCX, tailCX, iTip, iTail, R) {
   lr = lrAsc.reverse();                                            // back to tip→tail
   return [...rr, ...lr.slice(1)];
 }
-function applyVCutToCore(ski) {
-  const L = ski.length;
+// Clip a closed core polygon to the body side of a contact station and insert the V-cut apex — so a V-cut
+// end is honoured even on the inset-outline path (which is taken whenever the OTHER end has an interlock;
+// previously the V-cut end was left as the full-length rounded inset).
+function applyEndVCut(poly, contactX, apexX, isTip) {
+  const inside = p => isTip ? p.x <= contactX + 1e-9 : p.x >= contactX - 1e-9;
+  const isect = (a, b) => { const t = (contactX - a.x) / (b.x - a.x); return { x: contactX, y: a.y + t * (b.y - a.y) }; };
+  const out = [];
+  for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length], ai = inside(a), bi = inside(b); if (ai) out.push(a); if (ai !== bi) out.push(isect(a, b)); }
+  if (out.length < 3) return poly;
+  for (let i = 0; i < out.length; i++) { const a = out[i], b = out[(i + 1) % out.length]; if (Math.abs(a.x - contactX) < 1e-6 && Math.abs(b.x - contactX) < 1e-6) { out.splice(i + 1, 0, { x: apexX, y: 0 }); break; } }
+  return out;
+}
+function applyVCutToCore(ski) {  const L = ski.length;
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const tailContactX = ski.tailLength;
   const tipContactX = L - ski.tipLength;
@@ -2943,6 +2954,8 @@ function applyVCutToCore(ski) {
     try { base = offsetPolygonInward(getFullOutlinePoints(ski), coreInset).map(p => ({ x: p.y, y: p.x })); }
     catch (e) { base = null; }
     if (base && base.length >= 6) {
+      if (vTip) base = applyEndVCut(base, tipContactX, tipContactX + tipExt, true);
+      if (vTail) base = applyEndVCut(base, tailContactX, tailContactX - tailExt, false);
       if (iTip || iTail) base = spliceInterlockNotches(base, tipContactX, tailContactX, iTip, iTail, R);
       return base;
     }
