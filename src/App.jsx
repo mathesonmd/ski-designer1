@@ -2526,8 +2526,23 @@ function loadReplicad() {
   if (!_rcPromise) _rcPromise = (async () => {
     const V = "1.1.0", base = `https://esm.sh/replicad-opencascadejs@${V}/dist/`;
     const rc = await import(/* @vite-ignore */ `https://esm.sh/replicad@${V}`);
-    const initOC = (await import(/* @vite-ignore */ base + "replicad_single.js")).default;
-    const OC = await initOC({ locateFile: () => base + "replicad_single.wasm" });
+    // Cloudflare's build layer (unenv) polyfills `process`/`module` into the bundle, which makes the
+    // Emscripten WASM loader think it's running under Node and call module.require('fs') — hence the
+    // "[unenv] module.require is not implemented" failure. Hide those globals while the kernel loads and
+    // initialises so it takes the browser path, then restore them.
+    const g = globalThis;
+    const pDesc = Object.getOwnPropertyDescriptor(g, "process");
+    const mDesc = Object.getOwnPropertyDescriptor(g, "module");
+    let OC;
+    try {
+      try { Object.defineProperty(g, "process", { value: undefined, configurable: true, writable: true }); } catch (e) {}
+      try { Object.defineProperty(g, "module", { value: undefined, configurable: true, writable: true }); } catch (e) {}
+      const initOC = (await import(/* @vite-ignore */ base + "replicad_single.js")).default;
+      OC = await initOC({ locateFile: () => base + "replicad_single.wasm" });
+    } finally {
+      try { if (pDesc) Object.defineProperty(g, "process", pDesc); } catch (e) {}
+      try { if (mDesc) Object.defineProperty(g, "module", mDesc); } catch (e) {}
+    }
     rc.setOC(OC);
     return rc;
   })();
@@ -10597,7 +10612,7 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>SVG</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={expBtn}>STL</button>
           </div>
-          <button onClick={doStepExport} disabled={stepBusy} style={{ ...expBtn, width: "100%", marginBottom: 10, borderColor: C.heading, color: C.heading, opacity: stepBusy ? 0.6 : 1, cursor: stepBusy ? "wait" : "pointer" }}>
+          <button onClick={doStepExport} disabled={stepBusy} style={{ ...expBtn, marginBottom: 10, opacity: stepBusy ? 0.6 : 1, cursor: stepBusy ? "wait" : "pointer" }}>
             {stepBusy ? "Building STEP solid\u2026" : "STEP \u2014 smooth editable solid"}
           </button>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core Side — thickness taper profile</div>
