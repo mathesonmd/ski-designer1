@@ -2435,73 +2435,62 @@ ${body}
 // contact) or an INWARD notch / swallowtail (negative extension, apex back toward the center). The top
 // follows the core-side thickness curve (flat bottom at Z=0). Planform matches the DXF outline, so the
 // solid is WYSIWYG. Honors the Export Orientation dropdown. Import into CAM as millimetres.
+// Fan-free ear-clipping triangulation of a simple (possibly non-convex) polygon — needed because the core
+// outline has V-notches and interlock scallops. Returns index triples into the input polygon.
+function earClip(poly) {
+  const n = poly.length; if (n < 3) return [];
+  let area = 0; for (let i = 0; i < n; i++) { const a = poly[i], b = poly[(i + 1) % n]; area += a.x * b.y - b.x * a.y; }
+  const order = area >= 0 ? [...Array(n).keys()] : [...Array(n).keys()].reverse();
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const inTri = (p, a, b, c) => { const d1 = cross(a, b, p), d2 = cross(b, c, p), d3 = cross(c, a, p); const neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0; return !(neg && pos); };
+  const rem = [...order], tris = []; let guard = 0;
+  while (rem.length > 3 && guard++ < 20000) {
+    let clipped = false;
+    for (let i = 0; i < rem.length; i++) {
+      const i0 = rem[(i - 1 + rem.length) % rem.length], i1 = rem[i], i2 = rem[(i + 1) % rem.length];
+      const a = poly[i0], b = poly[i1], c = poly[i2];
+      if (cross(a, b, c) <= 0) continue;
+      let ear = true; for (const j of rem) { if (j === i0 || j === i1 || j === i2) continue; if (inTri(poly[j], a, b, c)) { ear = false; break; } }
+      if (ear) { tris.push([i0, i1, i2]); rem.splice(i, 1); clipped = true; break; }
+    }
+    if (!clipped) break;
+  }
+  if (rem.length === 3) tris.push([rem[0], rem[1], rem[2]]);
+  return tris;
+}
+
 function exportCoreSTL(ski) {
-  const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
-  const L = ski.length;
-  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
-  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
-  // Extension: POSITIVE reaches past the contact toward the tip/tail (outward spear); NEGATIVE reaches
-  // back toward the center (inward notch). Clamp to a safe range so the outline can't self-intersect.
-  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
-  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
-  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
-  const hw = (x) => Math.max(1.0, getWidthAtPos(ski, x / L) / 2 - coreInset);
-  const th = (x) => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
+  const L = ski.length, cx = L / 2;
+  // Same plan outline the plan view / CAM / DXF / STEP use — V-cut spears & notches AND interlock scallops
+  // included — so every export agrees. Build a flat-bottomed mesh whose top follows the core-side taper.
+  let poly; try { poly = applyVCutToCore(ski); } catch (e) { poly = null; }
+  if (!poly || poly.length < 3) return;
+  const clean = [];
+  for (const p of poly) { const q = clean[clean.length - 1]; if (!q || Math.hypot(p.x - q.x, p.y - q.y) > 1e-4) clean.push({ x: p.x, y: p.y }); }
+  if (clean.length > 3 && Math.hypot(clean[0].x - clean[clean.length - 1].x, clean[0].y - clean[clean.length - 1].y) < 1e-4) clean.pop();
+  if (clean.length < 3) return;
+  let area = 0; for (let i = 0; i < clean.length; i++) { const a = clean[i], b = clean[(i + 1) % clean.length]; area += a.x * b.y - b.x * a.y; }
+  if (area < 0) clean.reverse();   // CCW, so wall normals point outward
+  const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
 
-  // Cross-section at length x -> { o: outer half-width, n: inner notch edge } or null (no core). Body:
-  // n=0. Outward spear: o tapers to 0 at the apex. Inward notch: n rises to o at the contact (two prongs).
-  function sec(x) {
-    if (vTip) {
-      if (tipExt > 0) { const apex = tipContactX + tipExt; if (x > tipContactX) { if (x > apex) return null; return { o: Math.max(0, hw(tipContactX) * (apex - x) / tipExt), n: 0 }; } }
-      else if (tipExt < 0) { const apex = tipContactX + tipExt; if (x > tipContactX) return null; if (x >= apex) { const o = hw(x); return { o, n: Math.min(hw(tipContactX) * (x - apex) / (-tipExt), o) }; } }
-      else { if (x > tipContactX) return null; }
-    }
-    if (vTail) {
-      if (tailExt > 0) { const apex = tailContactX - tailExt; if (x < tailContactX) { if (x < apex) return null; return { o: Math.max(0, hw(tailContactX) * (x - apex) / tailExt), n: 0 }; } }
-      else if (tailExt < 0) { const apex = tailContactX - tailExt; if (x < tailContactX) return null; if (x <= apex) { const o = hw(x); return { o, n: Math.min(hw(tailContactX) * (apex - x) / (-tailExt), o) }; } }
-      else { if (x < tailContactX) return null; }
-    }
-    return { o: hw(x), n: 0 };
-  }
-
-  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
-  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : Math.max(0, tailContactX - endExt);
-  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : Math.min(L, tipContactX + endExt);
-  const NS = 360, xset = new Set();
-  for (let i = 0; i <= NS; i++) xset.add(xLo + (xHi - xLo) * i / NS);
-  [tipContactX, tipContactX + tipExt, tailContactX, tailContactX - tailExt].forEach(e => { if (e >= xLo - 1e-6 && e <= xHi + 1e-6) xset.add(e); });
-  const X = [...xset].filter(x => x >= xLo - 1e-6 && x <= xHi + 1e-6).sort((a, b) => a - b);
-  const XX = []; for (const x of X) { if (!XX.length || Math.abs(x - XX[XX.length - 1]) > 1e-4) XX.push(x); }
-
-  const cx = L / 2, tris = [];
+  const tris = [];
   const nrm = (a, b, c) => { const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]; let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const m = Math.hypot(nx, ny, nz) || 1; return [nx / m, ny / m, nz / m]; };
-  const same = (p, q) => Math.abs(p[0] - q[0]) < 1e-6 && Math.abs(p[1] - q[1]) < 1e-6 && Math.abs(p[2] - q[2]) < 1e-6;
   const tri = (a, b, c, dir) => { let n = nrm(a, b, c); if (n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] < 0) { const t = b; b = c; c = t; n = nrm(a, b, c); } tris.push({ n, v: [a, b, c] }); };
-  const P = (x, y, z) => [x - cx, y, z];
-  const quad = (a, b, c, d, dir) => { const pts = [a, b, c, d], u = []; for (const p of pts) { const q = u[u.length - 1]; if (!q || !same(p, q)) u.push(p); } if (u.length > 1 && same(u[0], u[u.length - 1])) u.pop(); if (u.length === 4) { tri(u[0], u[1], u[2], dir); tri(u[0], u[2], u[3], dir); } else if (u.length === 3) tri(u[0], u[1], u[2], dir); };
+  const P = (p, z) => [p.x - cx, p.y, z];
 
-  // Loft one half-interval between two slices: top, bottom, outer wall, and (for a notch) the inner wall.
-  const loftHalf = (x0, x1, t0, t1, lo0, hi0, lo1, hi1, outer, innerOn) => {
-    quad(P(x0, lo0, t0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, lo1, t1), [0, 0, 1]);
-    quad(P(x0, lo0, 0), P(x0, hi0, 0), P(x1, hi1, 0), P(x1, lo1, 0), [0, 0, -1]);
-    if (outer === 'lo') { quad(P(x0, lo0, 0), P(x0, lo0, t0), P(x1, lo1, t1), P(x1, lo1, 0), [0, -1, 0]); if (innerOn) quad(P(x0, hi0, 0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, hi1, 0), [0, 1, 0]); }
-    else { quad(P(x0, hi0, 0), P(x0, hi0, t0), P(x1, hi1, t1), P(x1, hi1, 0), [0, 1, 0]); if (innerOn) quad(P(x0, lo0, 0), P(x0, lo0, t0), P(x1, lo1, t1), P(x1, lo1, 0), [0, -1, 0]); }
-  };
-
-  for (let i = 0; i < XX.length - 1; i++) {
-    const x0 = XX[i], x1 = XX[i + 1], s0 = sec(x0), s1 = sec(x1);
-    if (!s0 || !s1) continue;
-    const t0 = th(x0), t1 = th(x1), notch = s0.n > 1e-6 || s1.n > 1e-6;
-    loftHalf(x0, x1, t0, t1, -s0.o, -s0.n, -s1.o, -s1.n, 'lo', notch);
-    loftHalf(x0, x1, t0, t1, s0.n, s0.o, s1.n, s1.o, 'hi', notch);
+  const faces = earClip(clean);
+  for (const [i0, i1, i2] of faces) {
+    const a = clean[i0], b = clean[i1], c = clean[i2];
+    tri(P(a, 0), P(b, 0), P(c, 0), [0, 0, -1]);                    // flat bottom
+    tri(P(a, th(a.x)), P(b, th(b.x)), P(c, th(c.x)), [0, 0, 1]);   // tapered top
   }
-  // End caps at blunt / non-V ends (tapered ends converge to a point and need no cap).
-  const capX = (x, dir) => { const s = sec(x); if (!s) return; const t = th(x); quad(P(x, -s.o, 0), P(x, -s.n, 0), P(x, -s.n, t), P(x, -s.o, t), dir); quad(P(x, s.n, 0), P(x, s.o, 0), P(x, s.o, t), P(x, s.n, t), dir); };
-  const sA = sec(XX[0]); if (sA && sA.o - sA.n > 0.05 && !(vTail && tailExt > 0)) capX(XX[0], [-1, 0, 0]);
-  const sB = sec(XX[XX.length - 1]); if (sB && sB.o - sB.n > 0.05 && !(vTip && tipExt > 0)) capX(XX[XX.length - 1], [1, 0, 0]);
+  for (let i = 0; i < clean.length; i++) {
+    const a = clean[i], b = clean[(i + 1) % clean.length], dir = [b.y - a.y, -(b.x - a.x), 0];
+    const A0 = P(a, 0), B0 = P(b, 0), A1 = P(a, th(a.x)), B1 = P(b, th(b.x));
+    tri(A0, B0, B1, dir); tri(A0, B1, A1, dir);
+  }
 
-  // Honor the Export Orientation dropdown: "vertical" (default) runs length up +Y; "horizontal" keeps
-  // length along X. Applied as a true 90° rotation about Z so the solid stays valid.
+  // Honor the Export Orientation dropdown: "vertical" (default) runs length up +Y as a true 90° rotation.
   const vertical = (ski.exportOrientation || "vertical") !== "horizontal";
   if (vertical) for (const t of tris) { t.v = t.v.map(v => [-v[1], v[0], v[2]]); t.n = [-t.n[1], t.n[0], t.n[2]]; }
 
