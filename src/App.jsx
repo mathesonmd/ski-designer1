@@ -2545,6 +2545,7 @@ self.onmessage=async(e)=>{
     const d=e.data;
     const secs=d.sections.map(s=>rc.sketchRectangle(s.w,s.t,{plane:"YZ",origin:[s.x,0,s.t/2]}));
     let solid=secs[0].loftWith(secs.slice(1),{ruled:false});
+    for(const c of (d.cuts||[])){ const pr=rc.draw().movePointerTo(c.tri[0]).lineTo(c.tri[1]).lineTo(c.tri[2]).close().sketchOnPlane("XY",c.z0).extrude(c.h); solid=solid.cut(pr); }
     if(d.rotate) solid=solid.rotate(90,[0,0,0],[0,0,1]);
     const buf=await solid.blobSTEP().arrayBuffer();
     self.postMessage({ok:true,buf},[buf]);
@@ -2556,28 +2557,44 @@ self.onmessage=async(e)=>{
 }
 
 // Export the wood core as a true B-rep STEP solid — the same core the STL represents (flat bottom, top
-// following the core taper, core-inset planform), but as an exact, editable solid lofted by a real CAD
-// kernel. Opens as a solid body in Fusion, SolidWorks, etc. for CAM or editing — no mesh conversion.
-// (Tip/tail V-cuts aren't reflected yet; those export via STL.)
+// following the core taper, core-inset planform, and tip/tail V-cuts), but as an exact, editable solid: the
+// body is lofted through smooth cross-sections and each inward notch / swallowtail is a clean boolean cut.
+// Opens as a solid body in Fusion, SolidWorks, etc. for CAM or editing — no mesh conversion.
 async function exportCoreSTEP(ski) {
   const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0, cx = L / 2;
   const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
-  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
-  const xLo = Math.max(0, tailContactX - endExt), xHi = Math.min(L, tipContactX + endExt);
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
+  const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
+  const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
   const hw = x => Math.max(1, getWidthAtPos(ski, x / L) / 2 - coreInset);
   const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
-  const N = 100, sections = [];
-  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N; sections.push({ w: 2 * hw(x), t: th(x), x: x - cx }); }
+  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  const xLo = vTail ? (tailExt > 0 ? tailContactX - tailExt : tailContactX) : Math.max(0, tailContactX - endExt);
+  const xHi = vTip ? (tipExt > 0 ? tipContactX + tipExt : tipContactX) : Math.min(L, tipContactX + endExt);
+  // Outer half-width, honoring an OUTWARD spear (o -> 0 past the contact toward the apex).
+  const outer = x => {
+    if (vTip && tipExt > 0 && x > tipContactX) { const apex = tipContactX + tipExt; return x > apex ? 0 : hw(tipContactX) * (apex - x) / tipExt; }
+    if (vTail && tailExt > 0 && x < tailContactX) { const apex = tailContactX - tailExt; return x < apex ? 0 : hw(tailContactX) * (x - apex) / tailExt; }
+    return hw(x);
+  };
+  const N = 140, sections = [];
+  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N, o = Math.max(0.4, outer(x)); sections.push({ w: 2 * o, t: th(x), x: x - cx }); }
+  // INWARD notches / swallowtails: a triangular prism (apex -> the two end corners, extended past the end
+  // so the cut is clean) subtracted through the full thickness.
+  const maxT = Math.max(...(ski.coreProfile || []).map(p => p.thick || 0), 1) + 4, cuts = [];
+  if (vTip && tipExt < 0) { const apex = tipContactX + tipExt, hwc = hw(tipContactX), Xe = tipContactX + 10, Ye = hwc * (Xe - apex) / (tipContactX - apex); cuts.push({ tri: [[apex - cx, 0], [Xe - cx, Ye], [Xe - cx, -Ye]], z0: -1, h: maxT + 1 }); }
+  if (vTail && tailExt < 0) { const apex = tailContactX - tailExt, hwc = hw(tailContactX), Xe = tailContactX - 10, Ye = hwc * (apex - Xe) / (apex - tailContactX); cuts.push({ tri: [[apex - cx, 0], [Xe - cx, Ye], [Xe - cx, -Ye]], z0: -1, h: maxT + 1 }); }
   const rotate = (ski.exportOrientation || "vertical") !== "horizontal";
   const worker = getStepWorker();
   const buf = await new Promise((resolve, reject) => {
     const to = setTimeout(() => { cleanup(); reject(new Error("Timed out loading the CAD kernel (network?).")); }, 60000);
     const cleanup = () => { clearTimeout(to); worker.removeEventListener("message", onMsg); worker.removeEventListener("error", onErr); };
-    const onMsg = e => { cleanup(); if (e.data && e.data.ok) resolve(e.data.buf); else reject(new Error((e.data && e.data.error) || "STEP build failed")); };
-    const onErr = e => { cleanup(); _stepWorker = null; reject(new Error("Could not load the CAD kernel: " + (e.message || "worker error"))); };
+    const onMsg = ev => { cleanup(); if (ev.data && ev.data.ok) resolve(ev.data.buf); else reject(new Error((ev.data && ev.data.error) || "STEP build failed")); };
+    const onErr = ev => { cleanup(); _stepWorker = null; reject(new Error("Could not load the CAD kernel: " + (ev.message || "worker error"))); };
     worker.addEventListener("message", onMsg);
     worker.addEventListener("error", onErr);
-    worker.postMessage({ sections, rotate });
+    worker.postMessage({ sections, cuts, rotate });
   });
   downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.step`, "application/step");
 }
@@ -10617,7 +10634,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
             <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — outline + 3D solid</span>
             <InfoBubble C={C} width={260}>
-              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D mesh whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. <b style={{ color: C.heading }}>STEP</b> is the same core as an exact, smooth B-rep solid (not a mesh) &mdash; opens as an editable solid body in Fusion, SolidWorks, etc. for CAM or editing. The first STEP export downloads a CAD kernel (~5&nbsp;MB) once. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
+              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D mesh whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. <b style={{ color: C.heading }}>STEP</b> is the same core as an exact, smooth B-rep solid (not a mesh) &mdash; inset, taper and V-cuts included &mdash; and opens as an editable solid body in Fusion, SolidWorks, etc. for CAM or editing. The first STEP export downloads a CAD kernel (~5&nbsp;MB) once. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
             </InfoBubble>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
