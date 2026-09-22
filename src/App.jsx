@@ -2519,6 +2519,41 @@ function exportCoreSTL(ski) {
   downloadFile(buf, `bcs-ski-core-3d-${ski.length}mm.stl`, "model/stl");
 }
 
+// Lazy-load the OpenCascade CAD kernel (replicad + its ~5MB WASM) from a CDN, once, only when the user
+// first exports a STEP. Kept out of the initial bundle so it never slows normal use.
+let _rcPromise = null;
+function loadReplicad() {
+  if (!_rcPromise) _rcPromise = (async () => {
+    const V = "1.1.0", base = `https://esm.sh/replicad-opencascadejs@${V}/dist/`;
+    const rc = await import(/* @vite-ignore */ `https://esm.sh/replicad@${V}`);
+    const initOC = (await import(/* @vite-ignore */ base + "replicad_single.js")).default;
+    const OC = await initOC({ locateFile: () => base + "replicad_single.wasm" });
+    rc.setOC(OC);
+    return rc;
+  })();
+  return _rcPromise;
+}
+
+// Export the wood core as a true B-rep STEP solid — the same core the STL represents (flat bottom, top
+// following the core taper, core-inset planform), but as an exact, editable solid built by lofting smooth
+// cross-sections through a real CAD kernel. Opens cleanly as a solid body in Fusion, SolidWorks, etc. for
+// CAM or editing — no mesh conversion. (Tip/tail V-cuts aren't reflected yet; those export via STL.)
+async function exportCoreSTEP(ski) {
+  const rc = await loadReplicad();
+  const L = ski.length, coreInset = ski.coreInset !== undefined ? ski.coreInset : 0, cx = L / 2;
+  const tailContactX = ski.tailLength, tipContactX = L - ski.tipLength;
+  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  const xLo = Math.max(0, tailContactX - endExt), xHi = Math.min(L, tipContactX + endExt);
+  const hw = x => Math.max(1, getWidthAtPos(ski, x / L) / 2 - coreInset);
+  const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
+  const N = 100, secs = [];
+  for (let i = 0; i <= N; i++) { const x = xLo + (xHi - xLo) * i / N, w = 2 * hw(x), t = th(x); secs.push(rc.sketchRectangle(w, t, { plane: "YZ", origin: [x - cx, 0, t / 2] })); }
+  let solid = secs[0].loftWith(secs.slice(1), { ruled: false });
+  if ((ski.exportOrientation || "vertical") !== "horizontal") solid = solid.rotate(90, [0, 0, 0], [0, 0, 1]); // length up +Y, matching the STL
+  const blob = solid.blobSTEP();
+  downloadFile(await blob.arrayBuffer(), `bcs-ski-core-3d-${ski.length}mm.step`, "application/step");
+}
+
 function exportCorePlanDXF(ski){
   const coreInset = ski.coreInset !== undefined ? ski.coreInset : 0;
   const N = 200;
@@ -7959,6 +7994,14 @@ function studyDesignHTML(variants, opts) {
 export default function App() {
   const [ski, setSki] = useState(DEFAULT_SKI);
   const [printOpts, setPrintOpts] = useState({ core: true, profile: true, rocker: true, align: true });
+  const [stepBusy, setStepBusy] = useState(false);
+  const doStepExport = async () => {
+    if (stepBusy) return;
+    setStepBusy(true);
+    try { await exportCoreSTEP(ski); }
+    catch (e) { alert("STEP export failed: " + ((e && e.message) || e) + "\n\nThe CAD kernel downloads from the web the first time — check your connection and try again."); }
+    finally { setStepBusy(false); }
+  };
 
   // ── Undo / redo ────────────────────────────────────────────────
   // Debounced history of the design: a burst of drag updates collapses into one step, so a single Ctrl-Z
@@ -10546,14 +10589,17 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
             <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core — outline + 3D solid</span>
             <InfoBubble C={C} width={260}>
-              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D solid whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
+              <b style={{ color: C.heading }}>DXF / SVG</b> are the core-inset top outline with contact marks. <b style={{ color: C.heading }}>STL</b> is a flat-bottomed 3D mesh whose top follows the core-side taper &mdash; it includes the core inset and any tip/tail V-cuts. <b style={{ color: C.heading }}>STEP</b> is the same core as an exact, smooth B-rep solid (not a mesh) &mdash; opens as an editable solid body in Fusion, SolidWorks, etc. for CAM or editing. The first STEP export downloads a CAD kernel (~5&nbsp;MB) once. Import into CAM as millimetres to rough &amp; finish the core, no CAD modeling needed.
             </InfoBubble>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCorePlanDXF)} style={expBtn}>DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCorePlanSVG)} style={expBtn}>SVG</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSTL)} style={expBtn}>STL</button>
           </div>
+          <button onClick={doStepExport} disabled={stepBusy} style={{ ...expBtn, width: "100%", marginBottom: 10, borderColor: C.heading, color: C.heading, opacity: stepBusy ? 0.6 : 1, cursor: stepBusy ? "wait" : "pointer" }}>
+            {stepBusy ? "Building STEP solid\u2026" : "STEP \u2014 smooth editable solid"}
+          </button>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core Side — thickness taper profile</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
