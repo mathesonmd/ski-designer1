@@ -142,6 +142,9 @@ const CARBON = {
   glassWide:{name:"Glass UD Full",E:40000,width:0,thick:0.5},
 };
 const CARBON_THICK=0.3,EDGE_W=2,EDGE_H=1.8,BASE_THICK=1.2,TOPSHEET_THICK=0.5;
+// Edge body thickness follows the base by default (the edge sits flush beside the base). Only an explicit
+// unlink (edgeLinked === false) lets it differ.
+const edgeThickOf = L => (L && L.edgeLinked === false && L.edgeThick != null) ? L.edgeThick : ((L && L.thick != null) ? L.thick : BASE_THICK);
 const SCALARS = { edge: { name: "Steel edge", E: 200000 }, base: { name: "Base (P-tex)", E: 800 }, topsheet: { name: "Topsheet", E: 1500 }, vds: { name: "VDS rubber", E: 40 } };
 // Shaped reinforcement inserts can be cut from many materials, not just metal. thick mm, density kg/m³.
 const INSERT_MATERIALS = {
@@ -231,7 +234,7 @@ const fabricEff = L => { if (L.gsm0 != null && L.gsm45 != null && (L.gsm0 + L.gs
 function stackToLayers(stack, skiWidth, coreThick) {
   const out = [];
   for (const L of stack || []) {
-    if (L.kind === "base") { out.push({ E: SCALARS.base.E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: SCALARS.edge.E, b: EDGE_W * 2, t: (L.edgeThick != null ? L.edgeThick : EDGE_H), role: "edge" }); }
+    if (L.kind === "base") { out.push({ E: SCALARS.base.E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: SCALARS.edge.E, b: EDGE_W * 2, t: edgeThickOf(L), role: "edge" }); }
     else if (L.kind === "topsheet") { out.push({ E: SCALARS.topsheet.E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
     else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
@@ -277,13 +280,13 @@ const _veil = () => ({ id: _sid(), kind: "fabric", mat: "glassBiax", gsm: 120 })
 const LAYUP_RECIPES = [
   { name: "Fiberglass Sandwich", wood: "poplar", desc: "Triax (0/\u00B145) skins over wood \u2014 the metal-free all-mountain standard.", ex: "most non-metal all-mtn skis",
     build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _fab("glassTriax", 750), _top()] },
-  { name: "Titanal Sandwich (2-sheet)", wood: "ash", desc: "Two 0.4mm Titanal sheets around the core with a thin glass veil between metal and core (bond), triax outside \u2014 damp, planted.", ex: "Enforcer, Brahma/Bonafide, Head",
+  { name: "Titanal Sandwich (2-sheet)", wood: "ash", desc: "Two 0.4mm Titanal sheets around the core with a thin glass veil between metal and core (bond), triax outside \u2014 damp, planted.", ex: "two-sheet metal all-mtn / charger",
     build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _veil(), _cor("ash"), _veil(), _met("titanal"), _fab("glassTriax", 750), _top()] },
   { name: "Single Titanal", wood: "poplar", desc: "One 0.6mm Titanal sheet up top for damping without full metal weight.", ex: "one-sheet-Ti all-mtn",
     build: () => [_base(), _fab("glassTriax", 750), _cor("poplar"), _veil(), _met("titanalH"), _fab("glassBiax", 600), _top()] },
-  { name: "Carbon / Glass Hybrid", wood: "poplar", desc: "Biax glass skins + UD carbon stringers by the core \u2014 light and lively, keeps torsion.", ex: "Shaggy's standard, Folsom 90/10",
+  { name: "Carbon / Glass Hybrid", wood: "poplar", desc: "Biax glass skins + UD carbon stringers by the core \u2014 light and lively, keeps torsion.", ex: "light, lively all-mtn",
     build: () => [_base(), _fab("glassBiax", 600), _uni("carbonUni", 300, 60), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
-  { name: "Full Carbon", wood: "paulownia", desc: "Biax (\u00B145) + UD (0\u00B0) carbon over a light core \u2014 lightest, touring/race.", ex: "DPS Alchemist, Shaggy's Pure Carbon",
+  { name: "Full Carbon", wood: "paulownia", desc: "Biax (\u00B145) + UD (0\u00B0) carbon over a light core \u2014 lightest, touring/race.", ex: "light touring / race",
     build: () => [_base(), _fab("carbonBiax", 400), _uni("carbonUni", 300, 60), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("carbonBiax", 400), _top()] },
   { name: "Carbon Biax + Flax UD", wood: "poplar", desc: "Carbon biax (\u00B145) skins for torsion + full-width flax UD (0\u00B0) \u2014 a stiff-but-damp eco/performance hybrid.", ex: "carbon-flax hybrids",
     build: () => [_base(), _fab("carbonBiax", 400), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("carbonBiax", 400), _top()] },
@@ -291,9 +294,9 @@ const LAYUP_RECIPES = [
     build: () => [_base(), _fab("flaxBiax", 500), _uni("carbonUni", 300, 0), _cor("poplar"), _uni("carbonUni", 300, 0), _fab("flaxBiax", 500), _top()] },
   { name: "Titanal + Carbon", wood: "poplar", desc: "One Titanal sheet (damp) + UD carbon (pop), triax/biax skins \u2014 damp but lighter.", ex: "modern hybrid all-mtn",
     build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _veil(), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassBiax", 600), _top()] },
-  { name: "Flax / Eco (natural fiber)", wood: "poplar", desc: "Flax biax skins over a light core \u2014 naturally damp and sustainable, softer flex.", ex: "WNDR, natural-fiber eco skis",
+  { name: "Flax / Eco (natural fiber)", wood: "poplar", desc: "Flax biax skins over a light core \u2014 naturally damp and sustainable, softer flex.", ex: "natural-fiber eco builds",
     build: () => [_base(), _fab("flaxBiax", 500), _uni("flaxUni", 450, 0), _cor("poplar"), _uni("flaxUni", 450, 0), _fab("flaxBiax", 500), _top()] },
-  { name: "Park Twin (soft glass)", wood: "poplar", desc: "Biax glass skins \u2014 softer and more playful than triax, forgiving for a symmetric twin.", ex: "Line Chronic, ON3P park, Armada",
+  { name: "Park Twin (soft glass)", wood: "poplar", desc: "Biax glass skins \u2014 softer and more playful than triax, forgiving for a symmetric twin.", ex: "park / freestyle twins",
     build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassBiax", 600), _top()] },
   { name: "Damp Race (Ti + VDS)", wood: "ash", desc: "Two Titanal sheets with VDS rubber between metal and core \u2014 damping plus a clean bond, triax skins, max damping for GS/race.", ex: "GS race plates, damp chargers",
     build: () => [_base(), _fab("glassTriax", 750), _met("titanal"), _vds(), _cor("ash"), _vds(), _met("titanal"), _fab("glassTriax", 750), _top()] },
@@ -305,13 +308,13 @@ const SNOWBOARD_LAYUP_RECIPES = [
     build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassBiax", 600), _top()] },
   { name: "All-Mountain (Triax)", wood: "poplar", desc: "Triax (45/0/-45) both sides \u2014 more torsional stiffness and pop, responsive everywhere.", ex: "all-mtn freestyle / freeride",
     build: () => [_base(), _fab("glassTriax", 700), _cor("poplar"), _fab("glassTriax", 700), _top()] },
-  { name: "Blended (Triax top / Biax base)", wood: "poplar", desc: "Triax up top, biax underneath \u2014 the common blend: response on top, forgiving underfoot.", ex: "CAPiTA-style all-mtn",
+  { name: "Blended (Triax top / Biax base)", wood: "poplar", desc: "Triax up top, biax underneath \u2014 the common blend: response on top, forgiving underfoot.", ex: "common all-mtn blend",
     build: () => [_base(), _fab("glassBiax", 600), _cor("poplar"), _fab("glassTriax", 700), _top()] },
   { name: "Freeride + Carbon", wood: "poplar", desc: "Triax skins + UD carbon stringers over the core \u2014 pop, rebound and edge power for charging.", ex: "directional freeride",
     build: () => [_base(), _fab("glassTriax", 700), _cor("poplar"), _uni("carbonUni", 300, 60), _fab("glassTriax", 700), _top()] },
   { name: "Carbon Pop (light)", wood: "paulownia", desc: "Biax glass + carbon biax over a light core \u2014 lively, aggressive pop, low weight.", ex: "poppy park / all-mtn",
     build: () => [_base(), _fab("glassBiax", 500), _fab("carbonBiax", 400), _cor("paulownia"), _fab("carbonBiax", 400), _fab("glassBiax", 500), _top()] },
-  { name: "Alpine / Carve (stiff)", wood: "ash", desc: "Triax + UD carbon over a stiff hardwood core \u2014 precise and rigid for hardboot carving / SKWAL.", ex: "Kessler/SG-style, skwal",
+  { name: "Alpine / Carve (stiff)", wood: "ash", desc: "Triax + UD carbon over a stiff hardwood core \u2014 precise and rigid for hardboot carving / SKWAL.", ex: "hardboot carving, skwal",
     build: () => [_base(), _fab("glassTriax", 750), _uni("carbonUni", 300, 80), _cor("ash"), _uni("carbonUni", 300, 80), _fab("glassTriax", 750), _top()] },
   { name: "Powder (light directional)", wood: "paulownia", desc: "Biax glass + a carbon stringer over a light core \u2014 low swing weight for a surfy directional.", ex: "directional powder boards",
     build: () => [_base(), _fab("glassBiax", 500), _cor("paulownia"), _uni("carbonUni", 300, 60), _fab("glassBiax", 500), _top()] },
@@ -441,7 +444,7 @@ function makeDefaultCore(ski){
     return node;
   });
   return [
-    { pos: 0.0, thick: 2.0, end: true },   // tail end (flat 2mm past contact)
+    { pos: 0.0, thick: 2.0, end: true, interp: "linear" },   // tail end (flat 2mm past contact); interp rides on node 0
     ...nodes,
     { pos: 1.0, thick: 2.0, end: true },   // tip end (flat 2mm past contact)
   ];
@@ -515,6 +518,7 @@ const DEFAULT_SKI={
   // sits INBOARD of the contacts, set independently by tipRockerLen/tailRockerLen, so a published
   // rocker % and a published sidecut radius can both be matched at once (they're different locations).
   rockerLinked:true,
+  waistFromTip:true,     // waist position DISPLAYED tip-back (common convention); stored value is unchanged
   radiusTarget:"waist",  // what the Sidecut R input adjusts: "waist" (design) or "tiptail" (spec-match).
   tipRockerLen:240,   // mm from tip end to rocker takeoff. When linked, mirrors tipLength.
   tailRockerLen:170,  // mm from tail end to rocker takeoff. When linked, mirrors tailLength.
@@ -771,6 +775,12 @@ let _coreSplineCache = { profile: null, fn: null };
 function getCoreThickAt(profile, pos) {
   if (pos <= profile[0].pos) return profile[0].thick;
   if (pos >= profile[profile.length - 1].pos) return profile[profile.length - 1].thick;
+  // Straight-segment taper (how cores are actually cut on a planer or CNC) — the default for new designs.
+  // Older designs without the flag keep the smooth monotone curve they were built with.
+  if (profile[0].interp === "linear") {
+    for (let i = 0; i < profile.length - 1; i++) { const a = profile[i], b = profile[i + 1]; if (pos >= a.pos && pos <= b.pos) { const r = b.pos > a.pos ? (pos - a.pos) / (b.pos - a.pos) : 0; return a.thick + r * (b.thick - a.thick); } }
+    return profile[profile.length - 1].thick;
+  }
   if (_coreSplineCache.profile !== profile) {
     _coreSplineCache = {
       profile,
@@ -818,7 +828,7 @@ function computeEIAtStation(skiWidth,coreThick,layup,insertLayers){
   const botFab=split?(GLASS[layup.glassBot]||glass):glass, nGb=split?(layup.glassBotLayers||1):nG;
   layers=[];
   layers.push({E:SCALARS.base.E,b:skiWidth,t:BASE_THICK});
-  layers.push({E:SCALARS.edge.E,b:EDGE_W*2,t:EDGE_H});
+  layers.push({E:SCALARS.edge.E,b:EDGE_W*2,t:BASE_THICK});
   if(carbon.E>0)for(let i=0;i<nC;i++)layers.push({E:carbon.E,b:cW,t:cT});          // bottom UD stringer — outboard, just above the base
   for(let i=0;i<nGb;i++)layers.push({E:botFab.E,b:skiWidth,t:botFab.thick});       // bottom fabric
   layers.push({E:metal.E,b:skiWidth,t:metal.thick});                  // metal against the core
@@ -952,7 +962,7 @@ function computeBOM(ski) {
         else if (L.kind === "metal") { const mt = METALS[L.mat] || METALS.titanal; m += areaM2 * ((L.thick != null ? L.thick : mt.thick) / 1000) * (mt.density || 2700); }
         else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; m += areaM2 * ((L.thick != null ? L.thick : 0.6) / 1000) * (w.density || 600); }
         else if (L.kind === "vds") { m += areaM2 * ((L.thick != null ? L.thick : 0.2) / 1000) * 1200; }
-        else if (L.kind === "base") { m += areaM2 * ((L.thick != null ? L.thick : BASE_THICK) / 1000) * 950; m += edgeLenM * (EDGE_W / 1000) * ((L.edgeThick != null ? L.edgeThick : EDGE_H) / 1000) * 7850; }
+        else if (L.kind === "base") { m += areaM2 * ((L.thick != null ? L.thick : BASE_THICK) / 1000) * 950; m += edgeLenM * (EDGE_W / 1000) * (edgeThickOf(L) / 1000) * 7850; }
         else if (L.kind === "topsheet") { m += areaM2 * (TOPSHEET_THICK / 1000) * 1200; }
       }
       return m;
@@ -2216,7 +2226,7 @@ function measurementRows(ski, extra = {}) {
   rows.push(["Tip height (rocker)", `${ski.tipHeight}`]);
   rows.push(["Tail height (rocker)", `${ski.tailHeight}`]);
   rows.push(["Camber height", `${ski.camberHeight}`]);
-  rows.push(["Waist position", `${((ski.waistPosition !== undefined ? ski.waistPosition : 0.48) * 100).toFixed(0)}%`]);
+  { const wp0 = ski.waistPosition !== undefined ? ski.waistPosition : 0.48; rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
   rows.push(["Edge inset", `${ski.edgeInset}`]);
   rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
   if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
@@ -2794,6 +2804,26 @@ function exportRockerDXF(ski){
 
   dxf += dxfEnd();
   downloadFile(dxf, `bcs-ski-rocker-${ski.length}mm.dxf`, "application/dxf");
+}
+
+// Mold rib: a closed profile you can cut from MDF / ply and stack across the mold's width. The rib's top edge
+// is the ski's base profile (camber + rocker) raised on a solid rib of ski.ribHeight, extended past both ends
+// by ski.ribOverhang along the end slope, and lowered by ski.ribSkin for any mold skin laid over the ribs.
+function exportMoldRibDXF(ski) {
+  const L = ski.length, H = ski.ribHeight != null ? ski.ribHeight : 100, over = ski.ribOverhang != null ? ski.ribOverhang : 50, skin = ski.ribSkin || 0;
+  const hAt = x => { if (x >= 0 && x <= L) return sideProfileHeightAt(ski, x); const e = x < 0 ? 0 : L, d = x < 0 ? 5 : -5, s = (sideProfileHeightAt(ski, e) - sideProfileHeightAt(ski, e + d)) / Math.abs(d); return sideProfileHeightAt(ski, e) + s * Math.abs(x - e); };
+  const N = 400, top = [];
+  for (let i = 0; i <= N; i++) { const x = -over + (L + 2 * over) * i / N; top.push({ x, y: H + hAt(x) - skin }); }
+  const O = skiOrientation(ski), Q = (a, t) => orientPt(a + over, t, O);
+  const layers = [{ name: 'MOLD_RIB', color: 3 }, { name: 'REFERENCE', color: 1 }, { name: 'TEXT', color: 2 }];
+  let dxf = dxfStart(layers);
+  const outline = [Q(-over, 0), ...top.map(p => Q(p.x, p.y)), Q(L + over, 0)];
+  dxf += dxfLwpolyline('MOLD_RIB', outline, true);
+  const maxY = Math.max(...top.map(p => p.y));
+  getRegistrationMarks(ski).forEach(m => { const a = Q(m.skiY, 0), b = Q(m.skiY, H * 0.6), lbl = Q(m.skiY + 2, H * 0.6 + 2); dxf += dxfLine('REFERENCE', a.x, a.y, b.x, b.y); dxf += dxfText('TEXT', lbl.x, lbl.y, 5, m.label); });
+  const t0 = Q(10, 12); dxf += dxfText('TEXT', t0.x, t0.y, 6, `MOLD RIB  ski ${L}mm  rib ${H}mm  skin ${skin}mm  overhang ${over}mm  max ${maxY.toFixed(1)}mm`);
+  dxf += dxfEnd();
+  downloadFile(dxf, `bcs-mold-rib-${L}mm.dxf`, "application/dxf");
 }
 
 function exportRockerSVG(ski){
@@ -6096,7 +6126,7 @@ function CoreView({ ski, setSki, width, height }) {
     }
     ctx.strokeStyle = C.snow; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(padL, baseY); ctx.lineTo(padL + plotW, baseY); ctx.stroke();
-    ctx.fillStyle = C.labelDim; ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = C.labelDim; ctx.font = "11px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
     for (let mm = 0; mm <= maxThick; mm += 4) {
       const p = toC2(0, mm);
@@ -6117,7 +6147,7 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = C.contactLabel || "#f0895c";
-      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.font = "bold 11px 'JetBrains Mono', monospace";
       ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
       ctx.textAlign = "left"; ctx.fillText(lbl, 0, 0); ctx.restore();
     });
@@ -6129,7 +6159,7 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.lineWidth = 1.2; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, baseY); ctx.stroke();
       ctx.fillStyle = C.waistLabel || "#f3ecdd";
-      ctx.font = "bold 8px 'JetBrains Mono', monospace";
+      ctx.font = "bold 11px 'JetBrains Mono', monospace";
       ctx.save(); ctx.translate(x - 2, padT + 3); ctx.rotate(Math.PI / 2);
       ctx.textAlign = "left"; ctx.fillText("WAIST 0", 0, 0); ctx.restore();
     }
@@ -6197,18 +6227,18 @@ function CoreView({ ski, setSki, width, height }) {
       ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = C.heading;
-      ctx.font = "8px 'JetBrains Mono', monospace";
+      ctx.font = "11px 'JetBrains Mono', monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`${cp[cpObj.idx].thick.toFixed(1)}`, cpObj.cx, cpObj.cy - 10);
+      ctx.fillText(`${cp[cpObj.idx].thick.toFixed(1)}`, cpObj.cx, cpObj.cy - 11);
       // distance from the waist (boot center) so you can see where the underfoot thick zone sits
       const dmm = waistDistMM(cp[cpObj.idx].pos);
       ctx.fillStyle = (isH || isD) ? C.waistLabel || "#f3ecdd" : C.labelDim;
-      ctx.font = `${(isH || isD) ? "bold " : ""}7px 'JetBrains Mono', monospace`;
-      ctx.fillText(`${dmm >= 0 ? "+" : ""}${Math.round(dmm)}`, cpObj.cx, cpObj.cy + 15);
+      ctx.font = `${(isH || isD) ? "bold " : ""}10px 'JetBrains Mono', monospace`;
+      ctx.fillText(`${dmm >= 0 ? "+" : ""}${Math.round(dmm)}`, cpObj.cx, cpObj.cy + 19);
     });
 
     ctx.fillStyle = C.dimText;
-    ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.font = "11px 'JetBrains Mono', monospace";
     ctx.textAlign = "left";  ctx.fillText("TAIL", padL + 3, baseY - 4);
     ctx.textAlign = "right"; ctx.fillText("TIP",  padL + plotW - 3, baseY - 4);
     ctx.globalAlpha = 0.72;
@@ -9736,7 +9766,17 @@ export default function App() {
                     </div>
                   );
                 })()}
-                {inputField(t("dim.waistPos", "Waist Pos"), "waistPosition", ski.waistFullLength ? 0.10 : 0.30, ski.waistFullLength ? 0.90 : 0.70, 0.01)}
+                {(() => { const fromTip = !!ski.waistFromTip, wp = ski.waistPosition != null ? ski.waistPosition : 0.48, lo = ski.waistFullLength ? 0.10 : 0.30, hi = ski.waistFullLength ? 0.90 : 0.70; let wmm = 0; try { wmm = resolveWaistY(ski); } catch (e) {} const ref = fromTip ? (ski.waistFullLength ? ski.length - wmm : (ski.length - ski.tipLength) - wmm) : (ski.waistFullLength ? wmm : wmm - ski.tailLength); return (
+                  <div style={{ marginBottom: 7 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{t("dim.waistPos", "Waist Pos")}</span>
+                      <span style={{ display: "flex", gap: 3 }}>{[["from tail", false], ["from tip", true]].map(([lb, v]) => { const on = fromTip === v; return <button key={lb} onClick={() => setSki(s => ({ ...s, waistFromTip: v }))} style={{ padding: "2px 7px", fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.labelDim, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>{lb}</button>; })}</span>
+                    </div>
+                    <NumberInput value={+(fromTip ? 1 - wp : wp).toFixed(2)} min={lo} max={hi} step={0.01}
+                      onCommit={v => setSki(s => ({ ...s, waistPosition: Math.round((s.waistFromTip ? 1 - v : v) * 1000) / 1000 }))}
+                      style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>= {Math.round(ref)} mm from the {fromTip ? (ski.waistFullLength ? "tip" : "tip contact") : (ski.waistFullLength ? "tail" : "tail contact")}</div>
+                  </div>); })()}
                 <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
                   {[[t("dim.span", "span"), false], [t("dim.fullLength", "full length"), true]].map(([lbl, val]) => {
                     const active = !!ski.waistFullLength === val;
@@ -9763,7 +9803,7 @@ export default function App() {
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: -4, marginBottom: 4, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                   {ski.waistFullLength
                     ? t("dim.waistHelpFull", "0.5 = geometric center of the ski (fraction of full length).")
-                    : t("dim.waistHelpSpan", "0.5 = midway between the contact points (fraction of running edge).")}
+                    : t("dim.waistHelpSpan", "0.5 = midway between the contact points (fraction of running edge).")} {ski.waistFromTip ? "Measured from the tip back, the common convention." : "Switch to \"from tip\" to measure tip-back, the common convention."}
                 </div>
                 {/* ── Asymmetric (advanced) — all left/right asymmetry contained here so symmetric skis are untouched ── */}
                 <div style={{ border: `1px solid ${(ski.asymSidecut || ski.asymContact) ? C.heading : C.inputBorder}`, borderRadius: 5, marginTop: 6 }}>
@@ -10015,6 +10055,12 @@ export default function App() {
 
           <div style={{ marginTop: 6, paddingTop: 10, borderTop: `1px solid ${C.panelBorder}`, color: C.heading, fontSize: 10.5, fontWeight: 700, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>CORE</div>
 
+          {(() => { const lin = ((ski.coreProfile || [])[0] || {}).interp === "linear"; const setI = m => setSki(s => ({ ...s, coreProfile: s.coreProfile.map((n, j) => j === 0 ? { ...n, interp: m } : n) })); return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+              <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Taper between points</span>
+              {[["Straight", "linear"], ["Smooth", "smooth"]].map(([lab, m]) => { const on = (m === "linear") === lin; return (
+                <button key={m} onClick={() => setI(m)} style={{ padding: "4px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}` }}>{lab}</button>); })}
+            </div>); })()}
           <div style={{ marginTop: 2, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 5 }}>
             {(ski.coreProfile || []).map((nd, i) => ({ nd, i })).reverse().map(({ nd, i }) => {
@@ -10022,7 +10068,12 @@ export default function App() {
               const end = i === last ? "tip" : i === 0 ? "tail" : "";
               return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ color: end ? C.heading : C.labelDim, fontSize: 10, width: 74, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{end ? end.toUpperCase() + " " : ""}{Math.round(nd.pos * ski.length)} mm</span>
+                {(() => { const locked = !!(nd.end || nd.contact); const lbl = nd.end ? (i === 0 ? "TAIL END" : "TIP END") : nd.contact ? (nd.contact === "tip" ? "TIP CONTACT" : "TAIL CONTACT") : ""; if (locked) return <span title="Pinned to the ski's end / contact — change the ski dimensions to move it" style={{ color: C.heading, fontSize: 10, width: 118, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{lbl} {Math.round(nd.pos * ski.length)} mm</span>;
+                  return (<span style={{ display: "flex", alignItems: "center", gap: 4, width: 118, justifyContent: "flex-end" }}>
+                    <NumberInput value={Math.round(nd.pos * ski.length)} step={5} min={1} max={ski.length - 1}
+                      onCommit={v => setSki(s => { const cp = s.coreProfile, L = s.length, lo = (cp[i - 1].pos * L) + 5, hi = (cp[i + 1].pos * L) - 5; if (hi <= lo) return s; const mm = Math.max(lo, Math.min(hi, v)); return { ...s, coreProfile: cp.map((n, j) => j === i ? { ...n, pos: mm / L } : n) }; })}
+                      style={{ width: 62, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                    <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></span>); })()}
                 <input type="number" value={Number(nd.thick).toFixed(1)} step={0.1} min={0.5} max={40}
                   onChange={e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; setSki(s => ({ ...s, coreProfile: s.coreProfile.map((n, j) => j === i ? { ...n, thick: v } : n) })); }}
                   style={{ width: 70, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 8px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
@@ -10031,7 +10082,7 @@ export default function App() {
             ); })}
           </div>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            Tip is at the top, tail at the bottom. Type an exact value (e.g. 10.8) for any point — position is mm from the tail. Or drag the points in the Core view; double-click the line there to add one.
+            Tip is at the top, tail at the bottom. Type a position (mm from the tail) and thickness for any interior point; ends and contacts stay pinned to the ski dimensions. Or drag points in the Core view and double-click the line to add one. Straight tapers match how cores are cut on a planer or CNC.
           </div>
 
           {(() => { const lb = { color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginTop: 8, marginBottom: 4 }; return (
@@ -10137,7 +10188,7 @@ export default function App() {
                   {recipes.map((r, i) => <option key={r.name} value={i} style={{ color: C.label }}>{r.name}{" \u2014 "}{r.ex}</option>)}
                 </select>
                 <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                  Drops in a proven base→top stack for that construction (named by build, not a specific model — exact specs are proprietary). Flex + torsion update live.
+                  Starting-point stacks by construction type, not copies of any brand's ski. Fabric weights are typical values — check your supplier's spec sheets and adjust. Flex + torsion update live as relative comparisons.
                 </div>
               </div>
             );
@@ -10193,19 +10244,20 @@ export default function App() {
                             <button onClick={() => upd(idx, { gsm0: undefined, gsm45: undefined })} title="back to a single total weight" style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, color: C.labelDim, borderRadius: 4, fontSize: 10, padding: "3px 7px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>single</button>
                           </>) : (<>
                             <input type="number" value={L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm} step={25} min={50} onChange={e => upd(idx, { gsm: parseFloat(e.target.value) || 0 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>g/m²</span>
-                            <button onClick={() => { const tot = L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm; const m = String(L.mat); const g0 = m.includes("Triax") ? Math.round(tot / 3) : m.includes("Uni") ? tot : 0; upd(idx, { gsm0: g0, gsm45: tot - g0 }); }} title="split into 0° and ±45° gram weights from your fabric datasheet" style={{ background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "3px 7px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>0° / ±45°</button>
+                            <button onClick={() => { const tot = L.gsm != null ? L.gsm : (FIBERS[L.mat] || FIBERS.glassBiax).gsm; const m = String(L.mat); const g0 = m.includes("Triax") ? Math.round(tot / 2) : m.includes("Uni") ? tot : 0;   /* starting guess only — real triaxes vary; enter your datasheet split */ upd(idx, { gsm0: g0, gsm45: tot - g0 }); }} title="Split into 0° and ±45° gram weights. Starts at a 50/50 guess — replace it with the split from your fabric's datasheet, since triaxes vary a lot." style={{ background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "3px 7px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>0° / ±45°</button>
                           </>))}
                           {L.kind === "uni" && <><input type="number" value={L.width || 0} step={5} min={0} onChange={e => upd(idx, { width: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 44 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm wide (0 = full width)</span></>}
                           {L.kind === "metal" && <><input type="number" value={L.thick != null ? L.thick : (METALS[L.mat] || METALS.titanal).thick} step={0.1} min={0.1} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.4 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></>}
                           {L.kind === "veneer" && <><select value={L.mat || "walnut"} onChange={e => upd(idx, { mat: e.target.value })} style={{ ...inp, width: "auto" }}>{Object.keys(VENEERS).map(k => <option key={k} value={k}>{VENEERS[k].name}</option>)}</select><input type="number" value={L.thick != null ? L.thick : 0.6} step={0.1} min={0.2} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.6 })} style={{ ...inp, width: 52 }} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm veneer</span></>}
                           {L.kind === "vds" && <><input type="number" value={L.thick != null ? L.thick : 0.2} step={0.1} min={0.1} max={2} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 0.2 })} style={inp} /><span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>mm rubber (damping)</span></>}
-                          {L.kind === "base" && (() => { const gL = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }; const bt = L.thick != null ? L.thick : 1.2; const bOpts = [1.2, 1.3, 1.4, 1.5, 1.8]; const bPre = bOpts.includes(bt); const et = L.edgeThick != null ? L.edgeThick : 1.8; const opts = [0.9, 1.2, 1.4, 1.5, 1.8]; const preset = opts.includes(et); return (<>
+                          {L.kind === "base" && (() => { const gL = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }; const bt = L.thick != null ? L.thick : 1.2; const bOpts = [1.2, 1.3, 1.4, 1.5, 1.8]; const bPre = bOpts.includes(bt); const linked = L.edgeLinked !== false; const et = linked ? bt : (L.edgeThick != null ? L.edgeThick : bt); const opts = [0.9, 1.2, 1.4, 1.5, 1.8]; const preset = opts.includes(et); return (<>
                             <span style={gL}>base</span>
                             <select value={bPre ? String(bt) : "custom"} onChange={e => { if (e.target.value === "custom") upd(idx, { thick: bt }); else upd(idx, { thick: parseFloat(e.target.value) }); }} style={{ ...inp, width: "auto" }}>{bOpts.map(v => <option key={v} value={String(v)}>{v.toFixed(1)} mm</option>)}<option value="custom">custom…</option></select>
                             {!bPre && <><input type="number" value={bt} step={0.1} min={0.5} max={3} onChange={e => upd(idx, { thick: parseFloat(e.target.value) || 1.2 })} style={{ ...inp, width: 52 }} /><span style={gL}>mm</span></>}
                             <span style={gL}>· edge</span>
-                            <select value={preset ? String(et) : "custom"} onChange={e => { if (e.target.value === "custom") upd(idx, { edgeThick: et }); else upd(idx, { edgeThick: parseFloat(e.target.value) }); }} style={{ ...inp, width: "auto" }}>{opts.map(v => <option key={v} value={String(v)}>{v.toFixed(1)} mm</option>)}<option value="custom">custom…</option></select>
-                            {!preset && <><input type="number" value={et} step={0.1} min={0.3} max={4} onChange={e => upd(idx, { edgeThick: parseFloat(e.target.value) || 1.8 })} style={{ ...inp, width: 52 }} /><span style={gL}>mm</span></>}
+                            <button onClick={() => upd(idx, linked ? { edgeLinked: false, edgeThick: bt } : { edgeLinked: true })} title="Edge body thickness normally matches the base so they sit flush" style={{ ...inp, width: "auto", cursor: "pointer", color: linked ? C.heading : C.labelDim, borderColor: linked ? C.heading : C.inputBorder }}>{linked ? "= base" : "unlinked"}</button>
+                            {!linked && <><select value={preset ? String(et) : "custom"} onChange={e => { if (e.target.value === "custom") upd(idx, { edgeThick: et }); else upd(idx, { edgeThick: parseFloat(e.target.value) }); }} style={{ ...inp, width: "auto" }}>{opts.map(v => <option key={v} value={String(v)}>{v.toFixed(1)} mm</option>)}<option value="custom">custom…</option></select>
+                            {!preset && <><input type="number" value={et} step={0.1} min={0.3} max={4} onChange={e => upd(idx, { edgeThick: parseFloat(e.target.value) || bt })} style={{ ...inp, width: 52 }} /><span style={gL}>mm</span></>}</>}
                           </>); })()}
                           {L.kind === "core" && (() => {
                             const cp = coreProps(L); const gLab = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
@@ -10493,8 +10545,8 @@ export default function App() {
               <br /><br /><b style={{ color: C.label }}>Materials.</b> Fabric and stringer moduli are laminate values (glass biax ~12, triax ~25, carbon biax ~24, triax ~58, UD ~135 GPa). Ply thickness = areal weight / (fibre density × ~0.5 fibre volume fraction). Metal, base, and edge from tables.
               <br /><br /><b style={{ color: C.label }}>Core.</b> Density is the volume-weighted mean of the constituents (mass is additive). Modulus uses the Voigt / parallel bound E = sum(fi·Ei), the correct bound for stringers running lengthwise; an entered measured density overrides for weight. Foam moduli are estimates, not density-derived.
               <br /><br /><b style={{ color: C.label }}>Calibration.</b> A test bend gives EI = P·L³ / (48·δ) for a centre load, or P·L³ / (3·δ) for a cantilever; the modelled EI is scaled to that ratio.
-              <br /><br /><b style={{ color: C.label }}>Torsion.</b> GJ uses the same transformed-section method with each layer's shear modulus (orientation-aware: ±45 biax stiff, 0° UD weak) and a z\u00B3 weighting. A bonded laminate twists between a solid plate and loose plies, so the absolute value is a "solid section" estimate — trustworthy as a relative comparison until measured data (e.g. SoothSki) calibrates it.
-              <br /><br /><b style={{ color: C.label }}>Limits.</b> Bending and torsion are estimates; no core shear, isotropic-ply assumption. Ratings map the constants to bands. Treat uncalibrated numbers as comparative between designs, not absolute, until a test bend (bending) or measured data (torsion) anchors them.
+              <br /><br /><b style={{ color: C.label }}>Torsion.</b> GJ uses the same transformed-section method with each layer's shear modulus (orientation-aware: ±45 biax stiff, 0° UD weak) and a z\u00B3 weighting. A bonded laminate twists between a solid plate and loose plies, so the absolute value is a "solid section" estimate — trustworthy as a relative comparison until measured data calibrates it. (Importing SoothSki measured datasets is planned, not yet available.)
+              <br /><br /><b style={{ color: C.label }}>Limits.</b> Bending and torsion are estimates; no core shear, isotropic-ply assumption. A fabric uses one averaged laminate modulus unless you split it (the 0\u00B0 / \u00B145\u00B0 button on the layer) into gram weights from its datasheet; then its stiffness blends the UD and biax moduli by weight. Direction splits vary widely between fabrics, so splitting from the real datasheet matters more than any default. Ratings map the constants to bands. Treat uncalibrated numbers as comparative between designs, not absolute, until a test bend (bending) or measured data (torsion) anchors them.
             </div>
           </details>
         </AccordionSection>
@@ -10656,6 +10708,19 @@ export default function App() {
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideDXF)} style={expBtn}>Core Side DXF</button>
             <button onClick={() => exportWithFeedbackPrompt(exportCoreSideSVG)} style={expBtn}>Core Side SVG</button>
           </div>
+          <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Base Profile — camber / rocker, for mold ribs</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+            <button onClick={() => exportWithFeedbackPrompt(exportRockerDXF)} style={expBtn}>Profile DXF</button>
+            <button onClick={() => exportWithFeedbackPrompt(exportRockerSVG)} style={expBtn}>Profile SVG</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
+            {[["Rib height", "ribHeight", 100], ["Mold skin", "ribSkin", 0], ["Overhang", "ribOverhang", 50]].map(([lab, key, def]) => (
+              <div key={key}><div style={{ color: C.labelDim, fontSize: 9.5, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>{lab} mm</div>
+                <NumberInput value={ski[key] != null ? ski[key] : def} min={0} max={key === "ribSkin" ? 30 : 400} step={1} onCommit={v => setSki(s => ({ ...s, [key]: v }))}
+                  style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} /></div>
+            ))}
+          </div>
+          <button onClick={() => exportWithFeedbackPrompt(exportMoldRibDXF)} style={{ ...expBtn, marginBottom: 10 }}>Mold Rib DXF</button>
           <div style={{ color: C.label, fontSize: 11, marginBottom: 5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Combined — all views aligned for lofting</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
             <button onClick={() => exportWithFeedbackPrompt(exportCombinedDXF)} style={expBtn}>Combined DXF</button>
@@ -10665,6 +10730,7 @@ export default function App() {
             <b style={{color: C.heading}}>Base</b>: top-down ski outline with the edge offset (single continuous cut path in contact mode).<br/>
             <b style={{color: C.heading}}>Core</b>: top-down core outline narrowed by core inset, with tail/waist/tip contact marks.<br/>
             <b style={{color: C.heading}}>Core Side</b>: side thickness profile (flat bottom) for the taper.<br/>
+            <b style={{color: C.heading}}>Base Profile</b>: the base's camber/rocker line. <b style={{color: C.heading}}>Mold Rib</b> turns it into a closed rib (flat bottom, profile on top, raised by rib height, lowered by any mold skin) to cut and stack across your mold.<br/>
             <b style={{color: C.heading}}>Combined</b>: base, core, and side profile stacked and aligned on the length axis so they can be lofted together in CAD.
           </div>
         </AccordionSection>
