@@ -97,6 +97,24 @@ function coreWoods(L) {
   if (L.mat2 && L.pct2 > 0) { first.pct = 100 - L.pct2; return [first, { mat: L.mat2, pct: L.pct2 }]; }
   return [first];
 }
+// Strip-built core: strips glued side by side into a blank, listed in order across the width — strip 1 is the
+// LEFT edge looking down on the top with the tip pointing away. Each strip has a species and a width (mm);
+// the blank is centred on the ski's centreline. The sidecut trims the outer strips where the core narrows, so
+// the mix of woods changes along the ski: stripCoreAt() returns the width-weighted modulus and density of the
+// wood actually present inside the core half-width hw at one station. All strips sit at the same height, so
+// the width-weighted (Voigt) modulus is exact for bending at that station.
+function coreStrips(L) { return (L && L.stripMode && Array.isArray(L.strips) && L.strips.length) ? L.strips : null; }
+function stripSpans(strips) { const T = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0); let x = -T / 2; return strips.map(s => { const a = x; x += Math.max(0, s.width || 0); return { mat: s.mat, density: s.density, a, b: x }; }); }
+function stripCoreAt(L, hw) {
+  const st = coreStrips(L); if (!st || !(hw > 0)) return null;
+  let wS = 0, eS = 0, dS = 0;
+  for (const s of stripSpans(st)) {
+    const o = Math.max(0, Math.min(s.b, hw) - Math.max(s.a, -hw)); if (o <= 0) continue;
+    const m = CORE_MATERIALS[s.mat] || CORE_MATERIALS.poplar, dens = (s.density != null && s.density > 0) ? s.density : m.density;
+    wS += o; eS += m.E * o; dS += dens * o;
+  }
+  return wS > 0 ? { E: eS / wS, density: dS / wS, covered: wS / (2 * hw) } : null;
+}
 function coreProps(L) {
   const M = k => CORE_MATERIALS[k] || CORE_MATERIALS.poplar;
   const ws = coreWoods(L);
@@ -199,16 +217,6 @@ const FIBERS = {
 // 0° UD is weak); everything else is treated as isotropic with G = E / 2.6 (ν ≈ 0.3).
 const shearModOf = (mat, E) => (FIBERS[mat] && FIBERS[mat].G != null) ? FIBERS[mat].G : (E || 0) / 2.6;
 const fiberThickOf = (mat, gsm) => { const f = FIBERS[mat] || FIBERS.glassBiax; return (gsm || f.gsm) / (1000 * f.dens * 0.5); };
-// ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
-// Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
-// applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
-const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SIDEWALLS: SIDEWALL_MATERIALS, SCALARS };
-const _CONST_PROPS = { FIBERS: ["E", "G", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SIDEWALLS: ["E", "density"], SCALARS: ["E"] };
-const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
-const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
-const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
-const _resetConsts = () => { for (const name in _CONST_TABLES) for (const k in _CONST_TABLES[name]) if (_CONST_DEF[name][k]) Object.assign(_CONST_TABLES[name][k], _CONST_DEF[name][k]); try { localStorage.removeItem("bcs-material-consts"); } catch (e) {} };
-_applyConstOverrides();
 // Sidewall materials run down each edge, filling the Core-Inset gap between the wood core and the edges.
 // E in MPa, density kg/m^3. Included in the bending stiffness (a strip of core-height at each edge) and the
 // mass. "custom" lets the builder type their own density + Young's modulus, as Mirsad asked.
@@ -222,6 +230,16 @@ const SIDEWALL_MATERIALS = {
   custom: { name: "Custom (enter E + density)", E: 2300, density: 1050 },
 };
 const sidewallProps = (sw) => { if (!sw || !sw.mat || sw.mat === "none") return null; const m = SIDEWALL_MATERIALS[sw.mat] || SIDEWALL_MATERIALS.abs; return { E: sw.E != null ? sw.E : m.E, density: sw.density != null ? sw.density : m.density, thick: sw.thick || 0 }; };
+// ── Editable material constants (Advanced) ──────────────────────────────────────────────────────────────
+// Pros can override the built-in moduli and densities; overrides persist per-browser in localStorage and are
+// applied in place at load, so the whole tool reads the tuned values. Snapshot the shipped defaults first.
+const _CONST_TABLES = { FIBERS, WOODS, VENEERS, METALS, SIDEWALLS: SIDEWALL_MATERIALS, SCALARS };
+const _CONST_PROPS = { FIBERS: ["E", "G", "dens", "gsm"], WOODS: ["E", "density"], VENEERS: ["E", "density"], METALS: ["E", "thick", "density"], SIDEWALLS: ["E", "density"], SCALARS: ["E"] };
+const _CONST_DEF = JSON.parse(JSON.stringify(_CONST_TABLES));
+const _applyConstOverrides = () => { try { const raw = (typeof localStorage !== "undefined") && localStorage.getItem("bcs-material-consts"); if (!raw) return; const ov = JSON.parse(raw); for (const name in _CONST_TABLES) if (ov[name]) for (const k in ov[name]) if (_CONST_TABLES[name][k]) Object.assign(_CONST_TABLES[name][k], ov[name][k]); } catch (e) {} };
+const _saveConstOverrides = () => { try { const ov = {}; for (const name in _CONST_TABLES) { ov[name] = {}; for (const k in _CONST_TABLES[name]) { const row = {}; for (const p of _CONST_PROPS[name]) if (_CONST_TABLES[name][k][p] !== undefined) row[p] = _CONST_TABLES[name][k][p]; ov[name][k] = row; } } localStorage.setItem("bcs-material-consts", JSON.stringify(ov)); } catch (e) {} };
+const _resetConsts = () => { for (const name in _CONST_TABLES) for (const k in _CONST_TABLES[name]) if (_CONST_DEF[name][k]) Object.assign(_CONST_TABLES[name][k], _CONST_DEF[name][k]); try { localStorage.removeItem("bcs-material-consts"); } catch (e) {} };
+_applyConstOverrides();
 // Directional moduli for the 0°/±45° fabric split (Mirsad): a fabric's along-length stiffness comes from its
 // 0° yarns; ±45° yarns add little. E0 = the family's UD modulus, E45 = its biax modulus. When a fabric layer
 // carries an explicit 0°/±45° gram split, its effective modulus is the weight-weighted blend of the two.
@@ -231,12 +249,12 @@ const E45_OF = { glass: FIBERS.glassBiax.E, carbon: FIBERS.carbonBiax.E, flax: F
 const fabricEff = L => { if (L.gsm0 != null && L.gsm45 != null && (L.gsm0 + L.gsm45) > 0) { const f = famOf(L.mat); const E0 = (FIBERS[f + "Uni"] || {}).E || 40000, E45 = (FIBERS[f + "Biax"] || {}).E || 12000; return { E: (L.gsm0 * E0 + L.gsm45 * E45) / (L.gsm0 + L.gsm45), gsm: L.gsm0 + L.gsm45 }; } return null; };
 // A stack layer: { id, kind:'fabric'|'uni'|'metal'|'core', mat, gsm?, width?, thick?, wood?, density?, E? }
 // Flatten a stack (base→top) into the {E,b,t} layers the EI integrator + drawing + BOM consume.
-function stackToLayers(stack, skiWidth, coreThick) {
+function stackToLayers(stack, skiWidth, coreThick, coreHW) {
   const out = [];
   for (const L of stack || []) {
     if (L.kind === "base") { out.push({ E: SCALARS.base.E, b: skiWidth, t: (L.thick != null ? L.thick : BASE_THICK), role: "base" }, { E: SCALARS.edge.E, b: EDGE_W * 2, t: edgeThickOf(L), role: "edge" }); }
     else if (L.kind === "topsheet") { out.push({ E: SCALARS.topsheet.E, b: skiWidth, t: TOPSHEET_THICK, role: "topsheet" }); }
-    else if (L.kind === "core") { const cp = coreProps(L); out.push({ E: L.E != null ? L.E : cp.E, b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
+    else if (L.kind === "core") { const cp = coreProps(L); const sc = stripCoreAt(L, coreHW); out.push({ E: sc ? sc.E : (L.E != null ? L.E : cp.E), b: skiWidth, t: Math.max(coreThick, 0.5), role: "core", mat: L.mat || L.wood }); }
     else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; out.push({ E: L.E != null ? L.E : m.E, b: skiWidth, t: L.thick != null ? L.thick : m.thick, role: "metal", mat: L.mat }); }
     else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; out.push({ E: L.E != null ? L.E : w.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.6), role: "veneer", mat: L.mat }); }
     else if (L.kind === "vds") { out.push({ E: SCALARS.vds.E, b: skiWidth, t: (L.thick != null ? L.thick : 0.2), role: "vds" }); }
@@ -815,10 +833,10 @@ function insertLayersAt(ski, pos) {
   }
   return out;
 }
-function computeEIAtStation(skiWidth,coreThick,layup,insertLayers){
+function computeEIAtStation(skiWidth,coreThick,layup,insertLayers,coreHW){
   let layers;
   if (layup.stack && layup.stack.length) {
-    layers = stackToLayers(layup.stack, skiWidth, coreThick);
+    layers = stackToLayers(layup.stack, skiWidth, coreThick, coreHW);
   } else {
   const glass=GLASS[layup.glass],metal=METALS[layup.metal],wood=WOODS[layup.wood],carbon=CARBON[layup.carbon];
   const nG=layup.glassLayers||1,nC=layup.carbonLayers||1,cW=carbon.width===0?skiWidth:carbon.width,cT=carbon.thick||CARBON_THICK;
@@ -911,7 +929,15 @@ function computeBOM(ski) {
   // Custom layer stack drives the fibre/metal areas and the core wood when present.
   if (ski.layup && ski.layup.stack && ski.layup.stack.length) {
     const st = ski.layup.stack, coreL = st.find(l => l.kind === "core");
-    if (coreL) { density = coreProps(coreL).density; coreMassKg = (vol / 1e9) * density; }
+    if (coreL) {
+      density = coreProps(coreL).density;
+      if (coreStrips(coreL)) {   // strips: weight each station's density by the wood present there (by volume)
+        let num = 0, den = 0;
+        for (let i = 0; i <= N; i++) { const pos = i / N, w = getWidthAtPos(ski, pos), t = getCoreThickAt(ski.coreProfile, pos), sc = stripCoreAt(coreL, coreHalfAt(ski, w)); if (sc) { const wt = (i === 0 || i === N ? 0.5 : 1) * w * t; num += sc.density * wt; den += wt; } }
+        if (den > 0) density = num / den;
+      }
+      coreMassKg = (vol / 1e9) * density;
+    }
     let gN = 0, cN = 0, mN = 0;
     for (const L of st) {
       if (L.kind === "metal") mN++;
@@ -974,13 +1000,15 @@ function computeBOM(ski) {
 // deflection, and whether it was a centre-loaded simply-supported beam (δ = PL³/48EI) or a cantilever tip
 // load (δ = PL³/3EI). We back out the measured EI and scale the modelled EI to match, so every downstream
 // number (rating, curve, tip stiffness) is anchored to a real measurement instead of the material tables.
+// Core (wood) half-width at a station: half the ski width minus the core inset, where sidewalls/edges sit.
+const coreHalfAt = (ski, w) => Math.max(0.5, w / 2 - (ski.coreInset != null ? ski.coreInset : 0));
 function flexCalFactor(ski) {
   const fc = ski.flexCal;
   if (!fc || !(fc.load > 0) || !(fc.span > 0) || !(fc.defl > 0)) return 1;
   const P = fc.load * 9.81, L = fc.span, c = fc.type === "cantilever" ? 3 : 48;
   const EImeas = P * L * L * L / (c * fc.defl);            // N·mm² from beam theory
   let sum = 0, n = 0; const tailC = ski.tailLength, tipC = ski.length - ski.tipLength;
-  for (let i = 0; i <= 40; i++) { const pos = (tailC + (tipC - tailC) * i / 40) / ski.length; try { sum += computeEIAtStation(getWidthAtPos(ski, pos), getCoreThickAt(ski.coreProfile, pos), ski.layup).EI; n++; } catch (e) {} }
+  for (let i = 0; i <= 40; i++) { const pos = (tailC + (tipC - tailC) * i / 40) / ski.length; try { sum += computeEIAtStation(getWidthAtPos(ski, pos), getCoreThickAt(ski.coreProfile, pos), ski.layup, undefined, coreHalfAt(ski, getWidthAtPos(ski, pos))).EI; n++; } catch (e) {} }
   const EImodel = n ? sum / n : 1;
   return EImodel > 0 ? Math.max(0.2, Math.min(5, EImeas / EImodel)) : 1;
 }
@@ -990,7 +1018,7 @@ function computeFlexProfile(ski){
   const N=250,stations=[];
   for(let i=0;i<=N;i++){
     const pos=i/N,w=getWidthAtPos(ski,pos),ct=getCoreThickAt(ski.coreProfile,pos);
-    const r=computeEIAtStation(w,ct,ski.layup,insertLayersAt(ski,pos));
+    const r=computeEIAtStation(w,ct,ski.layup,insertLayersAt(ski,pos),coreHalfAt(ski,w));
     const ei=r.EI*cal,gj=r.GJ*calT;
     stations.push({pos,xmm:pos*ski.length,width:w,coreThick:ct,ei,gj,kCant:3*ei/(1e6)});
   }
@@ -999,7 +1027,7 @@ function computeFlexProfile(ski){
   for(let i=0;i<=N;i++){
     const x=i*dx,m=(x<=span/2)?x/2:(span-x)/2;
     const pos=(tailStart+x)/ski.length;
-    const ei=computeEIAtStation(getWidthAtPos(ski,pos),getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos)).EI*cal;
+    const wq=getWidthAtPos(ski,pos),ei=computeEIAtStation(wq,getCoreThickAt(ski.coreProfile,pos),ski.layup,insertLayersAt(ski,pos),coreHalfAt(ski,wq)).EI*cal;
     const f=ei>0?(m*m)/ei:0;integral+=(i===0||i===N?0.5:1.0)*f*dx;
   }
   const k3pt=integral>0?1/integral:0;
@@ -2954,7 +2982,13 @@ function applyVCutToCore(ski) {  const L = ski.length;
   const effHalf = Math.max(1, (tipContactX - tailContactX) / 2);
   const tipExt = vTip ? Math.max(-effHalf * 0.9, Math.min(ski.tipLength, ski.vcutTipExt || 0)) : 0;
   const tailExt = vTail ? Math.max(-effHalf * 0.9, Math.min(ski.tailLength, ski.vcutTailExt || 0)) : 0;
+  // Core half-width on each side = the REAL plan outline's half-width on that side, minus the core inset. Using
+  // the outline (not the symmetric width function) keeps asymmetric sidecuts right on both sides and follows the
+  // nose/tail curve where the core runs past the contacts. Falls back to the width function if the outline fails.
+  let _plan = null; try { _plan = getFullOutlinePoints(ski); } catch (e) { _plan = null; }
+  const sideHW = (xmm) => { if (!_plan || _plan.length < 3) return null; let pos = -1e9, neg = 1e9; for (let i = 0; i < _plan.length; i++) { const a = _plan[i], b = _plan[(i + 1) % _plan.length]; if ((a.y - xmm) * (b.y - xmm) <= 0 && a.y !== b.y) { const t = (xmm - a.y) / (b.y - a.y), x = a.x + t * (b.x - a.x); if (x > pos) pos = x; if (x < neg) neg = x; } } return (pos > -1e8 && neg < 1e8) ? [pos, -neg] : null; };
   const hwAt = (xmm) => Math.max(1.0, getWidthAtPos(ski, xmm / L) / 2 - coreInset);
+  const hwSide = (xmm, s) => { const h = sideHW(xmm); return h ? Math.max(1.0, (s > 0 ? h[0] : h[1]) - coreInset) : hwAt(xmm); };
 
   // Sample the core rails only within the (possibly clipped) X range.
   const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
@@ -2987,9 +3021,8 @@ function applyVCutToCore(ski) {  const L = ski.length;
   const rightRail = [], leftRail = [];
   for (let i = 0; i <= N; i++) {
     const xmm = xStart + (xEnd - xStart) * (i / N);
-    const hw = hwAt(xmm);
-    rightRail.push({ x: xmm, y: hw });
-    leftRail.push({ x: xmm, y: -hw });
+    rightRail.push({ x: xmm, y: hwSide(xmm, 1) });
+    leftRail.push({ x: xmm, y: -hwSide(xmm, -1) });
   }
 
   // Build the closed loop. Order: right rail (tail→tip), tip cap, left rail (tip→tail), tail cap.
@@ -3577,7 +3610,7 @@ function layupStack(ski) {
       const L = lu.stack[i];
       if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
       else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: (L.thick != null ? L.thick : 1.2), count: 1 }); }
-      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const nm = ws.length > 1 ? (ws.map(w => (CORE_MATERIALS[w.mat] || {}).name || "Wood").join(" + ") + " core") : (((CORE_MATERIALS[ws[0].mat] || WOODS.poplar).name || "Wood") + " core"); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
+      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const stq = coreStrips(L); const nm = stq ? (stq.length + "-strip core: " + stq.map(s => (CORE_MATERIALS[s.mat] || {}).name || "Wood").join(" / ")) : ws.length > 1 ? (ws.map(w => (CORE_MATERIALS[w.mat] || {}).name || "Wood").join(" + ") + " core") : (((CORE_MATERIALS[ws[0].mat] || WOODS.poplar).name || "Wood") + " core"); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
       else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; St.push({ role: "veneer", name: (w.name || "Wood") + " veneer \u00B7 " + (L.thick != null ? L.thick : 0.6) + "mm", thick: (L.thick != null ? L.thick : 0.6), count: 1 }); }
       else if (L.kind === "vds") { St.push({ role: "vds", name: "VDS rubber \u00B7 " + (L.thick != null ? L.thick : 0.2) + "mm", thick: (L.thick != null ? L.thick : 0.2), count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
@@ -3716,7 +3749,7 @@ function buildCoreCAM(ski, opt) {
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth", "insToolDia", "insFeed", "insPlunge", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -3758,13 +3791,21 @@ function buildCoreCAM(ski, opt) {
   const P = s => { if (s === "") { G.push(""); return; } if (pst.lineNum) { G.push("N" + lineNo + " " + s); lineNo += 10; } else G.push(s); };
   const PC = t => G.push(pst.comment === "()" ? "(" + String(t).replace(/[()]/g, "") + ")" : "; " + t);
   const PB = () => G.push("");
-  const toolChange = n => { if (pst.tc === "manual") { P("M5"); PC("TOOL CHANGE -> T" + n + " - resume when ready"); P("M0"); } else if (pst.tc === "m6t") P("M6 T" + n); else P("T" + n + " M6"); };
+  let curTool = null;
+  const toolChange = n => { curTool = n; if (pst.tc === "manual") { P("M5"); PC("TOOL CHANGE -> T" + n + " - resume when ready"); P("M0"); } else if (pst.tc === "m6t") P("M6 T" + n); else P("T" + n + " M6"); };
+  // Switch tools only when the tool number actually changes (no pointless pause), then restart the spindle.
+  const useTool = n => { if (n === curTool) return; P(`G0 Z${f(safeZ)}`); toolChange(n); if (!o.baseOp) P(`S${o.spindle} M3`); };
   let cuts = 0, rapids = 0, cutDist = 0, minZ = 1e9, maxZ = -1e9;
   let minCX = 1e9, maxCX = -1e9, minCY = 1e9, maxCY = -1e9;   // cut extents → required stock size
   const tk = z => { minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); };
   // Part orientation: which machine axis the ski LENGTH runs along. "y" (default) puts length on the
   // long bed axis (portrait). Emit swaps X/Y accordingly so the preview and the machine always agree.
-  const emitXY = (x, y) => { const sx = x + originShiftLen, sy = y + originShiftWid; const p = o.partAxis === "x" ? [sx, sy] : [sy, sx]; return [p[0] + (o.offsetX || 0) + cOffX, p[1] + (o.offsetY || 0) + cOffY]; };
+  // Lateral sign. Internal coords are (x = along, y = lateral). Length along machine Y outputs (lateral, along),
+  // which puts the part on the table exactly as drawn in the plan view. Length along machine X must be a true
+  // 90-degree ROTATION of that, (along, -lateral); outputting (along, lateral) would cut the mirror image of an
+  // asymmetric board. The bottom face (blank turned over about its long axis) adds one more mirror.
+  const latSgn = (o.bottomSide ? -1 : 1) * (o.partAxis === "x" ? -1 : 1);
+  const emitXY = (x, y) => { const sx = x + originShiftLen, sy = latSgn * y + originShiftWid; const p = o.partAxis === "x" ? [sx, sy] : [sy, sx]; return [p[0] + (o.offsetX || 0) + cOffX, p[1] + (o.offsetY || 0) + cOffY]; };
   const tkC = (mx, my) => { if (mx < minCX) minCX = mx; if (mx > maxCX) maxCX = mx; if (my < minCY) minCY = my; if (my > maxCY) maxCY = my; };
   const g0 = (x, y) => { const [mx, my] = emitXY(x, y); P(`G0 X${f(mx)} Y${f(my)}`); rapids++; };
   const g0z = z => { P(`G0 Z${f(z)}`); tk(z); };
@@ -3800,6 +3841,12 @@ function buildCoreCAM(ski, opt) {
     cOffX = Math.max(0, (stockMX - partMX) / 2);
     cOffY = Math.max(0, (stockMY - partMY) / 2);
   }
+  // Two-sided (pin-registered) work: EVERY op zeroes X/Y on the centre of the tail-side dowel hole, on the ski
+  // centreline, so the bottom-side op and the top-side ops share one physical zero after the blank is flipped
+  // onto pins. Overrides the per-op corner/centre origin and stock centring above.
+  if (latSgn < 0) originShiftWid = o.origin === "corner" ? sy1 : (sy0 + sy1) / 2;   // origin from the sign-flipped lateral extents
+  let pinTail = null;
+  if (o.pinOrigin) { const ah = alignHoles(ski); if (ah.length) { pinTail = ah.reduce((a, b) => (b.y < a.y ? b : a)); originShiftLen = -pinTail.y; originShiftWid = 0; cOffX = 0; cOffY = 0; } }
   const dv = n => inch ? (+n.toFixed(3)) : Math.round(n);
   // Required thickness: blanks/sheets for cut ops = stock; mold blank = surface span + a solid base.
   const moldBase = 12;                                                   // mm of base left under the deepest cut
@@ -3820,10 +3867,11 @@ function buildCoreCAM(ski, opt) {
   }
   if (o.doPerimeter) PC(`Outline: ${o.perimDir} milling, ${o.rampEntry ? "ramp entry " + disp.rampLen + " " + uu : "straight plunge"}`);
   PC(`Part orientation: length along ${o.partAxis === "x" ? "X" : "Y"} axis`);
-  PC(`Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
+  PC(pinTail ? "Origin: X0 Y0 = centre of the TAIL dowel hole, on the ski centreline (two-sided, pin-registered)" : `Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
-  toolChange(o.toolNum); P(o.baseOp ? "M5" : `S${o.spindle} M3`); if (o.baseOp) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
+  if (o.bottomSide) PC("BOTTOM FACE UP. Sections run in order: dowel holes, insert bores, outer profile. Each loads its own tool.");
+  if (!o.bottomSide) { toolChange(o.toolNum); P(o.baseOp ? "M5" : `S${o.spindle} M3`); } if (o.baseOp) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
     let minTop = 1e9; for (let x = 0; x <= L; x += 5) minTop = Math.min(minTop, topH(x));
@@ -3916,7 +3964,8 @@ function buildCoreCAM(ski, opt) {
   if (o.baseOp) {
     emitDragKnife(baseEdge, baseLbl);
   }
-  if (o.doPerimeter) {
+  const runPerimeter = () => {
+    if (o.bottomSide) { useTool(o.toolNum); PB(); PC("===== OUTER PROFILE (bottom face up; cut last, it frees the core) ====="); }
     let path = core;
     if (o.perimeterSide === "outside") path = offsetPolygonOutward(core, R);
     else if (o.perimeterSide === "inside") path = offsetPolygonInward(core, R);
@@ -3925,6 +3974,10 @@ function buildCoreCAM(ski, opt) {
     let area = 0; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length]; area += a.x * b.y - b.x * a.y; }
     const isCCW = area > 0, outside = o.perimeterSide !== "inside";
     let wantCCW = o.perimDir === "climb" ? outside : !outside; if (!o.spindleCW) wantCCW = !wantCCW;
+    // The rule above is in internal coords; both part orientations output through one reflection of that frame, so
+    // on the machine (M3, clockwise spindle) climb = clockwise travel around an outside profile. The bottom-face
+    // mirror adds a second reflection, which reverses the loop, so compensate there.
+    if (o.bottomSide) wantCCW = !wantCCW;
     if (isCCW !== wantCCW) path = path.slice().reverse();
     // densify so the ramp Z and tabs sample smoothly along long offset segments
     { const dstep = 4, dp = []; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < n; j++) { const t = j / n; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } path = dp; }
@@ -3950,7 +4003,8 @@ function buildCoreCAM(ski, opt) {
       for (let i = 1; i < verts.length; i++) { const v = verts[i]; g1(v.x, v.y, zAtRun(v.run)); cutDist += Math.abs(v.run - pr); pr = v.run; }
       g0z(safeZ);
     }
-  }
+  };
+  if (o.doPerimeter && !o.bottomSide) runPerimeter();
   if (o.slatPolys && o.slatPolys.length) {
     PB(); PC("===== MOLD SLATS (camber/rocker ribs cut through sheet) =====");
     const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown));
@@ -3989,27 +4043,69 @@ function buildCoreCAM(ski, opt) {
       PC(`${nHoles} holes drilled (travel-optimised)`);
     }
   }
-  if (o.borePts && o.borePts.length) {
-    PB(); PC(`===== BORING - insert holes (${f(o.boreDia)} ${uu} dia x ${f(o.boreDepth)} ${uu} deep) =====`);
-    const hr = Math.max(0, (o.boreDia - o.toolDia) / 2);
-    const topZ = o.stockThick, botZ = o.stockThick - o.boreDepth;   // blind hole, depth measured from stock top
+  const runBores = () => { if (!(o.borePts && o.borePts.length)) return;
+    // Insert bores, cut from the BOTTOM of the core. Inserts go in from the bottom so the flange bears against
+    // the pull of the binding screw. Run this on the flat blank, bottom face up, BEFORE the top is tapered
+    // (a tapered core can't lie flat upside down); then flip the blank about its LONG axis onto the pins.
+    // That flip mirrors the lateral coordinate, so every lateral position here is negated. Depths are measured
+    // from the top of the blank, which is the core's bottom face. All insert dimensions come from the builder.
+    const need = (v, what) => { if (!(v > 0)) throw new Error("Insert bores need " + what + "."); return v; };
+    const bTool = o.insToolNum != null ? o.insToolNum : o.toolNum, bFeed = o.insFeed || o.feed, bPlunge = o.insPlunge || o.plunge;
+    const Rb = need(o.insBarrelDia, "the barrel hole diameter") / 2, Rt = (o.insToolDia || o.toolDia) / 2;
+    const prof0 = o.insFlangeProfile || "flat", hasF = prof0 !== "none";
+    const Rf = hasF ? need(o.insFlangeDia, "the flange diameter") / 2 : 0, df = hasF ? need(o.insFlangeDepth, "the flange pocket depth") : 0;
+    const Rcb = prof0 === "cone" ? need(o.insConeBotDia, "the cone's diameter at the bottom of the flange") / 2 : Rf;
+    const so = hasF ? need(o.insStepover, "a pocket stepover") : 0, cStep = prof0 === "cone" ? need(o.insConeStep, "a cone step height") : 0;
+    if (Rt > Rb + 1e-6) throw new Error("The tool is wider than the barrel hole.");
+    if (hasF && Rf <= Rb) throw new Error("The flange diameter must be larger than the barrel diameter.");
+    if (hasF && so >= 2 * Rt) throw new Error("The pocket stepover must be smaller than the tool diameter, or ridges are left uncut.");
+    if (prof0 === "cone" && !(Rcb >= Rb && Rcb < Rf)) throw new Error("The cone's bottom diameter must be between the barrel and flange diameters.");
+    const tZ = o.stockThick, segs = 36;
+    const circle = (cx, cy, r, z) => { for (let s = 1; s <= segs; s++) { const a = (s / segs) * 2 * Math.PI; g1(cx + r * Math.cos(a), cy + r * Math.sin(a), z, bFeed); } };
+    const bz = z => { P(`G1 Z${f(z)} F${f(bPlunge)}`); tk(z); };
+    useTool(bTool);
+    PB(); PC("===== INSERT BORES - BOTTOM SIDE (flat blank, bottom face up; run before the top taper) =====");
+    PC(`barrel ${f(2 * Rb)} x ${o.insBarrelMode === "through" ? "through the finished core" : f(o.insBarrelDepth) + " deep"}` + (hasF ? `, flange ${prof0} ${f(2 * Rf)}${prof0 === "cone" ? " to " + f(2 * Rcb) : ""} x ${f(df)} deep` : ", no flange pocket"));
+    if (o.bottomSide) PC("Lateral positions are mirrored for the bottom face (blank turned over about its long axis).");
     o.borePts.forEach((h, i) => {
+      const ax = h.x, lat = h.y;   // bottom-face mirroring is applied when coordinates are emitted
       PC(`-- insert ${i + 1}/${o.borePts.length} --`);
-      if (hr < 0.15 || !o.boreHelix) {
-        // straight plunge (bit ~ hole size), stepped for chip clearing
-        g0(h.x, h.y); g0z(MZ(topZ + 1));
-        let z = topZ; while (z > botZ + 1e-6) { z = Math.max(botZ, z - o.stepdown); g1z(MZ(z)); }
-        g0z(safeZ);
-      } else {
-        // helical bore: spiral down at radius hr, then a clean-up circle at depth
-        const segs = 24, turns = Math.max(2, Math.ceil((topZ - botZ) / 1.2)), dz = (topZ - botZ) / (turns * segs);
-        g0(h.x + hr, h.y); g0z(MZ(topZ + 0.5)); let z = topZ;
-        for (let t = 0; t < turns; t++) for (let s = 1; s <= segs; s++) { const a = (s / segs) * 2 * Math.PI; z -= dz; g1(h.x + hr * Math.cos(a), h.y + hr * Math.sin(a), MZ(z)); }
-        for (let s = 1; s <= segs; s++) { const a = (s / segs) * 2 * Math.PI; g1(h.x + hr * Math.cos(a), h.y + hr * Math.sin(a), MZ(botZ)); }
-        g1(h.x + hr, h.y, MZ(botZ)); g0z(safeZ);
+      if (hasF) {
+        // Clear the flange pocket level by level. Flat: full-diameter levels at the stepdown. Cone: stepped
+        // terraces, each cleared to the cone's radius at the bottom of that terrace so nothing is overcut.
+        const lv = [];
+        if (prof0 === "cone") { const n = Math.max(1, Math.ceil(df / cStep)); for (let k = 1; k <= n; k++) lv.push(Math.min(df, k * cStep)); }
+        else { const n = Math.max(1, Math.ceil(df / Math.max(0.1, o.stepdown))); for (let k = 1; k <= n; k++) lv.push(df * k / n); }
+        g0(ax, lat); g0z(MZ(tZ + 1));
+        for (const d of lv) {
+          const wallR = prof0 === "cone" ? Rf + (Rcb - Rf) * (d / df) : Rf, rc = wallR - Rt, z = MZ(tZ - d);
+          if (rc < -1e-6) throw new Error("The tool is wider than the flange pocket at depth " + f(d) + ".");
+          g1(ax, lat, z, bPlunge);
+          // Concentric rings out from the centre plunge. Adjacent rings (and the centre plunge) overlap because
+          // the stepover is checked to be less than the tool diameter; the last ring sits exactly on the wall.
+          const rings = []; for (let r = so; r < rc - 1e-6; r += so) rings.push(r); if (rc > 0.05) rings.push(rc);
+          for (const r of rings) { g1(ax + r, lat, z, bFeed); circle(ax, lat, r, z); }
+          g1(ax, lat, z, bFeed);
+        }
       }
+      // Barrel hole from the flange floor down. "through" = the finished core thickness at this point (the top
+      // taper exposes the hole); otherwise the builder's depth. Helical when the hole is wider than the tool.
+      const bD = o.insBarrelMode === "through" ? getCoreThickAt(prof, Math.min(1, Math.max(0, ax / L))) : need(o.insBarrelDepth, "a barrel hole depth");
+      if (bD > tZ + 1e-6) throw new Error("The barrel hole is deeper than the blank.");
+      const zS = tZ - df, zE = tZ - bD, orb = Rb - Rt;
+      if (zE < zS - 1e-6) {
+        if (orb < 0.05) { g0(ax, lat); g0z(MZ(zS + 1)); let z = zS; while (z > zE + 1e-6) { z = Math.max(zE, z - Math.max(0.1, o.stepdown)); bz(MZ(z)); } }
+        else {
+          g0(ax + orb, lat); g0z(MZ(zS + 1));
+          const depth = zS - zE, turns = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown))), tot = turns * segs;
+          for (let s = 1; s <= tot; s++) { const a = (s / segs) * 2 * Math.PI; g1(ax + orb * Math.cos(a), lat + orb * Math.sin(a), MZ(zS - depth * s / tot), bFeed); }
+          circle(ax, lat, orb, MZ(zE));
+        }
+      }
+      g0z(safeZ);
     });
-  }
+  };
+  if (!o.bottomSide) runBores();
   if (o.doPocket) {
     PB(); PC(`===== POCKET (raster clear, ${f(o.pocketDepth)} ${uu} deep) =====`);
     const cxL = (o.pocketCenterX != null ? o.pocketCenterX : 0.5) * L, r = o.toolDia / 2;
@@ -4038,7 +4134,7 @@ function buildCoreCAM(ski, opt) {
   // dowels glued to the base. CAM's internal axes are (x = length, y = width), so swap from the (lateral,
   // along) hole coords. Tool number + diameter come from the CAM options; the hole diameter is the design's
   // dowel size. A smaller bit helical-bores a larger hole (a 1/4" bit opening a 1/2" dowel hole). ──
-  if (o.drillAlign) {
+  const runDowels = () => {
     const aholes = alignHoles(ski);
     if (aholes.length) {
       const holeD = (ski.alignDowelDia || 12.7);         // design value, already mm
@@ -4047,10 +4143,8 @@ function buildCoreCAM(ski, opt) {
       const aToolDisp = inch ? +(aToolD / 25.4).toFixed(4) : aToolD;
       const orbitR = Math.max(0, holeD / 2 - aToolD / 2);
       PB(); PC("===== ALIGNMENT DOWEL HOLES (" + (ski.alignDowelDia || 12.7) + " mm, " + (orbitR > 0.2 ? "helical bore" : "plunge") + ") =====");
-      P(`G0 Z${f(safeZ)}`);
-      toolChange(aTool); PC("Dowel-hole tool: " + aToolDisp + " " + uu + " endmill");
-      if (!o.baseOp) P(`S${o.spindle} M3`);
-      const zTop = MZ(o.stockThick), zBot = MZ(-(inch ? 0.04 : 1)), segs = 24;
+      useTool(aTool); PC("Dowel-hole tool: " + aToolDisp + " " + uu + " endmill");
+      const zTop = MZ(o.stockThick), zBot = MZ(-(o.alignPinDepth != null ? o.alignPinDepth : 1)), segs = 24;   // alignPinDepth is mm: how far into the spoilboard, for the registration pins
       aholes.forEach(h => {
         const along = h.y, lat = h.x;               // CAM x = along-length, y = lateral
         if (orbitR <= 0.2) { g0(along, lat); g0z(zTop); P(`G1 Z${f(zBot)} F${f(o.plunge)}`); tk(zBot); cuts++; }
@@ -4063,7 +4157,11 @@ function buildCoreCAM(ski, opt) {
         P(`G0 Z${f(safeZ)}`);
       });
     }
-  }
+  };
+  // Bottom face (two-sided): dowels first (registration for everything after), then the insert bores while the
+  // blank is still whole, then the outer profile last because it frees the core. Top-side ops keep their order.
+  if (o.bottomSide) { if (o.drillAlign) runDowels(); runBores(); if (o.doPerimeter) runPerimeter(); }
+  else if (o.drillAlign) runDowels();
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
   let _gc = G.join("\n"), _lines = G.length;
   if (o.arcOut) { const dec = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); _gc = arcFitGcode(_gc, 0.02 / uL, dec, pst.lineNum); _lines = _gc.split("\n").length; }
@@ -7952,7 +8050,7 @@ const CAM_LEN_KEYS = [
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
   "slatHoleDia", "slatHoleH", "slatHoleSpacing", "slatHoleEndZone",
-  "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY",
+  "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth",
   "pocketL", "pocketW", "pocketDepth", "pocketCenterY",
   "roughStepover", "roughStepdown", "finishAllowance",
   "tabHeight", "tabLen", "rampLen",
@@ -8552,6 +8650,8 @@ export default function App() {
     const matRow = (nm, qty, cut, total) => `<tr><td>${esc(nm)}</td><td class="c">${qty}</td><td class="c">${cut}</td><td class="v">${total}</td></tr>`;
     let matRows = Object.values(agg).map(g => matRow(g.nm, `${g.count} \u00d7 layer`, g.cut, g.area.toFixed(2) + " m\u00b2")).join("");
     if (bom.blank) matRows += matRow("Wood core blank", "1", `${bom.blank.L} \u00d7 ${bom.blank.W} \u00d7 ${bom.blank.T} mm`, (bom.coreVolL || 0).toFixed(2) + " L");
+    { const coreL = ((ski.layup && ski.layup.stack) || []).find(l => l.kind === "core"), stq = coreStrips(coreL);
+      if (stq && bom.blank) stq.forEach((s, i) => { matRows += matRow(`  Strip ${i + 1}: ${(CORE_MATERIALS[s.mat] || {}).name || s.mat}`, "1", `${bom.blank.L} \u00d7 ${Math.round((s.width || 0) * 10) / 10} \u00d7 ${bom.blank.T} mm`, "\u2014"); }); }
     matRows += matRow("Base (P-Tex)", "1", `${mL} \u00d7 ${mW} mm`, areaEach.toFixed(2) + " m\u00b2");
     matRows += matRow("Steel edge", `${(bom.edgeLenM || 0).toFixed(2)} m`, (bom.edgeWrap === "contact" ? "contact\u2013contact" : "full wrap"), "\u2014");
     if (bom.sidewallMassKg > 0) { const runLen = Math.max(0, ski.length - ski.tipLength - ski.tailLength); matRows += matRow("Sidewall strips", "2", `${Math.round(runLen)} mm each`, "\u2014"); }
@@ -8613,7 +8713,7 @@ export default function App() {
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
-      boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
+      boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional" };
     try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
@@ -8673,26 +8773,39 @@ export default function App() {
     }
     return out;
   }, [ski, camOpt.op, camOpt.slatBase, camOpt.slatOverlap, camOpt.slatSections, camOpt.slatCopies, camOpt.slatSheetW, camOpt.units]);
+  // Insert positions for the Bore op come from the DESIGN: the snowboard insert packs (stance, setback, pattern)
+  // and any binding-mount inserts. {x: along the ski from the tail, y: lateral} in mm. "grid" keeps the older
+  // manual grid for anything the design doesn't describe.
+  const designInsertPts = useMemo(() => {
+    const pts = [];
+    try { const ins = computeInserts(ski); (ins.holes || []).forEach(h => pts.push({ x: h.y, y: h.x })); } catch (e) {}
+    try { const mg = mountGeometry(ski); if (mg && mg.m.inserts) mg.boots.forEach(bt => bt.holes.forEach(h => pts.push({ x: h.y, y: h.x }))); } catch (e) {}
+    return pts;
+  }, [ski]);
+  // Where the alignment dowels are drilled: in the first (bottom-side) op when the design has inserts, so the
+  // blank can be flipped onto pins; otherwise with the core profile, as before. The builder can override.
+  const alignDrillOp = camOpt.alignDrillOp || (designInsertPts.length ? "bore" : "outline");
   const borePts = useMemo(() => {
     if (camOpt.op !== "bore") return null;
+    if ((camOpt.boreSrc || "design") === "design") return designInsertPts;
     const L = ski.length, uLm = camOpt.units === "inch" ? 25.4 : 1;
     const cx = (camOpt.boreCenter != null ? camOpt.boreCenter : 0.5) * L, spx = camOpt.boreSpaceX * uLm, spy = camOpt.boreSpaceY * uLm;
     const cols = Math.max(1, Math.round(camOpt.boreCols || 1)), rows = Math.max(1, Math.round(camOpt.boreRows || 1));
     const pts = [];
     for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) pts.push({ x: cx + (i - (cols - 1) / 2) * spx, y: (j - (rows - 1) / 2) * spy });
     return pts;
-  }, [ski.length, camOpt.op, camOpt.boreCenter, camOpt.boreSpaceX, camOpt.boreSpaceY, camOpt.boreCols, camOpt.boreRows, camOpt.units]);
+  }, [ski.length, camOpt.op, camOpt.boreSrc, camOpt.boreCenter, camOpt.boreSpaceX, camOpt.boreSpaceY, camOpt.boreCols, camOpt.boreRows, camOpt.units, designInsertPts]);
   const camResult = useMemo(() => {
     try {
-      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY };
+      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!(camOpt.pinOrigin && ski.alignMarks), alignPinDepth: camOpt.alignPinDepth };
       const opt = camOpt.op === "outline"
-        ? { ...b, doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks, alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
+        ? { ...b, bottomSide: camOpt.outlineSide === "bottom", doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks && alignDrillOp === "outline", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
         ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
         : camOpt.op === "bore"
-        ? { ...b, doProfile: false, doPerimeter: false, borePts, toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge, boreDia: camOpt.boreDia, boreDepth: camOpt.boreDepth, boreHelix: camOpt.boreHelix }
+        ? { ...b, bottomSide: true, doProfile: false, doPerimeter: !!camOpt.boreWithProfile, borePts, ...(camOpt.boreWithProfile ? { toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen } : { toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge }), insToolNum: camOpt.boreToolNum, insToolDia: camOpt.boreToolDia, insFeed: camOpt.boreFeed, insPlunge: camOpt.borePlunge, insBarrelDia: camOpt.insBarrelDia, insFlangeProfile: camOpt.insFlangeProfile, insFlangeDia: camOpt.insFlangeDia, insFlangeDepth: camOpt.insFlangeDepth, insConeBotDia: camOpt.insConeBotDia, insConeStep: camOpt.insConeStep, insStepover: camOpt.insStepover, insBarrelMode: camOpt.insBarrelMode, insBarrelDepth: camOpt.insBarrelDepth, drillAlign: !!ski.alignMarks && alignDrillOp === "bore", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "base"
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
@@ -8700,7 +8813,7 @@ export default function App() {
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
-  }, [ski, camOpt, slatPolys, borePts]);
+  }, [ski, camOpt, slatPolys, borePts, alignDrillOp]);
   const downloadCAM = useCallback(() => {
     downloadFile(camResult.gcode, `bcs-core-${camOpt.op}-${ski.length}mm-${camOpt.units}.${(camResult.stats && camResult.stats.ext) || "nc"}`, "text/plain");
   }, [camResult, ski.length, camOpt.op, camOpt.units]);
@@ -8724,7 +8837,7 @@ export default function App() {
   const openSetupSheet = useCallback(() => {
     const s = camResult.stats; if (!s) return;
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
-    const opName = { outline: "Core profile (perimeter)", taper: "Core taper", mold: "Mold surfacing", slat: "Slat molds", bore: "Insert bores", pocket: "Pocket" }[camOpt.op] || camOpt.op;
+    const opName = { outline: "Core profile (perimeter)", taper: "Core taper", mold: "Mold surfacing", slat: "Slat molds", bore: "Insert bores (bottom side, run first)", pocket: "Pocket" }[camOpt.op] || camOpt.op;
     const post = (POST_PROFILES[camOpt.postKey] || {}).name || camOpt.postKey;
     const tool = `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
     const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
@@ -8734,12 +8847,39 @@ export default function App() {
     const so = camOpt.op === "outline" || camOpt.op === "slat" || camOpt.op === "bore";
     rows.push([so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`], ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
     if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
-    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin — every move is positive).`, `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const pinOn = !!(camOpt.pinOrigin && ski.alignMarks);
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? (camOpt.op === "bore" ? `Before anything else: jog to where you want the TAIL-side dowel hole, on the lengthwise centreline of the blank, and zero X and Y there. The toolpath is laid out from that point.` : `Zero X and Y on the centre of the TAIL-side dowel pin (the same point as the Bore op). Do not re-zero anywhere else.`) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centreline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
+    const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
+    const ahS = ski.alignMarks ? alignHoles(ski) : [];
+    const pinMaxS = ahS.length ? Math.min(...ahS.map(h => getCoreThickAt(ski.coreProfile, Math.min(1, Math.max(0, h.y / ski.length))))) : null;
+    const pinLine = pinMaxS != null ? `Put the registration pins in the spoilboard holes. They must stand NO TALLER than ${cvS(pinMaxS)} ${uu} above the spoilboard (the finished core thickness at the dowels), or the taper cutter will hit them.` : "Put the registration pins in the spoilboard holes.";
+    const flipLine = "Turn the core over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it TOP FACE UP on the pins. Hold it down with clamps, vacuum or tape: the pins locate it but don't hold it.";
+    if (camOpt.op === "bore") {
+      const tl = [];
+      if (ski.alignMarks && alignDrillOp === "bore") tl.push(`T${camOpt.alignToolNum} dowel holes`);
+      tl.push(`T${camOpt.boreToolNum} insert bores and flange pockets`);
+      if (camOpt.boreWithProfile) tl.push(`T${camOpt.outlineToolNum} outer profile (Core Profile tab settings)`);
+      rows.push(["Tools in this file", tl.join(", then ")]);
+      steps.splice(0, 0, "This is OP 1 of the two-sided workflow. Lay the FLAT blank with the core's BOTTOM face up.");
+      steps.splice(2, 1, `Load the tools in order: ${tl.join(", then ")}. The program pauses or calls each tool change.`);
+      steps.push("What this file cuts, in order: " + [ski.alignMarks && alignDrillOp === "bore" ? "dowel holes through the blank into the spoilboard" : null, "insert bores and flange pockets", camOpt.boreWithProfile ? "the outer profile last, which frees the core" : null].filter(Boolean).join(", then ") + ".");
+      steps.push("Afterwards: remove the core and glue on the sidewalls.");
+      steps.push(pinLine);
+      steps.push(flipLine);
+      steps.push(camOpt.boreWithProfile ? "Then run OP 2 (Core Taper tab) with the same X/Y zero." : "Then run the Core Profile tab (Bottom face) in this same setup, before removing anything. After the sidewalls, run OP 2 (Core Taper tab) with the same X/Y zero.");
+    } else if (pinOn && camOpt.op === "taper") {
+      steps.splice(0, 1, "This is OP 2 of the two-sided workflow. The core has been profiled in op 1 and its sidewalls glued on.", pinLine, flipLine);
+    } else if (pinOn && camOpt.op === "outline" && camOpt.outlineSide === "bottom") {
+      steps.splice(0, 0, "Bottom-face profile, run as its own file: same setup as the Bore op (bottom face up, same zero), immediately after it.");
+    } else if (pinOn && camOpt.op === "outline") {
+      steps.splice(0, 1, "Top-face profile after the flip.", pinLine, flipLine);
+    }
     const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">{t("study.print", "Print / Save PDF")}</button></body></html>`;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); } else downloadFile(html, `setup-${camOpt.op}-${ski.length}mm.html`, "text/html");
-  }, [camResult, camOpt, camMachine, ski]);
+  }, [camResult, camOpt, camMachine, ski, alignDrillOp]);
   const camLabel = { color: C.label, fontSize: 11, marginBottom: 3, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 };
   const camSmall = { color: C.labelDim, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" };
   const camInput = { width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 7px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" };
@@ -10276,7 +10416,69 @@ export default function App() {
                             const addWood = () => { const used = ws.map(w => w.mat); const avail = woodKeys.find(k => !used.includes(k)) || "poplar"; const nw = [...ws.map(x => ({ ...x })), { mat: avail }]; const eq = Math.floor(100 / nw.length); nw.forEach((x, i) => x.pct = i === nw.length - 1 ? 100 - eq * (nw.length - 1) : eq); commit(nw); };
                             const removeWood = wi => { const nw = ws.filter((_, i) => i !== wi).map(x => ({ ...x })); if (nw.length === 1) nw[0].pct = 100; else { const sum = nw.reduce((a, x) => a + (x.pct || 0), 0) || 1; let alloc = 0; nw.forEach((x, i) => { if (i === nw.length - 1) x.pct = 100 - alloc; else { x.pct = Math.round((x.pct || 0) / sum * 100); alloc += x.pct; } }); } commit(nw); };
                             const multi = ws.length > 1;
+                            const stripOn = !!L.stripMode;
+                            const modeBtn = (on, lab, click) => <button onClick={click} style={{ padding: "3px 9px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", borderRadius: 3, cursor: "pointer", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}` }}>{lab}</button>;
+                            // Core width the strips must cover: the widest point of the actual core outline.
+                            let corePoly = []; try { corePoly = applyVCutToCore(ski) || []; } catch (e) {}
+                            const needW = corePoly.length ? Math.ceil(2 * Math.max(...corePoly.map(q => Math.abs(q.y)))) : 0;
+                            const strips = (L.strips && L.strips.length) ? L.strips : [{ mat: ws[0].mat, width: needW || 100 }];
+                            const setStrips = ns => upd(idx, { strips: ns, stripMode: true });
+                            const totW = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0);
+                            const setCount = n => { const k = Math.max(1, Math.min(41, Math.round(n) || 1)); const ns = strips.slice(0, k).map(s => ({ ...s })); while (ns.length < k) ns.push({ ...ns[ns.length - 1] }); setStrips(ns); };
+                            const setStrip = (si, patch) => setStrips(strips.map((s, i) => i === si ? { ...s, ...patch } : { ...s }));
+                            const moveStrip = (si, d) => { const j = si + d; if (j < 0 || j >= strips.length) return; const ns = strips.map(s => ({ ...s })); const t = ns[si]; ns[si] = ns[j]; ns[j] = t; setStrips(ns); };
+                            const equalize = () => { if (!needW) return; const wEach = Math.round((needW / strips.length) * 10) / 10; setStrips(strips.map(s => ({ ...s, width: wEach }))); };
+                            const woodCol = k => { const pal = ["#c8935a", "#e8d3a8", "#8a5a3a", "#b8a070", "#6e4a2e", "#d9b98a", "#a07850", "#f0e0c0", "#5a3a22", "#caa46a"]; const i = woodKeys.indexOf(k); return pal[(i < 0 ? 0 : i) % pal.length]; };
+                            const stripEditor = (() => {
+                              const xs = corePoly.map(q => q.x), minX = xs.length ? Math.min(...xs) : 0, maxX = xs.length ? Math.max(...xs) : ski.length;
+                              const hwMax = Math.max(needW / 2, totW / 2, 1), spanX = Math.max(1, maxX - minX);
+                              const sp = stripSpans(strips), clipId = "coreclip-" + (L.id || idx);
+                              const polyPts = corePoly.map(q => `${(q.x - minX).toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+                              const used = [...new Set(strips.map(s => s.mat))];
+                              return (
+                                <div style={{ flexBasis: "100%" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 5 }}>
+                                    <span style={gLab}>Number of strips</span>
+                                    <NumberInput value={strips.length} min={1} max={41} step={1} onCommit={setCount} style={{ ...inp, width: 48 }} />
+                                    <button onClick={equalize} title="Set every strip to the same width so together they span the widest point of the core" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, borderRadius: 3, fontSize: 10, padding: "3px 7px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Equal widths to {needW} mm</button>
+                                  </div>
+                                  <div style={{ ...gLab, marginBottom: 4 }}>Strip 1 is the left edge, looking down on the top with the tip pointing away.</div>
+                                  {strips.map((s, si) => { const m = CORE_MATERIALS[s.mat] || CORE_MATERIALS.poplar; return (
+                                    <div key={si} style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
+                                      <span style={{ width: 10, height: 10, borderRadius: 2, background: woodCol(s.mat), display: "inline-block" }} />
+                                      <span style={{ ...gLab, width: 18 }}>{si + 1}</span>
+                                      <select value={s.mat} onChange={e => setStrip(si, { mat: e.target.value, density: undefined })} style={{ ...inp, width: "auto" }}>{woodKeys.map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
+                                      <NumberInput value={s.width} min={0.5} max={600} step={0.5} onCommit={v => setStrip(si, { width: v })} style={{ ...inp, width: 54 }} /><span style={gLab}>mm</span>
+                                      <input type="number" value={s.density != null ? s.density : ""} placeholder={String(m.density)} min={0} step={10} title="Measured density (optional) — blank uses the table value" onChange={e => setStrip(si, { density: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 50 }} /><span style={gLab}>kg/m³</span>
+                                      <button onClick={() => moveStrip(si, -1)} disabled={si === 0} style={{ background: "transparent", border: "none", color: si === 0 ? C.inputBorder : C.label, cursor: si === 0 ? "default" : "pointer", fontSize: 11 }}>{"▲"}</button>
+                                      <button onClick={() => moveStrip(si, 1)} disabled={si === strips.length - 1} style={{ background: "transparent", border: "none", color: si === strips.length - 1 ? C.inputBorder : C.label, cursor: si === strips.length - 1 ? "default" : "pointer", fontSize: 11 }}>{"▼"}</button>
+                                    </div>); })}
+                                  <div style={{ ...gLab, marginTop: 4, color: totW + 0.05 < needW ? "#e8552a" : C.labelDim }}>
+                                    Strips total {Math.round(totW * 10) / 10} mm; the core is {needW} mm at its widest.{totW + 0.05 < needW ? " The strips don't reach the core edges, so the uncovered part is modelled as if it matched the strips inside it. Widen the strips." : ""}
+                                  </div>
+                                  {corePoly.length > 2 && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <svg viewBox={`0 ${-hwMax} ${spanX} ${2 * hwMax}`} preserveAspectRatio="none" style={{ width: "100%", height: 84, display: "block", background: C.inputBg, borderRadius: 4 }}>
+                                        <defs><clipPath id={clipId}><polygon points={polyPts} /></clipPath></defs>
+                                        <g clipPath={`url(#${clipId})`}>{sp.map((q, qi) => <rect key={qi} x={0} y={q.a} width={spanX} height={Math.max(0, q.b - q.a)} fill={woodCol(q.mat)} />)}</g>
+                                        {sp.slice(1).map((q, qi) => <line key={"b" + qi} x1={0} x2={spanX} y1={q.a} y2={q.a} stroke="rgba(0,0,0,0.35)" strokeWidth={0.4} vectorEffect="non-scaling-stroke" clipPath={`url(#${clipId})`} />)}
+                                        <polygon points={polyPts} fill="none" stroke={C.label} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                                      </svg>
+                                      <div style={{ display: "flex", justifyContent: "space-between", ...gLab, marginTop: 2 }}><span>TAIL</span><span>top view · width exaggerated · strip 1 on top</span><span>TIP {"→"}</span></div>
+                                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 3 }}>{used.map(k => <span key={k} style={{ ...gLab, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 9, height: 9, background: woodCol(k), borderRadius: 2, display: "inline-block" }} />{(CORE_MATERIALS[k] || {}).name || k}</span>)}</div>
+                                    </div>
+                                  )}
+                                  <div style={{ ...gLab, marginTop: 5, lineHeight: 1.4 }}>Flex uses the wood actually inside the core at each point along the ski, so outer strips trimmed by the sidecut count for less at the waist. Weight uses the same strips.</div>
+                                </div>
+                              );
+                            })();
                             return (<>
+                              <div style={{ flexBasis: "100%", display: "flex", gap: 5, alignItems: "center", marginBottom: 5 }}>
+                                <span style={gLab}>Core built as</span>
+                                {modeBtn(!stripOn, "Blend by %", () => upd(idx, { stripMode: false }))}
+                                {modeBtn(stripOn, "Strips", () => upd(idx, { stripMode: true, strips: strips.map(s => ({ ...s })) }))}
+                              </div>
+                              {stripOn ? stripEditor : (<>
                               {ws.map((w, wi) => { const m = CORE_MATERIALS[w.mat] || CORE_MATERIALS.poplar; const dens = w.density != null ? w.density : m.density; return (
                                 <div key={wi} style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
                                   <select value={w.mat} onChange={e => setMat(wi, e.target.value)} style={{ ...inp, width: "auto" }}>{woodKeys.map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
@@ -10290,6 +10492,7 @@ export default function App() {
                                 <span style={gLab}>{multi ? `= blend ${Math.round(cp.density)} kg/m³ · E` : "E"}</span>
                                 <input type="number" value={L.E != null ? L.E : ""} placeholder={String(Math.round(cp.eComputed))} min={0} step={500} onChange={e => upd(idx, { E: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 62 }} /><span style={gLab}>MPa (blank = auto {Math.round(cp.eComputed)})</span>
                               </div>
+                              </>)}
                             </>); })()}
                         </div>
                       </div>
@@ -11119,6 +11322,31 @@ export default function App() {
                     {[["outline", "Core Profile"], ["taper", "Core Taper"], ["mold", "Mold"], ["slat", "Slats"], ["bore", "Bore"], ["pocket", "Pocket"], ["base", "Base"]].map(([v, l]) => (<button key={v} onClick={() => setCam("op", v)} style={{ ...camSeg(camOpt.op === v), fontSize: 11.5, padding: "8px 4px", letterSpacing: 0.3 }}>{l}</button>))}
                   </div>
                 </div>
+                {(designInsertPts.length > 0 || camOpt.pinOrigin) && (() => {
+                  const inchG = camOpt.units === "inch", cvG = v => inchG ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
+                  const pinMax = (() => { const ah = ski.alignMarks ? alignHoles(ski) : []; return ah.length ? Math.min(...ah.map(h => getCoreThickAt(ski.coreProfile, Math.min(1, Math.max(0, h.y / ski.length))))) : null; })();
+                  const ok = t => <span style={{ color: t ? "#6fbf73" : "#e8552a" }}>{t ? "\u2713" : "\u2717"}</span>;
+                  const li = { margin: "0 0 5px 0", lineHeight: 1.45 };
+                  return (
+                  <details style={{ border: `1px solid ${C.heading}55`, borderLeft: `3px solid ${C.heading}`, borderRadius: 4, padding: "6px 9px", marginBottom: 8, fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: C.label }}>
+                    <summary style={{ cursor: "pointer", color: C.heading, fontWeight: 700, fontSize: 11 }}>Two-sided workflow for boards with inserts</summary>
+                    <ol style={{ paddingLeft: 17, margin: "7px 0 6px" }}>
+                      <li style={li}><b>Op 1, Bore tab.</b> Flat blank, core's bottom face up. One file, in this order: alignment dowel holes (through the blank into the spoilboard), insert bores and flange pockets, then the outer profile last, because that cut frees the core. Use tabs if you want the core held until you're done.</li>
+                      <li style={li}>Remove the core and glue on the sidewalls.</li>
+                      <li style={li}>Put registration pins in the spoilboard holes{pinMax != null ? <>, standing no taller than <b>{cvG(pinMax)} {uu}</b> above the spoilboard (the finished core thickness at the dowels, so the taper cutter can't reach them)</> : ""}. Turn the core over sideways about its long axis, so tail and tip stay at the same ends, and seat it top face up on the pins. Hold it down with clamps, vacuum or tape; the pins only locate it.</li>
+                      <li style={li}><b>Op 2, Core Taper tab.</b> Same X/Y zero, don't re-zero. Tapers the top surface, including over the sidewalls.</li>
+                    </ol>
+                    <div style={{ color: C.labelDim, marginBottom: 3 }}>Settings this needs:</div>
+                    <div style={li}>{ok(!!ski.alignMarks)} Alignment dowel holes on {"\u00b7"} {ok(alignDrillOp === "bore")} dowels drilled in Bore {"\u00b7"} {ok(!!camOpt.pinOrigin)} zero every op on the tail dowel {"\u00b7"} {ok(!!camOpt.boreWithProfile)} Bore also cuts the outer profile</div>
+                    <div style={{ color: C.labelDim, margin: "6px 0 3px" }}>Other ways to do it:</div>
+                    <ul style={{ paddingLeft: 17, margin: 0 }}>
+                      <li style={li}>Profile as its own file: turn off {"\u201c"}Also cut the outer profile{"\u201d"} in Bore, then run the Core Profile tab set to Bottom face, in the same setup, right after Bore.</li>
+                      <li style={li}>Profile from the top: after flipping onto the pins, run Core Profile set to Top face. The sidewalls then go on after that, so the taper becomes a third setup back on the pins.</li>
+                      <li style={li}>No inserts: skip Bore and cut everything from the top. Core Profile, then Core Taper, with the dowels drilled in Core Profile.</li>
+                    </ul>
+                    <div style={{ color: C.labelDim, marginTop: 5, lineHeight: 1.45 }}>Air-cut each file above the stock before cutting wood. The toolpaths have been checked in software, not yet on a machine.</div>
+                  </details>);
+                })()}
                 <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
                   {[["Tool #", "ToolNum", 1], ["Tool Ø", "ToolDia", st], ["Feed", "Feed", stf], ["Plunge", "Plunge", stf]].map(([lab, kk, step]) => (
                     <div key={kk}><div style={camSmall}>{lab}{kk === "ToolNum" ? "" : (kk === "Feed" || kk === "Plunge" ? " " + uf : " " + uu)}</div>
@@ -11143,10 +11371,15 @@ export default function App() {
                     const bitMm = camOpt.alignToolDia != null ? camOpt.alignToolDia : 6.35;
                     const bitDisp = inchU ? +(bitMm / 25.4).toFixed(4) : bitMm;
                     return (<>
-                      <div style={{ color: camOpt.op === "outline" ? C.labelDim : C.heading, fontSize: 10, margin: "6px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                        {camOpt.op === "outline"
-                          ? "Bored in THIS op — two holes on the centerline at the midpoints between waist and each contact. A smaller bit helical-bores; an equal bit plunges. Also on the plan view + DXF/SVG."
-                          : "\u2192 Drilled during the Core Profile op. Set the sizes here, then switch to Core Profile to see the toolpaths. Also shown on the plan view + DXF/SVG."}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
+                        <span style={camSmall}>Drill dowels in</span>
+                        {[["bore", "Bore (bottom, first)"], ["outline", "Core Profile (top)"]].map(([v, l]) => <button key={v} onClick={() => setCam("alignDrillOp", v)} style={{ ...camSeg(alignDrillOp === v), flex: "none", padding: "4px 8px" }}>{l}</button>)}
+                      </div>
+                      <div style={{ color: camOpt.op === alignDrillOp ? C.labelDim : C.heading, fontSize: 10, margin: "2px 0 6px", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {camOpt.op === alignDrillOp
+                          ? "Drilled in THIS op: two holes on the centreline, through the blank and into the spoilboard for registration pins. A smaller bit helical-bores; an equal bit plunges."
+                          : "\u2192 Drilled during the " + (alignDrillOp === "bore" ? "Bore" : "Core Profile") + " op. Set the sizes here."}
+                        {alignDrillOp === "bore" ? " Drilling them in the first, bottom-side op lets the blank be flipped onto pins for the top-side ops." : ""}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                         <div><div style={camSmall}>Dowel {"\u00D8"} {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
@@ -11157,6 +11390,15 @@ export default function App() {
                         <div style={camSmall}>Fore/aft {uu} (+ tip)</div>
                         <input type="number" value={inchU ? +((ski.alignOffset || 0) / 25.4).toFixed(3) : (ski.alignOffset || 0)} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignOffset: Math.round(inchU ? v * 25.4 : v) })); }} style={{ ...camInput, width: 90 }} />
                       </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                        <div style={camSmall}>Depth into spoilboard {uu}</div>
+                        <input type="number" value={inchU ? +(((camOpt.alignPinDepth != null ? camOpt.alignPinDepth : 1)) / 25.4).toFixed(3) : (camOpt.alignPinDepth != null ? camOpt.alignPinDepth : 1)} step={st} min={0} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= 0) setCam("alignPinDepth", inchU ? +(v * 25.4).toFixed(3) : v); }} style={{ ...camInput, width: 90 }} />
+                      </div>
+                      <div style={{ ...camSmall, marginTop: 2 }}>Set this to how deep your registration pins need to seat in the spoilboard.</div>
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", color: C.label, fontSize: 11.5, marginTop: 7, fontFamily: "'JetBrains Mono', monospace" }}>
+                        <input type="checkbox" checked={!!camOpt.pinOrigin} onChange={e => setCam("pinOrigin", e.target.checked)} style={{ marginTop: 2 }} />
+                        <span>Zero every op on the tail dowel (two-sided work)<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4 }}>X0 Y0 = centre of the tail-side dowel hole, on the ski centreline, in every op. Needed when a blank is flipped onto pins, so the top-side ops line up with the bottom-side op. Replaces the corner/centre origin and stock centring for all ops.</span></span>
+                      </label>
                     </>);
                   })()}
                 </div>
@@ -11189,6 +11431,11 @@ export default function App() {
                 {isOutline ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Outline cut (flat blank)</div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center" }}>
+                      <span style={camSmall}>Cut from</span>
+                      {[["top", "Top face"], ["bottom", "Bottom face (mirrored)"]].map(([v, l]) => (<button key={v} onClick={() => setCam("outlineSide", v)} style={camSeg((camOpt.outlineSide || "top") === v)}>{l}</button>))}
+                    </div>
+                    {designInsertPts.length > 0 && camOpt.boreWithProfile && <div style={{ color: C.heading, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>In the two-sided workflow the outer profile is already cut at the end of the Bore op, using these settings. Only export this op if you're cutting the profile separately.</div>}
                     <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                       {[["outside", "Outside"], ["on", "On line"], ["inside", "Inside"]].map(([v, l]) => (<button key={v} onClick={() => setCam("perimeterSide", v)} style={camSeg(camOpt.perimeterSide === v)}>{l}</button>))}
                     </div>
@@ -11252,22 +11499,67 @@ export default function App() {
                       </>
                     )}
                   </div>
-                ) : isBore ? (
+                ) : isBore ? (() => {
+                  const src = camOpt.boreSrc || "design", prof = camOpt.insFlangeProfile || "flat";
+                  const numIn = (lab, key, step) => (
+                    <div key={key}><div style={camSmall}>{lab}</div>
+                      <input type="number" value={camOpt[key] != null ? camOpt[key] : ""} placeholder="spec sheet" step={step} min={0}
+                        onChange={e => { const v = e.target.value === "" ? null : parseFloat(e.target.value); setCam(key, (v != null && isFinite(v)) ? v : null); }} style={camInput} /></div>);
+                  const warn = t => <div style={{ color: "#e8552a", fontSize: 10.5, margin: "5px 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>{t}</div>;
+                  const nDesign = designInsertPts.length;
+                  return (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
-                    <div style={{ ...camLabel, color: C.heading }}>Insert boring (helical)</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      {[["Hole \u00D8 " + uu, "boreDia", st], ["Depth " + uu, "boreDepth", st], ["Cols", "boreCols", 1], ["Rows", "boreRows", 1], ["Col gap " + uu, "boreSpaceX", st], ["Row gap " + uu, "boreSpaceY", st], ["Center 0-1", "boreCenter", 0.01]].map(([lab, key, step]) => (
-                        <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                      ))}
+                    <div style={{ ...camLabel, color: C.heading }}>Insert bores {"\u00b7"} bottom side, run first</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Op 1 of the two-sided workflow. Inserts go in from the bottom so the flange holds against the pull of the binding screw. Cut on the flat blank with the core's bottom face up. Everything in this file is mirrored side to side to match turning the core over for op 2.
                     </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginTop: 6 }}>
-                      <input type="checkbox" checked={camOpt.boreHelix} onChange={e => setCam("boreHelix", e.target.checked)} /> Helical bore
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", color: C.label, fontSize: 11.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                      <input type="checkbox" checked={!!camOpt.boreWithProfile} onChange={e => setCam("boreWithProfile", e.target.checked)} style={{ marginTop: 2 }} />
+                      <span>Also cut the outer profile in this op (last)<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4 }}>Uses the Core Profile tab's tool, feeds, climb/conventional, tabs, ramp and cut-through. Set them there. Off: cut the profile separately with the Core Profile tab.</span></span>
                     </label>
-                    <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      {Math.round(camOpt.boreCols) * Math.round(camOpt.boreRows)} blind holes in a {camOpt.boreCols}\u00D7{camOpt.boreRows} grid at {(camOpt.boreCenter * 100).toFixed(0)}% of length. Helical lets a {camOpt.boreToolDia} {uu} bit bore an exact {camOpt.boreDia} {uu} hole.
+                    {!ski.alignMarks && warn("Two-sided work needs the alignment dowels to register the flip. Turn on alignment dowel holes in the alignment box.")}
+                    {ski.alignMarks && !camOpt.pinOrigin && warn("Turn on \u201cZero every op on the tail dowel\u201d in the alignment box so the flipped blank lines up with the top-side ops.")}
+                    {ski.alignMarks && alignDrillOp !== "bore" && warn("The dowels are set to drill in the Core Profile op, which runs after the flip. Set them to drill in Bore in the alignment box.")}
+                    <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                      {[["design", `From design (${nDesign})`], ["grid", "Manual grid"]].map(([v, l]) => <button key={v} onClick={() => setCam("boreSrc", v)} style={camSeg(src === v)}>{l}</button>)}
                     </div>
-                  </div>
-                ) : isPocket ? (
+                    {src === "design" && nDesign === 0 && warn((ski.mode === "snowboard" && ski.insertPattern === "channel") ? "Channel mounts don't use round inserts. Pick a 2x4 or 4x4 insert pattern, or use the manual grid." : "The design has no inserts yet. Set an insert pattern (snowboard) or turn on inserts in Binding Mount.")}
+                    {src === "grid" && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
+                        {[["Cols", "boreCols", 1], ["Rows", "boreRows", 1], ["Col gap " + uu, "boreSpaceX", st], ["Row gap " + uu, "boreSpaceY", st], ["Center 0-1", "boreCenter", 0.01]].map(([lab, key, step]) => (
+                          <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ ...camSmall, color: C.label, marginTop: 4 }}>Insert dimensions {"\u00b7"} from your insert maker's spec sheet</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
+                      {numIn("Barrel \u00D8 " + uu, "insBarrelDia", st)}
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center" }}>
+                      <span style={camSmall}>Flange pocket</span>
+                      {[["none", "None"], ["flat", "Flat"], ["cone", "Conical"]].map(([v, l]) => <button key={v} onClick={() => setCam("insFlangeProfile", v)} style={camSeg(prof === v)}>{l}</button>)}
+                    </div>
+                    {prof !== "none" && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
+                        {numIn((prof === "cone" ? "Flange \u00D8 at face " : "Flange \u00D8 ") + uu, "insFlangeDia", st)}
+                        {numIn("Flange depth " + uu, "insFlangeDepth", st)}
+                        {prof === "cone" && numIn("\u00D8 at flange bottom " + uu, "insConeBotDia", st)}
+                        {prof === "cone" && numIn("Cone step " + uu, "insConeStep", st)}
+                        {numIn("Pocket stepover " + uu, "insStepover", st)}
+                      </div>
+                    )}
+                    {prof === "cone" && <div style={{ ...camSmall, lineHeight: 1.4, marginBottom: 6 }}>A flat endmill cuts the cone as stepped terraces, each cleared to the cone's size at the bottom of that step, so nothing is overcut. A smaller step gives a closer fit.</div>}
+                    <div style={{ display: "flex", gap: 4, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={camSmall}>Barrel hole</span>
+                      {[["through", "Through finished core"], ["depth", "Fixed depth"]].map(([v, l]) => <button key={v} onClick={() => setCam("insBarrelMode", v)} style={camSeg((camOpt.insBarrelMode || "through") === v)}>{l}</button>)}
+                    </div>
+                    {camOpt.insBarrelMode === "depth" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>{numIn("Depth from bottom " + uu, "insBarrelDepth", st)}</div>}
+                    <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {"\u201c"}Through finished core{"\u201d"} drills to the core's final thickness at each insert, so the top taper opens the hole. Nothing here is pre-filled because insert dimensions differ between makers. A helical bore lets a {camOpt.boreToolDia} {uu} bit cut a wider barrel hole.
+                    </div>
+                    {camResult && !camResult.stats && warn(String(camResult.gcode || "").replace(/^; error\n(Error: )?/, ""))}
+                  </div>);
+                })() : isPocket ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Pocket (raster clear)</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
@@ -11343,7 +11635,7 @@ export default function App() {
                   </>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={downloadCAM} style={{ ...primaryBtn, flex: 1, padding: "10px 8px" }}>Download {isOutline ? "Outline" : isMold ? "Mold" : isSlat ? "Slats" : isBore ? "Bore" : isPocket ? "Pocket" : isBaseOp ? "Base" : "Taper"} .nc</button>
+                  <button onClick={downloadCAM} disabled={!camResult || !camResult.stats} title={!camResult || !camResult.stats ? "Fix the problem shown above first" : undefined} style={{ ...primaryBtn, flex: 1, padding: "10px 8px", opacity: (!camResult || !camResult.stats) ? 0.45 : 1, cursor: (!camResult || !camResult.stats) ? "not-allowed" : "pointer" }}>Download {isOutline ? "Outline" : isMold ? "Mold" : isSlat ? "Slats" : isBore ? "Bore" : isPocket ? "Pocket" : isBaseOp ? "Base" : "Taper"} .nc</button>
                   <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ ...secondaryBtn, color: C.label, padding: "10px 14px", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
                 </div>
                 <button onClick={() => setShowToolpath(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Preview Toolpaths</button>
