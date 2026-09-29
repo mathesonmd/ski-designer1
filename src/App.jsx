@@ -7704,6 +7704,35 @@ function FeedsHelper({ toolDiaMM, C, uu, uf, onApply }) {
   );
 }
 
+// Write the print resolution into an exported image, so photo editors and print shops open it at the right
+// physical size instead of assuming 72 DPI. PNG: a pHYs chunk (pixels per meter) right after IHDR, replacing
+// any existing one. JPEG: the JFIF header's density fields, when a JFIF header is present.
+const _crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function _crc32(bytes) { let c = 0xffffffff; for (let i = 0; i < bytes.length; i++) c = _crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function setPngDpi(buf, dpi) {
+  const b = new Uint8Array(buf), dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  if (b.length < 33 || b[1] !== 0x50 || b[2] !== 0x4e || b[3] !== 0x47) return b;   // not a PNG
+  const out = [b.slice(0, 8)]; let off = 8, inserted = false;
+  const ppm = Math.round(dpi / 0.0254);
+  const phys = new Uint8Array(21), pv = new DataView(phys.buffer);
+  pv.setUint32(0, 9); phys.set([0x70, 0x48, 0x59, 0x73], 4); pv.setUint32(8, ppm); pv.setUint32(12, ppm); phys[16] = 1; pv.setUint32(17, _crc32(phys.subarray(4, 17)));
+  while (off + 8 <= b.length) {
+    const len = dv.getUint32(off), type = String.fromCharCode(b[off + 4], b[off + 5], b[off + 6], b[off + 7]), end = off + 12 + len;
+    if (type !== "pHYs") out.push(b.slice(off, end));
+    if (type === "IHDR" && !inserted) { out.push(phys); inserted = true; }
+    off = end; if (type === "IEND") break;
+  }
+  const total = out.reduce((a, x) => a + x.length, 0), res = new Uint8Array(total); let p = 0; for (const x of out) { res.set(x, p); p += x.length; }
+  return res;
+}
+function setJpegDpi(buf, dpi) {
+  const b = new Uint8Array(buf);
+  // SOI, then APP0 "JFIF\0": units at offset 13, X density 14-15, Y density 16-17
+  if (b.length > 18 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff && b[3] === 0xe0 && b[6] === 0x4a && b[7] === 0x46 && b[8] === 0x49 && b[9] === 0x46 && b[10] === 0) {
+    const r = b.slice(); r[13] = 1; r[14] = (dpi >> 8) & 0xff; r[15] = dpi & 0xff; r[16] = (dpi >> 8) & 0xff; r[17] = dpi & 0xff; return r;
+  }
+  return b;
+}
 function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   const bleed = 10, gap = 12.7;   // print bleed (sheet edge to trim box) and the gap between the two skis
   const L = ski.length;
@@ -7734,6 +7763,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   const [dpi, setDpi] = useState(150);
   const [guides, setGuides] = useState(true);
   const [crop, setCrop] = useState(true);
+  const [cutLines, setCutLines] = useState(true);   // print the ski cut line (and alignment ticks) on exports
   const [busy, setBusy] = useState("");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -7783,7 +7813,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
       ctx.restore();
     }
     if (guidesOn) { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1.2 / eff; ctx.setLineDash([6 / eff, 5 / eff]); skiYc.forEach((yc, si) => { const sgn = si === 0 ? 1 : -1; ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + margin + p.y, y = yc + sgn * p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); }); ctx.setLineDash([]); ctx.strokeStyle = "rgba(232,85,42,0.9)"; ctx.lineWidth = 1 / eff; ctx.strokeRect(bleed, bleed, tL - 2 * bleed, tW - 2 * bleed); ctx.restore(); }
-    if (cropOn) { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(0.3, 1.2 / eff); const m = 12; [[0, 0, 1, 1], [tL, 0, -1, 1], [0, tW, 1, -1], [tL, tW, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sx * m, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sy * m); ctx.stroke(); }); ctx.restore(); }
+    if (cropOn) { ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(0.3, 1.2 / eff); const gapMM = 2, len = Math.max(1, bleed - gapMM - 1), x0 = bleed, y0 = bleed, x1 = tL - bleed, y1 = tW - bleed; [[x0, y0, -1, -1], [x1, y0, 1, -1], [x0, y1, -1, 1], [x1, y1, 1, 1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x + sx * gapMM, y); ctx.lineTo(x + sx * (gapMM + len), y); ctx.moveTo(x, y + sy * gapMM); ctx.lineTo(x, y + sy * (gapMM + len)); ctx.stroke(); }); ctx.restore(); }   // crop marks at the trim-box corners, just outside the trim edge
   };
 
   const layerBox = l => {
@@ -7898,7 +7928,32 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   const del = id => { setLayers(ls => ls.filter(l => l.id !== id)); setSel("bg"); };
   const moveL = (id, dir) => setLayers(ls => { const i = ls.findIndex(l => l.id === id); const j = i + dir; if (j < 1 || j >= ls.length) return ls; const a = ls.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; });
   const dup = () => { const l = layers.find(x => x.id === sel); if (!l || l.type === "bg") return; const id = "d" + Date.now(); const clone = { ...l, id, x: l.x + 25, y: l.y + 25 }; if (l.pts) clone.pts = l.pts.map(pt => ({ ...pt })); setLayers(ls => [...ls, clone]); setSel(id); };
-  const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi…"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, crop); oc.toBlob(b => { const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-${isBoard ? "board" : "pair"}-${dpi}dpi.${fmt === "jpg" ? "jpg" : "png"}`; a.click(); URL.revokeObjectURL(u); setBusy(""); }, fmt === "jpg" ? "image/jpeg" : "image/png", 0.95); };
+  // Print marks for exported files, drawn in millimeters so they print at the same size at any DPI. Same
+  // conventions as the print template: solid black 0.5 mm cut line on each ski outline, blue 0.5 mm alignment
+  // ticks crossing the edge where the alignment holes are, and crop marks at the trim-box corners, set 2 mm
+  // outside the trim edge so trimming never cuts into them.
+  const drawPrintMarks = (ctx, withCut, withCrop) => {
+    ctx.save(); ctx.setLineDash([]); ctx.lineCap = "butt";
+    if (withCut) {
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 0.5;
+      skiYc.forEach((yc, si) => { const sgn = si === 0 ? 1 : -1; ctx.beginPath(); outline.forEach((p, i) => { const x = bleed + margin + p.y, y = yc + sgn * p.x; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); });
+      if (ski.alignMarks) {
+        let ah = []; try { ah = alignHoles(ski); } catch (e) {}
+        ctx.strokeStyle = "#5bb3d8"; ctx.lineWidth = 0.5;
+        ah.forEach(h => { let hw = latMax; try { hw = getWidthAtPos(ski, Math.min(1, Math.max(0, h.y / L))) / 2; } catch (e) {} const x = bleed + margin + h.y;
+          skiYc.forEach(yc => { [1, -1].forEach(s => { ctx.beginPath(); ctx.moveTo(x, yc + s * hw); ctx.lineTo(x, yc + s * (hw + 6)); ctx.stroke(); }); }); });
+      }
+    }
+    if (withCrop) {
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 0.3;
+      const gapMM = 2, len = Math.max(1, bleed - gapMM - 1), x0 = bleed, y0 = bleed, x1 = tL - bleed, y1 = tW - bleed;
+      [[x0, y0, -1, -1], [x1, y0, 1, -1], [x0, y1, -1, 1], [x1, y1, 1, 1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x + sx * gapMM, y); ctx.lineTo(x + sx * (gapMM + len), y); ctx.moveTo(x, y + sy * gapMM); ctx.lineTo(x, y + sy * (gapMM + len)); ctx.stroke(); });
+    }
+    ctx.restore();
+  };
+  const exportImg = async fmt => { setBusy("Rendering " + dpi + " dpi\u2026"); await new Promise(r => setTimeout(r, 30)); const ppm = dpi / 25.4, oc = document.createElement("canvas"); oc.width = Math.round(tL * ppm); oc.height = Math.round(tW * ppm); const ctx = oc.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, oc.width, oc.height); ctx.setTransform(ppm, 0, 0, ppm, 0, 0); paint(ctx, false, false); drawPrintMarks(ctx, cutLines, crop);
+    const isJpg = fmt === "jpg";
+    oc.toBlob(async b => { try { if (!b) { alert("This image is too large for this browser to create. Try a lower DPI, or a desktop browser."); return; } const buf = await b.arrayBuffer(); const fixed = isJpg ? setJpegDpi(buf, dpi) : setPngDpi(buf, dpi); const u = URL.createObjectURL(new Blob([fixed], { type: isJpg ? "image/jpeg" : "image/png" })); const a = document.createElement("a"); a.href = u; a.download = `topsheet-${ski.length}mm-${isBoard ? "board" : "pair"}-${dpi}dpi${cutLines ? "-cutlines" : ""}.${isJpg ? "jpg" : "png"}`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); } finally { setBusy(""); } }, isJpg ? "image/jpeg" : "image/png", 0.95); };
   // For the ON-SKI texture we render only the trim box (the art region), dropping the print bleed + safe
   // margin — otherwise the plan view stretches that ~22.7mm border onto the ski and the art sits inset/shifted.
   const renderDesignURL = () => { const bm = bleed + margin, trimL = tL - 2 * bm, trimW = tW - 2 * bm, maxLong = 3000, ppm = Math.min(150 / 25.4, maxLong / trimL), oc = document.createElement("canvas"); oc.width = Math.round(trimL * ppm); oc.height = Math.round(trimW * ppm); const ctx = oc.getContext("2d"); ctx.setTransform(ppm, 0, 0, ppm, -bm * ppm, -bm * ppm); paint(ctx, false, false); return oc.toDataURL("image/png"); };
@@ -7919,7 +7974,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bgDeep, zIndex: 1200, display: "flex", flexDirection: "column" }}>
-      <BrandBar title="Topsheet Designer" subtitle={`${isBoard ? "board" : "pair"} · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" incl. 1" bleed`} onClose={closeDesigner} C={C} />
+      <BrandBar title="Topsheet Designer" subtitle={`${isBoard ? "board" : "pair"} · ${(tL / 25.4).toFixed(1)}" × ${(tW / 25.4).toFixed(1)}" sheet, incl. ${bleed} mm bleed`} onClose={closeDesigner} C={C} />
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         <div style={{ width: 322, flexShrink: 0, overflowY: "auto", padding: 14, borderRight: `1px solid ${C.panelBorder}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -8003,6 +8058,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div><div style={lab}>Export DPI</div><div style={{ display: "flex", gap: 4 }}>{[150, 200, 300].map(d => <button key={d} onClick={() => setDpi(d)} style={btn(dpi === d)}>{d}</button>)}</div></div>
+            <label title="Adds the ski outline as a solid black 0.5 mm line to trim along, plus blue alignment ticks if alignment holes are on" style={{ display: "flex", alignItems: "center", gap: 5, color: C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 6, cursor: "pointer" }}><input type="checkbox" checked={cutLines} onChange={e => setCutLines(e.target.checked)} /> Include cut lines</label>
             <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", paddingBottom: 4 }}>{outPx.w.toLocaleString()} × {outPx.h.toLocaleString()} px</span>
             <button disabled={!!busy} onClick={() => exportImg("png")} style={{ background: C.heading, color: C.bgDeep, border: "none", padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{busy || "Export PNG (print-ready)"}</button>
             <button disabled={!!busy} onClick={() => exportImg("jpg")} style={{ background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, padding: "9px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>JPG</button>
@@ -8010,7 +8066,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
           </div>
           <div style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.value, lineHeight: 1.5 }}>
             <div style={{ color: C.heading, fontWeight: 700, marginBottom: 4 }}>PRINT & SEND OUT</div>
-            <div style={{ color: C.labelDim, marginBottom: 6 }}>Your export is <b style={{ color: C.value }}>{(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}"</b> with a built-in 1" bleed all around. Most shops want <b style={{ color: C.value }}>≥150 dpi</b>. It exports RGB, which sublimation printers convert to CMYK — if a shop requires true CMYK, open the PNG in Photoshop and convert (use a rich black, not 100% K).</div>
+            <div style={{ color: C.labelDim, marginBottom: 6 }}>Your export is <b style={{ color: C.value }}>{(tL / 25.4).toFixed(1)}" × {(tW / 25.4).toFixed(1)}"</b> including a {bleed} mm ({(bleed / 25.4).toFixed(2)}") bleed outside the trim box and a {margin} mm ({(margin / 25.4).toFixed(2)}") margin between each ski and the trim box. Check what resolution and color mode your print shop wants. The file is RGB; if a shop needs CMYK, convert it in an image editor.</div>
             <div style={{ color: C.labelDim, marginBottom: 6, fontStyle: "italic" }}>A few shops that print custom topsheets (examples, not endorsements):</div>
             {TOPSHEET_PRINTERS.map(p => (<div key={p.name} style={{ marginBottom: 4 }}><a href={p.url} target="_blank" rel="noreferrer" style={{ color: C.heading, textDecoration: "none" }}>{p.name} ↗</a><span style={{ color: C.labelDim }}> — {p.note}</span></div>))}
           </div>
@@ -8481,7 +8537,7 @@ export default function App() {
   // Export a 1:1 print-ready topsheet template. fmt "svg" = vector (Illustrator/CorelDraw). fmt "png"
   // = flattened raster at ~150 DPI for print RIPs. In pair view it renders both skis with the art
   // projected across the set.
-  const exportTopsheetTemplate = useCallback((fmt = "svg") => {
+  const exportTopsheetTemplate = useCallback((fmt = "svg", dpiWanted = 150) => {
     const isPair = pairView && ski.mode !== "snowboard";   // snowboards are a single board, never a pair
     const nameBase = `bcs-${(ski.designName || "ski").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-topsheet-template${isPair ? "-pair" : ""}`;
     const finish = (imgDims) => {
@@ -8497,11 +8553,10 @@ export default function App() {
       const vb = svg.match(/viewBox="([\d.\- ]+)"/);
       const parts = vb ? vb[1].split(" ").map(Number) : [0, 0, ski.length + 40, 320];
       const vbW = parts[2], vbH = parts[3];
-      const dpi = 150;
-      let pxPerMM = dpi / 25.4;
-      const MAXPX = 12000;
+      let pxPerMM = dpiWanted / 25.4;
+      const MAXPX = 32767;   // browsers refuse canvases wider than this; a very long sheet at 300 DPI is scaled down to fit
       if (vbW * pxPerMM > MAXPX) pxPerMM = MAXPX / vbW;   // clamp huge long-side
-      const W = Math.round(vbW * pxPerMM), H = Math.round(vbH * pxPerMM);
+      const W = Math.round(vbW * pxPerMM), H = Math.round(vbH * pxPerMM), dpi = Math.round(pxPerMM * 25.4);
       const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const im = new Image();
@@ -8512,8 +8567,10 @@ export default function App() {
         ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
         ctx.drawImage(im, 0, 0, W, H);
         URL.revokeObjectURL(url);
-        cv.toBlob((b) => {
-          const u = URL.createObjectURL(b);
+        cv.toBlob(async (b) => {
+          if (!b) { alert("This image is too large for this browser to create. Try 150 DPI, or a desktop browser."); return; }
+          const fixed = setPngDpi(await b.arrayBuffer(), dpi);
+          const u = URL.createObjectURL(new Blob([fixed], { type: "image/png" }));
           const a = document.createElement("a"); a.href = u; a.download = `${nameBase}-${dpi}dpi.png`; a.click();
           setTimeout(() => URL.revokeObjectURL(u), 1000);
         }, "image/png");
@@ -10642,13 +10699,17 @@ export default function App() {
               style={{ ...secondaryBtn, flex: 1 }}>
               SVG (vector)
             </button>
-            <button onClick={() => exportTopsheetTemplate("png")}
+            <button onClick={() => exportTopsheetTemplate("png", 150)}
               style={{ ...secondaryBtn, flex: 1 }}>
-              PNG (150dpi)
+              PNG 150 DPI
+            </button>
+            <button onClick={() => exportTopsheetTemplate("png", 300)}
+              style={{ ...secondaryBtn, flex: 1 }}>
+              PNG 300 DPI
             </button>
           </div>
           <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-            1:1 cut line + bleed + crop marks. Art is embedded and aligned exactly as shown above (use the Fit/Shift/Scale/Rotate controls to place it). For crisp prints, upload art at ~150 dpi of the final size (a full ski ≈ 10,600 px long).
+            1:1 cut line, bleed, and crop marks, with your art placed exactly as shown above. The art is only as sharp as its source: an image you uploaded keeps its full resolution, but a design applied from the Topsheet Designer is passed along as a low-resolution preview. For a sharp print of a designer design, use Export in the Topsheet Designer with “Include cut lines” on.
           </div>
 
           <button onClick={() => setShow3D(true)}
