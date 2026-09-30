@@ -103,6 +103,18 @@ function coreWoods(L) {
 // the mix of woods changes along the ski: stripCoreAt() returns the width-weighted modulus and density of the
 // wood actually present inside the core half-width hw at one station. All strips sit at the same height, so
 // the width-weighted (Voigt) modulus is exact for bending at that station.
+// Display colors for core woods (preview only; not material data).
+// Tones roughly follow each wood (poplar and aspen pale, ash and beech mid, bamboo straw), pushed apart just
+// enough that neighboring strips of different woods stay easy to tell apart in the preview.
+const _WOOD_TONES = { paulownia: "#efe2c4", poplar: "#e3d59a", aspen: "#f2ecd8", ash: "#c29058", maple: "#f0d9ae", birch: "#d8b77c", beech: "#b8744a", bamboo: "#d9bf5e", pufoam: "#9fb8c9", xpsfoam: "#8fb3a1" };
+const _WOOD_PALETTE = ["#d9b98a", "#8a5a3a", "#c8935a", "#f0e0c0", "#6e4a2e", "#b8a070"];
+const coreWoodColor = k => { if (_WOOD_TONES[k]) return _WOOD_TONES[k]; const keys = Object.keys(CORE_MATERIALS); const i = keys.indexOf(k); return _WOOD_PALETTE[(i < 0 ? 0 : i) % _WOOD_PALETTE.length]; };
+// Name a core layer the way a builder would: one wood reads "Poplar core"; more than one reads "Mixed wood core".
+function coreLayerName(L) {
+  const st = coreStrips(L);
+  if (st) { const sp = [...new Set(st.map(s => s.mat))]; return sp.length > 1 ? `Mixed wood core (${st.length} strips)` : ((CORE_MATERIALS[sp[0]] || CORE_MATERIALS.poplar).name + " core"); }
+  const ws = coreWoods(L); return ws.length > 1 ? "Mixed wood core" : ((CORE_MATERIALS[ws[0].mat] || CORE_MATERIALS.poplar).name + " core");
+}
 function coreStrips(L) { return (L && L.stripMode && Array.isArray(L.strips) && L.strips.length) ? L.strips : null; }
 function stripSpans(strips) { const T = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0); let x = -T / 2; return strips.map(s => { const a = x; x += Math.max(0, s.width || 0); return { mat: s.mat, density: s.density, a, b: x }; }); }
 function stripCoreAt(L, hw) {
@@ -3610,7 +3622,7 @@ function layupStack(ski) {
       const L = lu.stack[i];
       if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
       else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: (L.thick != null ? L.thick : 1.2), count: 1 }); }
-      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const stq = coreStrips(L); const nm = stq ? (stq.length + "-strip core: " + stq.map(s => (CORE_MATERIALS[s.mat] || {}).name || "Wood").join(" / ")) : ws.length > 1 ? (ws.map(w => (CORE_MATERIALS[w.mat] || {}).name || "Wood").join(" + ") + " core") : (((CORE_MATERIALS[ws[0].mat] || WOODS.poplar).name || "Wood") + " core"); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
+      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const stq = coreStrips(L); const nm = stq && new Set(stq.map(s => s.mat)).size > 1 ? `Mixed wood core, ${stq.length} strips: ${stq.map(s => (CORE_MATERIALS[s.mat] || {}).name || "Wood").join(" / ")}` : coreLayerName(L); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
       else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; St.push({ role: "veneer", name: (w.name || "Wood") + " veneer \u00B7 " + (L.thick != null ? L.thick : 0.6) + "mm", thick: (L.thick != null ? L.thick : 0.6), count: 1 }); }
       else if (L.kind === "vds") { St.push({ role: "vds", name: "VDS rubber \u00B7 " + (L.thick != null ? L.thick : 0.2) + "mm", thick: (L.thick != null ? L.thick : 0.2), count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
@@ -8106,6 +8118,79 @@ function InsertDiagram({ C, prof }) {
     </svg>
   );
 }
+// Top-down view of a mid-section of the core, for the main Layup view: a slice around the waist, drawn large
+// (not the whole ski shrunk to fit), showing the core strips, sidewalls and steel edges with readable labels.
+// Tip is to the right; looking down on the top, strip 1 (the left edge) is at the top of the drawing.
+function CoreStripTopView({ ski, width, height }) {
+  const L = ski.length;
+  let outline = [], core = [];
+  try { outline = getFullOutlinePoints(ski) || []; } catch (e) {}
+  try { core = applyVCutToCore(ski) || []; } catch (e) {}
+  if (outline.length < 3 || core.length < 3 || width < 200 || height < 160) return null;
+  const coreL = ((ski.layup && ski.layup.stack) || []).find(l => l.kind === "core");
+  const st = coreL ? coreStrips(coreL) : null;
+  const ws = coreL ? coreWoods(coreL) : [{ mat: "poplar" }];
+  const bands = st ? stripSpans(st).map((q, i) => ({ ...q, n: i + 1, w: st[i].width })) : [{ mat: ws[0].mat, a: -2000, b: 2000, n: 0 }];
+  // Section: centered on the narrowest point between the contacts (the waist)
+  const tailC = ski.tailLength, tipC = L - ski.tipLength;
+  let xc = L / 2, bw = 1e9;
+  for (let i = 0; i <= 120; i++) { const x = tailC + (tipC - tailC) * i / 120; let w = 1e9; try { w = getWidthAtPos(ski, x / L); } catch (e) {} if (w < bw) { bw = w; xc = x; } }
+  // Scale to fill the height with the ski's width, then show as much length as fits (60 to 300 mm).
+  const padL = 86, padR = 250, padT = 58, padB = 46;
+  let latMax = bw / 2; outline.forEach(p => { if (Math.abs(p.y - xc) <= 150) latMax = Math.max(latMax, Math.abs(p.x)); });
+  let sc = (height - padT - padB) / (2 * latMax);
+  let S = Math.min(300, (tipC - tailC) * 0.8, (width - padL - padR) / sc);
+  if (S < 60) { S = 60; sc = (width - padL - padR) / S; }
+  const x0 = xc - S / 2, x1 = xc + S / 2;
+  const midY = padT + (height - padT - padB) / 2;
+  const X = a => padL + (a - x0) * sc, Y = lat => midY + lat * sc;
+  const oPts = outline.map(p => `${X(p.y).toFixed(1)},${Y(p.x).toFixed(1)}`).join(" ");
+  const cPts = core.map(p => `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ");
+  // core half-widths at the section center, from the core outline itself
+  const coreAt = xx => { let pos = -1e9, neg = 1e9; for (let i = 0; i < core.length; i++) { const a = core[i], b = core[(i + 1) % core.length]; if ((a.x - xx) * (b.x - xx) <= 0 && a.x !== b.x) { const t = (xx - a.x) / (b.x - a.x), y = a.y + t * (b.y - a.y); pos = Math.max(pos, y); neg = Math.min(neg, y); } } return pos > -1e8 ? [neg, pos] : [-bw / 2, bw / 2]; };
+  const [cNeg, cPos] = coreAt(xc), [eNeg, ePos] = coreAt(x1 - 0.01);
+  const sw = sidewallProps(ski.layup && ski.layup.sidewall);
+  const txt = "#e8dcc8", dim = "#8a7f70", brass = "#c8935a", edgeCol = "#a9b0b7", swCol = "#3d3b44";
+  const id = "cstv" + Math.round(xc);
+  // strip labels on the right, pushed apart so they never overlap
+  const vis = bands.map(q => ({ ...q, ya: Math.max(q.a, eNeg), yb: Math.min(q.b, ePos), atWaist: Math.max(0, Math.min(q.b, cPos) - Math.max(q.a, cNeg)) })).filter(q => q.yb > q.ya);
+  let lastY = -1e9; const labs = vis.map(q => { let y = Y((q.ya + q.yb) / 2); y = Math.max(y, lastY + 16); lastY = y; return { ...q, ly: y }; });
+  const nm = k => (CORE_MATERIALS[k] || CORE_MATERIALS.poplar).name;
+  const f = v => (Math.round(v * 10) / 10).toString();
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: "block", background: "#141210", borderRadius: 4 }} role="img" aria-label="Top view of a section of the core">
+      <defs>
+        <clipPath id={id + "s"}><rect x={X(x0)} y={0} width={S * sc} height={height} /></clipPath>
+        <clipPath id={id + "o"}><polygon points={oPts} /></clipPath>
+        <clipPath id={id + "c"}><polygon points={cPts} /></clipPath>
+      </defs>
+      <text x={16} y={24} fill={brass} fontSize="13" fontFamily="'JetBrains Mono', monospace" letterSpacing="2">{st ? "CORE STRIPS" : "CORE"} {"\u00b7"} TOP VIEW</text>
+      <text x={16} y={42} fill={dim} fontSize="11.5" fontFamily="'JetBrains Mono', monospace">{Math.round(S)} mm section at the waist (narrowest point between the contacts) {"\u00b7"} tip {"\u2192"}</text>
+      <g clipPath={`url(#${id}s)`}>
+        <polygon points={oPts} fill={swCol} />
+        <g clipPath={`url(#${id}o)`}><polygon points={oPts} fill="none" stroke={edgeCol} strokeWidth={2 * EDGE_W * sc} /></g>
+        <g clipPath={`url(#${id}c)`}>
+          {bands.map((q, i) => <rect key={i} x={X(x0)} y={Y(Math.max(q.a, -latMax - 5))} width={S * sc} height={Math.max(0, (Math.min(q.b, latMax + 5) - Math.max(q.a, -latMax - 5)) * sc)} fill={coreWoodColor(q.mat)} />)}
+          {bands.slice(1).map((q, i) => <line key={"s" + i} x1={X(x0)} x2={X(x1)} y1={Y(q.a)} y2={Y(q.a)} stroke="rgba(0,0,0,0.45)" strokeWidth={1} />)}
+        </g>
+        <polygon points={cPts} fill="none" stroke="rgba(0,0,0,0.5)" strokeWidth={1} />
+      </g>
+      <line x1={X(x0)} x2={X(x0)} y1={padT - 8} y2={height - padB + 8} stroke={dim} strokeDasharray="5 4" />
+      <line x1={X(x1)} x2={X(x1)} y1={padT - 8} y2={height - padB + 8} stroke={dim} strokeDasharray="5 4" />
+      <line x1={X(x0) - 26} x2={X(x0) - 26} y1={Y(cNeg)} y2={Y(cPos)} stroke={brass} strokeWidth={1.2} />
+      <line x1={X(x0) - 31} x2={X(x0) - 21} y1={Y(cNeg)} y2={Y(cNeg)} stroke={brass} /><line x1={X(x0) - 31} x2={X(x0) - 21} y1={Y(cPos)} y2={Y(cPos)} stroke={brass} />
+      <text x={X(x0) - 34} y={midY} fill={txt} fontSize="12" fontFamily="'JetBrains Mono', monospace" textAnchor="middle" transform={`rotate(-90 ${X(x0) - 34} ${midY})`}>core {f(cPos - cNeg)} mm</text>
+      {labs.map((q, i) => (<g key={"l" + i}>
+        <line x1={X(x1) + 3} y1={Y((q.ya + q.yb) / 2)} x2={X(x1) + 14} y2={q.ly} stroke={dim} />
+        <rect x={X(x1) + 17} y={q.ly - 6} width={11} height={11} fill={coreWoodColor(q.mat)} />
+        <text x={X(x1) + 33} y={q.ly + 4} fill={txt} fontSize="12.5" fontFamily="'JetBrains Mono', monospace">{q.n ? `${q.n}  ${nm(q.mat)}  ${f(q.w)} mm` + (q.atWaist < q.w - 0.1 ? `, ${f(q.atWaist)} at the waist` : "") : `${nm(q.mat)} (one piece)`}</text>
+      </g>))}
+      <rect x={16} y={height - 26} width={11} height={11} fill={edgeCol} /><text x={32} y={height - 16} fill={dim} fontSize="11" fontFamily="'JetBrains Mono', monospace">steel edge</text>
+      <rect x={130} y={height - 26} width={11} height={11} fill={swCol} stroke={dim} strokeWidth={0.5} /><text x={146} y={height - 16} fill={dim} fontSize="11" fontFamily="'JetBrains Mono', monospace">{sw ? "sidewall" : "space outside the core (no sidewall set)"}</text>
+      {st && <text x={width - 12} y={height - 16} fill={dim} fontSize="11" fontFamily="'JetBrains Mono', monospace" textAnchor="end">strip 1 = left edge, looking down with the tip away</text>}
+    </svg>
+  );
+}
 function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }) {
   const [txt, setTxt] = useState(value == null ? "" : String(value));
   const focused = useRef(false);
@@ -10429,7 +10514,7 @@ export default function App() {
             const mv = (idx, dir) => { const j = idx + dir; if (j < 0 || j >= stack.length) return; if (isPinned(stack[idx]) || isPinned(stack[j])) return; const ns = stack.slice(); const t = ns[idx]; ns[idx] = ns[j]; ns[j] = t; setStack(ns); };
             const rm = idx => setStack(stack.filter((_, i) => i !== idx));
             const addLayer = spec => { const ns = stack.slice(); if (spec.kind === "base") { if (!ns.some(l => l.kind === "base")) ns.unshift({ id: _sid(), kind: "base" }); } else if (spec.kind === "topsheet") { if (!ns.some(l => l.kind === "topsheet")) ns.push({ id: _sid(), kind: "topsheet" }); } else { const it = { id: _sid(), ...spec, ...((spec.kind === "fabric" || spec.kind === "uni") ? { gsm: FIBERS[spec.mat].gsm } : {}) }; const ti = ns.findIndex(l => l.kind === "topsheet"); if (ti >= 0) ns.splice(ti, 0, it); else ns.push(it); } setStack(ns); };
-            const nm = L => L.kind === "topsheet" ? "Topsheet" : L.kind === "base" ? "Base + steel edges" : L.kind === "core" ? ((CORE_MATERIALS[L.mat || L.wood] || WOODS.poplar).name + (L.mat2 && L.pct2 > 0 ? " + " + ((CORE_MATERIALS[L.mat2] || {}).name || "?") : "") + " core") : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : L.kind === "veneer" ? "Wood veneer" : L.kind === "vds" ? "VDS rubber (damping)" : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
+            const nm = L => L.kind === "topsheet" ? "Topsheet" : L.kind === "base" ? "Base + steel edges" : L.kind === "core" ? coreLayerName(L) : L.kind === "metal" ? (METALS[L.mat] || METALS.titanal).name : L.kind === "veneer" ? "Wood veneer" : L.kind === "vds" ? "VDS rubber (damping)" : (FIBERS[L.mat] || FIBERS.glassBiax).name + (L.kind === "uni" ? (L.width > 0 ? " \u00B7 " + L.width + "mm" : " \u00B7 full") : "");
             const col = L => L.kind === "topsheet" ? "#2a2620" : L.kind === "base" ? "#1c1a17" : L.kind === "core" ? "#b0824e" : L.kind === "veneer" ? "#c99a5e" : L.kind === "vds" ? "#3a3a3e" : L.kind === "metal" ? "#8f99a6" : String(L.mat).startsWith("carbon") ? "#e8552a" : String(L.mat).startsWith("flax") ? "#9a8f5f" : "#d8b48a";
             const upd = (idx, patch) => setStack(stack.map((l, i) => i === idx ? { ...l, ...patch } : l));
             const inp = { width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
@@ -10488,100 +10573,71 @@ export default function App() {
                             {!preset && <><input type="number" value={et} step={0.1} min={0.3} max={4} onChange={e => upd(idx, { edgeThick: parseFloat(e.target.value) || bt })} style={{ ...inp, width: 52 }} /><span style={gL}>mm</span></>}</>}
                           </>); })()}
                           {L.kind === "core" && (() => {
-                            const cp = coreProps(L); const gLab = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" };
-                            const ws = coreWoods(L);
+                            // Core wood. One species is a solid core. A mixed-wood core is glued up in strips: the builder
+                            // picks two woods, a strip count and a core width; the width is divided evenly and the woods
+                            // alternate, then any strip's wood and width can be changed.
+                            const cp = coreProps(L);
+                            const gLab = { color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" };
+                            const hLab = { color: C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace" };
                             const woodKeys = Object.keys(CORE_MATERIALS);
-                            const commit = nw => upd(idx, { woods: nw, mat: nw[0].mat, wood: nw[0].mat, mat2: undefined, pct2: undefined, density: undefined });
-                            const setMat = (wi, mat) => commit(ws.map((x, i) => i === wi ? { ...x, mat, density: undefined } : { ...x }));
-                            const setDens = (wi, v) => commit(ws.map((x, i) => i === wi ? { ...x, density: (v === "" ? undefined : (parseFloat(v) || 0)) } : { ...x }));
-                            const setPct = (wi, val) => {
-                              const v = Math.max(0, Math.min(100, Math.round(parseFloat(val) || 0)));
-                              const nw = ws.map(x => ({ ...x })); const others = nw.map((_, i) => i).filter(i => i !== wi);
-                              const remaining = 100 - v; const otherSum = others.reduce((a, i) => a + (nw[i].pct || 0), 0); let alloc = 0;
-                              others.forEach((i, k) => { if (k === others.length - 1) nw[i].pct = remaining - alloc; else { const s = otherSum > 0 ? Math.round(remaining * (nw[i].pct || 0) / otherSum) : Math.round(remaining / others.length); nw[i].pct = s; alloc += s; } });
-                              nw[wi].pct = v; commit(nw);
-                            };
-                            const addWood = () => { const used = ws.map(w => w.mat); const avail = woodKeys.find(k => !used.includes(k)) || "poplar"; const nw = [...ws.map(x => ({ ...x })), { mat: avail }]; const eq = Math.floor(100 / nw.length); nw.forEach((x, i) => x.pct = i === nw.length - 1 ? 100 - eq * (nw.length - 1) : eq); commit(nw); };
-                            const removeWood = wi => { const nw = ws.filter((_, i) => i !== wi).map(x => ({ ...x })); if (nw.length === 1) nw[0].pct = 100; else { const sum = nw.reduce((a, x) => a + (x.pct || 0), 0) || 1; let alloc = 0; nw.forEach((x, i) => { if (i === nw.length - 1) x.pct = 100 - alloc; else { x.pct = Math.round((x.pct || 0) / sum * 100); alloc += x.pct; } }); } commit(nw); };
-                            const multi = ws.length > 1;
-                            const stripOn = !!L.stripMode;
-                            const modeBtn = (on, lab, click) => <button onClick={click} style={{ padding: "3px 9px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", borderRadius: 3, cursor: "pointer", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}` }}>{lab}</button>;
-                            // Core width the strips must cover: the widest point of the actual core outline.
+                            const woodName = k => (CORE_MATERIALS[k] || CORE_MATERIALS.poplar).name;
+                            const woodSel = (val, onChange) => <select value={val} onChange={e => onChange(e.target.value)} style={{ ...inp, width: "auto", fontSize: 12 }}>{woodKeys.map(k => <option key={k} value={k}>{woodName(k)}</option>)}</select>;
+                            const ws = coreWoods(L);
                             let corePoly = []; try { corePoly = applyVCutToCore(ski) || []; } catch (e) {}
                             const needW = corePoly.length ? Math.ceil(2 * Math.max(...corePoly.map(q => Math.abs(q.y)))) : 0;
-                            const strips = (L.strips && L.strips.length) ? L.strips : [{ mat: ws[0].mat, width: needW || 100 }];
-                            const setStrips = ns => upd(idx, { strips: ns, stripMode: true });
-                            const totW = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0);
-                            const setCount = n => { const k = Math.max(1, Math.min(41, Math.round(n) || 1)); const ns = strips.slice(0, k).map(s => ({ ...s })); while (ns.length < k) ns.push({ ...ns[ns.length - 1] }); setStrips(ns); };
-                            const setStrip = (si, patch) => setStrips(strips.map((s, i) => i === si ? { ...s, ...patch } : { ...s }));
-                            const moveStrip = (si, d) => { const j = si + d; if (j < 0 || j >= strips.length) return; const ns = strips.map(s => ({ ...s })); const t = ns[si]; ns[si] = ns[j]; ns[j] = t; setStrips(ns); };
-                            const equalize = () => { if (!needW) return; const wEach = Math.round((needW / strips.length) * 10) / 10; setStrips(strips.map(s => ({ ...s, width: wEach }))); };
-                            const woodCol = k => { const pal = ["#c8935a", "#e8d3a8", "#8a5a3a", "#b8a070", "#6e4a2e", "#d9b98a", "#a07850", "#f0e0c0", "#5a3a22", "#caa46a"]; const i = woodKeys.indexOf(k); return pal[(i < 0 ? 0 : i) % pal.length]; };
-                            const stripEditor = (() => {
-                              const xs = corePoly.map(q => q.x), minX = xs.length ? Math.min(...xs) : 0, maxX = xs.length ? Math.max(...xs) : ski.length;
-                              const hwMax = Math.max(needW / 2, totW / 2, 1), spanX = Math.max(1, maxX - minX);
-                              const sp = stripSpans(strips), clipId = "coreclip-" + (L.id || idx);
-                              const polyPts = corePoly.map(q => `${(q.x - minX).toFixed(1)},${q.y.toFixed(1)}`).join(" ");
-                              const used = [...new Set(strips.map(s => s.mat))];
-                              return (
-                                <div style={{ flexBasis: "100%" }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 5 }}>
-                                    <span style={gLab}>Number of strips</span>
-                                    <NumberInput value={strips.length} min={1} max={41} step={1} onCommit={setCount} style={{ ...inp, width: 48 }} />
-                                    <button onClick={equalize} title="Set every strip to the same width so together they span the widest point of the core" style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, borderRadius: 3, fontSize: 10, padding: "3px 7px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Equal widths to {needW} mm</button>
-                                  </div>
-                                  <div style={{ ...gLab, marginBottom: 4 }}>Strip 1 is the left edge, looking down on the top with the tip pointing away.</div>
-                                  {strips.map((s, si) => { const m = CORE_MATERIALS[s.mat] || CORE_MATERIALS.poplar; return (
-                                    <div key={si} style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
-                                      <span style={{ width: 10, height: 10, borderRadius: 2, background: woodCol(s.mat), display: "inline-block" }} />
-                                      <span style={{ ...gLab, width: 18 }}>{si + 1}</span>
-                                      <select value={s.mat} onChange={e => setStrip(si, { mat: e.target.value, density: undefined })} style={{ ...inp, width: "auto" }}>{woodKeys.map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
-                                      <NumberInput value={s.width} min={0.5} max={600} step={0.5} onCommit={v => setStrip(si, { width: v })} style={{ ...inp, width: 54 }} /><span style={gLab}>mm</span>
-                                      <input type="number" value={s.density != null ? s.density : ""} placeholder={String(m.density)} min={0} step={10} title="Measured density (optional) — blank uses the table value" onChange={e => setStrip(si, { density: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 50 }} /><span style={gLab}>kg/m³</span>
-                                      <button onClick={() => moveStrip(si, -1)} disabled={si === 0} style={{ background: "transparent", border: "none", color: si === 0 ? C.inputBorder : C.label, cursor: si === 0 ? "default" : "pointer", fontSize: 11 }}>{"▲"}</button>
-                                      <button onClick={() => moveStrip(si, 1)} disabled={si === strips.length - 1} style={{ background: "transparent", border: "none", color: si === strips.length - 1 ? C.inputBorder : C.label, cursor: si === strips.length - 1 ? "default" : "pointer", fontSize: 11 }}>{"▼"}</button>
-                                    </div>); })}
-                                  <div style={{ ...gLab, marginTop: 4, color: totW + 0.05 < needW ? "#e8552a" : C.labelDim }}>
-                                    Strips total {Math.round(totW * 10) / 10} mm; the core is {needW} mm at its widest.{totW + 0.05 < needW ? " The strips don't reach the core edges, so the uncovered part is modeled as if it matched the strips inside it. Widen the strips." : ""}
-                                  </div>
-                                  {corePoly.length > 2 && (
-                                    <div style={{ marginTop: 6 }}>
-                                      <svg viewBox={`0 ${-hwMax} ${spanX} ${2 * hwMax}`} preserveAspectRatio="none" style={{ width: "100%", height: 84, display: "block", background: C.inputBg, borderRadius: 4 }}>
-                                        <defs><clipPath id={clipId}><polygon points={polyPts} /></clipPath></defs>
-                                        <g clipPath={`url(#${clipId})`}>{sp.map((q, qi) => <rect key={qi} x={0} y={q.a} width={spanX} height={Math.max(0, q.b - q.a)} fill={woodCol(q.mat)} />)}</g>
-                                        {sp.slice(1).map((q, qi) => <line key={"b" + qi} x1={0} x2={spanX} y1={q.a} y2={q.a} stroke="rgba(0,0,0,0.35)" strokeWidth={0.4} vectorEffect="non-scaling-stroke" clipPath={`url(#${clipId})`} />)}
-                                        <polygon points={polyPts} fill="none" stroke={C.label} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                                      </svg>
-                                      <div style={{ display: "flex", justifyContent: "space-between", ...gLab, marginTop: 2 }}><span>TAIL</span><span>top view · width exaggerated · strip 1 on top</span><span>TIP {"→"}</span></div>
-                                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 3 }}>{used.map(k => <span key={k} style={{ ...gLab, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 9, height: 9, background: woodCol(k), borderRadius: 2, display: "inline-block" }} />{(CORE_MATERIALS[k] || {}).name || k}</span>)}</div>
-                                    </div>
-                                  )}
-                                  <div style={{ ...gLab, marginTop: 5, lineHeight: 1.4 }}>Flex uses the wood actually inside the core at each point along the ski, so outer strips trimmed by the sidecut count for less at the waist. Weight uses the same strips.</div>
+                            const stripOn = !!L.stripMode && Array.isArray(L.strips) && L.strips.length > 0;
+                            const legacyBlend = !stripOn && ws.length > 1;
+                            const makeStrips = (a, b, n, total) => { const w = Math.floor(total / n * 10) / 10; const arr = Array.from({ length: n }, (_, i) => ({ mat: i % 2 === 0 ? a : b, width: w })); const mid = Math.floor(n / 2); arr[mid].width = Math.round((total - w * (n - 1)) * 10) / 10; return arr; };   // any rounding leftover goes on the middle strip, so an odd count stays symmetric
+                            const woodA = L.stripA || (stripOn ? L.strips[0].mat : ws[0].mat);
+                            const woodB = L.stripB || (stripOn ? ((L.strips.find(s => s.mat !== woodA) || {}).mat || woodA) : (ws[1] ? ws[1].mat : (woodKeys.find(k => k !== woodA) || woodA)));
+                            const coreW = L.coreWidth > 0 ? L.coreWidth : needW;
+                            const nStr = stripOn ? L.strips.length : 3;
+                            const regen = patch => { const a = patch.a || woodA, b = patch.b || woodB, n = Math.max(1, Math.min(41, Math.round(patch.n || nStr))), tw = patch.w > 0 ? patch.w : (coreW || 100); upd(idx, { stripMode: true, stripA: a, stripB: b, coreWidth: tw, strips: makeStrips(a, b, n, tw), mat: a, wood: a, woods: [{ mat: a, pct: 100 }] }); };
+                            const oneWood = mat => upd(idx, { stripMode: false, woods: [{ mat, pct: 100 }], mat, wood: mat, mat2: undefined, pct2: undefined, density: undefined });
+                            const btn2 = { background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" };
+                            if (!stripOn) {
+                              const m = CORE_MATERIALS[ws[0].mat] || CORE_MATERIALS.poplar;
+                              return (<div style={{ flexBasis: "100%" }}>
+                                {legacyBlend && <div style={{ ...gLab, color: C.heading, marginBottom: 6, lineHeight: 1.45 }}>This design uses an older percentage mix ({ws.map(w => woodName(w.mat) + " " + (w.pct || 0) + "%").join(", ")}). Mixed-wood cores are now set up as strips. <button onClick={() => regen({ a: ws[0].mat, b: ws[1].mat, n: 3, w: needW })} style={{ ...btn2, marginLeft: 4 }}>Convert to strips</button></div>}
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+                                  <span style={hLab}>Wood</span>{woodSel(ws[0].mat, v => oneWood(v))}
+                                  <span style={gLab}>density</span><input type="number" value={ws[0].density != null ? ws[0].density : m.density} min={0} step={10} onChange={e => upd(idx, { woods: [{ ...ws[0], pct: 100, density: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) }] })} style={{ ...inp, width: 56 }} /><span style={gLab}>kg/m{"\u00b3"}</span>
                                 </div>
-                              );
-                            })();
-                            return (<>
-                              <div style={{ flexBasis: "100%", display: "flex", gap: 5, alignItems: "center", marginBottom: 5 }}>
-                                <span style={gLab}>Core built as</span>
-                                {modeBtn(!stripOn, "Blend by %", () => upd(idx, { stripMode: false }))}
-                                {modeBtn(stripOn, "Strips", () => upd(idx, { stripMode: true, strips: strips.map(s => ({ ...s })) }))}
+                                <button onClick={() => regen({ a: ws[0].mat, b: ws[1] ? ws[1].mat : (woodKeys.find(k => k !== ws[0].mat) || ws[0].mat), n: 3, w: needW })} style={btn2}>+ Mix in a second wood (strips)</button>
+                              </div>);
+                            }
+                            const strips = L.strips, totW = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0);
+                            const setStrip = (si, patch) => upd(idx, { strips: strips.map((s, i) => i === si ? { ...s, ...patch } : { ...s }) });
+                            const moveStrip = (si, d) => { const j = si + d; if (j < 0 || j >= strips.length) return; const ns = strips.map(s => ({ ...s })); const t = ns[si]; ns[si] = ns[j]; ns[j] = t; upd(idx, { strips: ns }); };
+                            const species = [...new Set(strips.map(s => s.mat))];
+                            return (<div style={{ flexBasis: "100%" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                <span style={{ ...hLab, color: C.heading, fontWeight: 700 }}>Mixed wood core, {strips.length} strips</span>
+                                <button onClick={() => oneWood(woodA)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, borderRadius: 4, fontSize: 10.5, padding: "3px 8px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Use one wood</button>
                               </div>
-                              {stripOn ? stripEditor : (<>
-                              {ws.map((w, wi) => { const m = CORE_MATERIALS[w.mat] || CORE_MATERIALS.poplar; const dens = w.density != null ? w.density : m.density; return (
-                                <div key={wi} style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
-                                  <select value={w.mat} onChange={e => setMat(wi, e.target.value)} style={{ ...inp, width: "auto" }}>{woodKeys.map(k => <option key={k} value={k}>{CORE_MATERIALS[k].name}</option>)}</select>
-                                  <input type="number" value={dens} min={0} step={10} onChange={e => setDens(wi, e.target.value)} style={{ ...inp, width: 52 }} /><span style={gLab}>kg/m³</span>
-                                  {multi && <><input type="number" value={w.pct != null ? w.pct : 0} min={0} max={100} step={5} onChange={e => setPct(wi, e.target.value)} style={{ ...inp, width: 44 }} /><span style={gLab}>%</span></>}
-                                  {multi && <button onClick={() => removeWood(wi)} title="remove this wood" style={{ background: "transparent", border: "none", color: C.controlHover, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>✕</button>}
-                                </div>
-                              ); })}
-                              <div style={{ flexBasis: "100%", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                {ws.length < 4 && <button onClick={addWood} style={{ background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "3px 8px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>+ add wood</button>}
-                                <span style={gLab}>{multi ? `= blend ${Math.round(cp.density)} kg/m³ · E` : "E"}</span>
-                                <input type="number" value={L.E != null ? L.E : ""} placeholder={String(Math.round(cp.eComputed))} min={0} step={500} onChange={e => upd(idx, { E: e.target.value === "" ? undefined : (parseFloat(e.target.value) || 0) })} style={{ ...inp, width: 62 }} /><span style={gLab}>MPa (blank = auto {Math.round(cp.eComputed)})</span>
+                              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 10px", alignItems: "center", marginBottom: 6 }}>
+                                <span style={hLab}>Wood 1</span><div>{woodSel(woodA, v => regen({ a: v }))}</div>
+                                <span style={hLab}>Wood 2</span><div>{woodSel(woodB, v => regen({ b: v }))}</div>
+                                <span style={hLab}>Number of strips</span><div><NumberInput value={strips.length} min={1} max={41} step={1} onCommit={v => regen({ n: v })} style={{ ...inp, width: 60, fontSize: 12 }} /></div>
+                                <span style={hLab}>Core width</span><div style={{ display: "flex", alignItems: "center", gap: 6 }}><NumberInput value={coreW} min={10} max={600} step={1} onCommit={v => regen({ w: v })} style={{ ...inp, width: 70, fontSize: 12 }} /><span style={gLab}>mm (widest point of this core: {needW} mm)</span></div>
                               </div>
-                              </>)}
-                            </>); })()}
+                              <div style={{ ...gLab, lineHeight: 1.45, marginBottom: 8 }}>Changing any of these divides the width evenly and alternates the two woods. Then change any strip below. Strip 1 is the left edge, looking down on the top with the tip pointing away.</div>
+                              {strips.map((s, si) => (
+                                <div key={si} style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 5 }}>
+                                  <span style={{ width: 12, height: 12, borderRadius: 2, background: coreWoodColor(s.mat), display: "inline-block", flex: "none" }} />
+                                  <span style={{ ...hLab, width: 22 }}>{si + 1}</span>
+                                  {woodSel(s.mat, v => setStrip(si, { mat: v, density: undefined }))}
+                                  <NumberInput value={s.width} min={0.5} max={600} step={0.5} onCommit={v => setStrip(si, { width: v })} style={{ ...inp, width: 62, fontSize: 12 }} /><span style={gLab}>mm</span>
+                                  <button onClick={() => moveStrip(si, -1)} disabled={si === 0} title="Move toward the left edge" style={{ background: "transparent", border: "none", color: si === 0 ? C.inputBorder : C.label, cursor: si === 0 ? "default" : "pointer", fontSize: 12 }}>{"\u25B2"}</button>
+                                  <button onClick={() => moveStrip(si, 1)} disabled={si === strips.length - 1} title="Move toward the right edge" style={{ background: "transparent", border: "none", color: si === strips.length - 1 ? C.inputBorder : C.label, cursor: si === strips.length - 1 ? "default" : "pointer", fontSize: 12 }}>{"\u25BC"}</button>
+                                </div>))}
+                              <div style={{ ...hLab, marginTop: 6, color: Math.abs(totW - coreW) > 0.05 ? "#e8552a" : C.labelDim }}>
+                                Strips add up to {Math.round(totW * 10) / 10} mm of the {coreW} mm core width.{Math.abs(totW - coreW) > 0.05 ? " Adjust a strip so they match." : ""}
+                              </div>
+                              {coreW + 0.05 < needW && <div style={{ ...hLab, color: "#e8552a", marginTop: 3 }}>The core width is narrower than this core's widest point ({needW} mm), so the strips won't reach the edges there.</div>}
+                              <div style={{ ...gLab, marginTop: 6, lineHeight: 1.45 }}>See the strips from above in the Layup view. Flex and weight use the wood actually inside the core at each point along the ski ({species.map(woodName).join(", ")}).</div>
+                            </div>);
+                          })()}
                         </div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0, width: 16, alignItems: "center" }}>
@@ -11250,12 +11306,15 @@ export default function App() {
           <div style={{ height: layersH, position: "relative", overflow: "auto", background: "#141210" }}>
             {(() => {
               const w = Math.min(560, Math.max(280, canvasW - 40));
+              const sideBySide = canvasW - w - 40 >= 420;   // room for the core top view beside the cross-section
+              const topW = sideBySide ? canvasW - w - 40 : Math.max(280, canvasW - 24), topH = sideBySide ? Math.max(280, Math.min(layersH - 24, 480)) : 320;
               const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40, maxH: layersH - 64 });
               const h = r.height + 64;
               const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#141210"/><text x="20" y="28" font-size="13" fill="#c8935a" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>${r.svg}</svg>`;
               return (
-                <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+                <div style={{ display: "flex", flexDirection: sideBySide ? "row" : "column", justifyContent: "center", alignItems: sideBySide ? "flex-start" : "center", gap: 12, padding: "8px 0" }}>
                   <img src={"data:image/svg+xml;utf8," + encodeURIComponent(svg)} alt="Layup cross-section" style={{ maxWidth: "100%", height: "auto" }} />
+                  <CoreStripTopView ski={ski} width={topW} height={topH} />
                 </div>
               );
             })()}
@@ -11266,7 +11325,7 @@ export default function App() {
           <div style={{ height: camH, position: "relative", background: "#14100d" }}>
             <ToolpathView gcode={camResult.gcode} width={canvasW} height={camH} />
             <div style={{ position: "absolute", left: 12, top: 10, color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>
-              TOOLPATH · {camOpt.op === "outline" ? "OUTLINE" : camOpt.op === "mold" ? "MOLD" : camOpt.op === "slat" ? "SLATS" : camOpt.op === "bore" ? "BORE" : camOpt.op === "pocket" ? "POCKET" : camOpt.op === "base" ? "BASE (DRAG KNIFE)" : "SURFACE TAPER"}
+              TOOLPATH · {(CAM_STEP_NAMES[camOpt.op] || camOpt.op).toUpperCase()}
             </div>
             {camResult.stats && (
               <div style={{ position: "absolute", right: 12, top: 10, color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
