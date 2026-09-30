@@ -3751,6 +3751,18 @@ function arcFitGcode(gcode, tol, dec, lineNum) {
   return out.join("\n");
 }
 
+// CAM jobs: what each "What are you cutting?" choice sets up, and which files (ops) belong to its steps.
+function camJobPatch(j) {
+  if (j === "coreInserts") return { job: j, op: "bore", pinOrigin: true, alignDrillOp: "bore" };
+  if (j === "core") return { job: j, op: "outline", outlineSide: "top", pinOrigin: false, alignDrillOp: "outline" };
+  return { job: j, op: j === "mold" ? "mold" : j };
+}
+function camJobOps(j, o) {
+  if (j === "coreInserts") return o.boreWithProfile === false ? ["bore", "outline", "taper"] : ["bore", "taper"];
+  if (j === "core") return ["outline", "taper"];
+  if (j === "mold") return ["mold", "slat"];
+  return [j];
+}
 // Plain names for each kind of CAM file, used in the UI, download filenames and setup sheets.
 const CAM_STEP_NAMES = { outline: "Cut out the core shape", taper: "Shape the top face", mold: "Carved press mold", slat: "Press mold ribs", bore: "Machine the bottom face", pocket: "Clear a recess", base: "Cut the base material" };
 const CAM_FILE_SLUGS = { outline: "core-shape", taper: "top-face", mold: "press-mold", slat: "mold-ribs", bore: "bottom-face", pocket: "recess", base: "base" };
@@ -8958,6 +8970,14 @@ export default function App() {
   // Where the alignment dowels are drilled: in the first (bottom-side) op when the design has inserts, so the
   // blank can be flipped onto pins; otherwise with the core profile, as before. The builder can override.
   const alignDrillOp = camOpt.alignDrillOp || (designInsertPts.length ? "bore" : "outline");
+  // Never leave the CAM steps with nothing open. If no job has been chosen yet, set up the one that fits the
+  // design (same as clicking it). If the current file isn't one of the job's steps, open the job's first step.
+  useEffect(() => {
+    if (!camOpt.job) { setCamMany(camJobPatch(designInsertPts.length ? "coreInserts" : "core")); return; }
+    const ops = camJobOps(camOpt.job, camOpt);
+    const sideOk = camOpt.op !== "outline" || (camOpt.job === "core" ? (camOpt.outlineSide || "top") === "top" : camOpt.job !== "coreInserts" || camOpt.outlineSide === "bottom");
+    if (!ops.includes(camOpt.op) || !sideOk) setCamMany(camJobPatch(camOpt.job));
+  }, [camOpt.job, camOpt.op, camOpt.outlineSide, camOpt.boreWithProfile, designInsertPts.length]);
   const borePts = useMemo(() => {
     if (camOpt.op !== "bore") return null;
     if ((camOpt.boreSrc || "design") === "design") return designInsertPts;
@@ -11772,13 +11792,7 @@ export default function App() {
                   if (pf === "cone") { if (!(camOpt.insConeBotDia > 0)) insMissing.push("D"); if (!(camOpt.insConeStep > 0)) insMissing.push("step height"); }
                   if (camOpt.insBarrelMode === "depth" && !(camOpt.insBarrelDepth > 0)) insMissing.push("hole depth");
                   const JOBS = [["coreInserts", "Core with inserts", "Cut on both faces"], ["core", "Core without inserts", "Top face only"], ["mold", "Press mold", "Carved mold or ribs"], ["base", "Base material", "Drag knife cut"], ["pocket", "Clear a recess", "Flat pocket"]];
-                  const pickJob = j => {
-                    const patch = { job: j };
-                    if (j === "coreInserts") Object.assign(patch, { op: "bore", pinOrigin: true, alignDrillOp: "bore" });
-                    else if (j === "core") Object.assign(patch, { op: "outline", outlineSide: "top", pinOrigin: false, alignDrillOp: "outline" });
-                    else patch.op = j === "mold" ? "mold" : j;
-                    setCamMany(patch);
-                  };
+                  const pickJob = j => setCamMany(camJobPatch(j));
                   const glueInserts = "Remove the core from the blank and glue on the sidewalls. When they've cured, put pins into the two alignment holes in the spoilboard" + (pinMax != null ? ", standing no taller than " + cvG(pinMax) + " " + uu + " (the finished core thickness at the holes, so the bit can't reach them)" : "") + ". Turn the core over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins. Hold it down with clamps, vacuum, or tape; the pins only keep it from sliding.";
                   const steps = job === "coreInserts" ? [
                     { op: "bore", title: "Machine the bottom face", sub: "Flat blank with the core's bottom face up. One file cuts, in order:", parts: [["Alignment holes", !!ski.alignMarks, ski.alignMarks ? "" : "turned off"], ["Insert holes", nIns > 0 && insMissing.length === 0, nIns === 0 ? "no inserts in the design" : (insMissing.length ? insMissing.length + (insMissing.length > 1 ? " sizes" : " size") + " needed" : nIns + " holes")]].concat(camOpt.boreWithProfile ? [["Cut out the core shape", true, "last, because it frees the core"]] : []) },
