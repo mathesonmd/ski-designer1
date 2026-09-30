@@ -11326,7 +11326,11 @@ export default function App() {
           <div style={{ height: layersH, position: "relative", overflow: "auto", background: "#141210" }}>
             {(() => {
               const w = Math.min(560, Math.max(280, canvasW - 40));
-              const sideBySide = canvasW - w - 40 >= 420;   // room for the core top view beside the cross-section
+              // The core top view only appears for a mixed-wood core (strips of more than one wood).
+              const coreLyr = ((ski.layup && ski.layup.stack) || []).find(l => l.kind === "core");
+              const stq = coreLyr ? coreStrips(coreLyr) : null;
+              const showTop = !!stq && new Set(stq.map(s => s.mat)).size > 1;
+              const sideBySide = showTop && canvasW - w - 40 >= 420;   // room for the core top view beside the cross-section
               const topW = sideBySide ? canvasW - w - 40 : Math.max(280, canvasW - 24), topH = sideBySide ? Math.max(280, Math.min(layersH - 24, 480)) : 320;
               const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40, maxH: layersH - 64 });
               const h = r.height + 64;
@@ -11334,7 +11338,7 @@ export default function App() {
               return (
                 <div style={{ display: "flex", flexDirection: sideBySide ? "row" : "column", justifyContent: "center", alignItems: sideBySide ? "flex-start" : "center", gap: 12, padding: "8px 0" }}>
                   <img src={"data:image/svg+xml;utf8," + encodeURIComponent(svg)} alt="Layup cross-section" style={{ maxWidth: "100%", height: "auto" }} />
-                  <CoreStripTopView ski={ski} width={topW} height={topH} />
+                  {showTop && <CoreStripTopView ski={ski} width={topW} height={topH} />}
                 </div>
               );
             })()}
