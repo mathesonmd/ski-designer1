@@ -4647,6 +4647,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   const [dragging, setDragging] = useState(null);
   const [dragStart, setDragStart] = useState(null);
   const [handleAngle, setHandleAngle] = useState(null);  // live tangent-handle angle readout during drag
+  // Plan-view mm grid (off by default) and the pointer position during a drag (for the change readout).
+  const [showGrid, setShowGrid] = useState(false);
+  const [dragPtr, setDragPtr] = useState(null);
   // Per-panel zoom (scale multiplier) and pan (screen-pixel offset). Default: 1× / no offset.
   const [tipZoom, setTipZoom] = useState(1);
   const [tailZoom, setTailZoom] = useState(1);
@@ -4657,6 +4660,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   // Active pan gesture (when the user drags empty space inside a panel)
   const [panning, setPanning] = useState(null); // { frame, startMx, startMy, startPan }
   const { right, left, waistY, tipContactY, tailContactY } = useMemo(() => computeOutline(ski), [ski]);
+  // Drag ghost: the outline as it was when the current drag started (dragStart.ski is a snapshot taken on
+  // pointer-down). Same coordinate frame as the live outline, so tail end = 0 mm and centerline = 0 mm.
+  const ghostOutline = useMemo(() => {
+    if (!dragStart || !dragStart.ski || dragging === "edgeExtTip" || dragging === "edgeExtTail") return null;
+    try { return computeOutline(dragStart.ski); } catch (e) { return null; }
+  }, [dragStart, dragging]);
   const isVertical = orientation === "vertical";
 
   // ── Layout regions ──────────────────────────────────────────────
@@ -4882,6 +4891,43 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     ctx.rect(mainClip.x, mainClip.y, mainClip.w, mainClip.h);
     ctx.clip();
 
+    // ── Millimeter grid (toggle) ──
+    // Along-ski lines are measured from the tail end (0 mm); lateral lines from the centerline (0 mm).
+    // Spacing adapts to the on-screen scale so minor lines stay at least 8 px apart.
+    const drawGrid = (toFrame, scalePx, rect, alongMin, alongMax, latMin, latMax, withLabels) => {
+      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+      const majorOf = { 1: 10, 2: 10, 5: 50, 10: 100, 20: 100, 50: 500, 100: 1000, 200: 1000, 500: 5000 };
+      const minor = steps.find(s => s * scalePx >= 8) || 500;
+      const major = majorOf[minor];
+      const isMajor = v => Math.abs(v / major - Math.round(v / major)) < 1e-6;
+      ctx.save();
+      ctx.font = "8px 'JetBrains Mono', monospace";
+      const line = (a, b, v, lateral) => {
+        const mj = isMajor(v);
+        ctx.strokeStyle = mj ? "rgba(155,147,136,0.30)" : "rgba(155,147,136,0.11)";
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        if (withLabels && mj) {
+          ctx.fillStyle = "rgba(155,147,136,0.85)";
+          const screenVertical = Math.abs(a.x - b.x) < 1;
+          if (screenVertical) {
+            if (a.x < rect.x + 2 || a.x > rect.x + rect.w - 2) return;
+            ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText(String(lateral ? Math.abs(v) : v), a.x + 2, rect.y + 2);
+          } else {
+            if (a.y < rect.y + 8 || a.y > rect.y + rect.h - 2) return;
+            ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(String(lateral ? Math.abs(v) : v), rect.x + 2, a.y - 1);
+          }
+        }
+      };
+      for (let v = Math.ceil(alongMin / minor) * minor; v <= alongMax; v += minor) line(toFrame(latMin, v), toFrame(latMax, v), v);
+      for (let v = Math.ceil(latMin / minor) * minor; v <= latMax; v += minor) line(toFrame(v, alongMin), toFrame(v, alongMax), v, true);
+      ctx.restore();
+    };
+    if (showGrid) {
+      const latSpan = Math.max(pairLatW, ski.length * 0.5);
+      drawGrid(toMain, mainScale * mainZoom, mainClip, -ski.length * 0.5, ski.length * 1.5, -latSpan, latSpan, true);
+    }
+
     // Centerline (uses toMain so it follows zoom/pan)
     ctx.strokeStyle = C.center; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
     ctx.beginPath();
@@ -4938,6 +4984,20 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
     if (pairView) { tracePath(mapB); ctx.fillStyle = C.skiFill; ctx.fill(); ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke(); }
     ctx.restore();
+
+    // Drag ghost: the outline as it was before this drag, dashed on top so the change is visible.
+    const drawGhost = (mapFn) => {
+      if (!ghostOutline) return;
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = "rgba(237,230,216,0.55)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ghostOutline.right.forEach((p, i) => { const s = mapFn(p.x, p.y); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+      for (let i = ghostOutline.left.length - 1; i >= 0; i--) { const s = mapFn(ghostOutline.left[i].x, ghostOutline.left[i].y); ctx.lineTo(s.x, s.y); }
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+    };
 
     // Splitboard: the centerline is where the finished board is ripped into two touring skis.
     if (ski.splitboard) {
@@ -5313,6 +5373,13 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.rect(panelX + 3, panelY + 22, panelW - 6, zoomPanelH - 26);
       ctx.clip();
 
+      if (showGrid) {
+        const fScale = (toFrame === toTip ? tipScale : tailScale) * zoomFactor;
+        const latSpan = Math.max(ski.tipWidth, ski.tailWidth, ski.waistWidth) * 2;
+        drawGrid(toFrame, fScale, { x: panelX + 3, y: panelY + 22, w: panelW - 6, h: zoomPanelH - 26 },
+          viewMinY - viewSpanY, viewMinY + viewSpanY * 2, -latSpan, latSpan, true);
+      }
+
       // Centerline inside panel
       const cL = toFrame(0, viewMinY);
       const cR = toFrame(0, viewMinY + viewSpanY);
@@ -5340,6 +5407,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.fillStyle = C.skiFill; ctx.fill();
       ctx.strokeStyle = C.skiStroke; ctx.lineWidth = 1.8; ctx.stroke();
       ctx.restore();
+      drawGhost(toFrame);
 
       ctx.restore();  // outer clip
     };
@@ -5506,6 +5574,13 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.restore();
     })();
 
+    // Drag ghost in the main view, drawn late so the edge, core and mount overlays don't hide it.
+    if (ghostOutline) {
+      ctx.save(); ctx.beginPath(); ctx.rect(mainClipRect.x, mainClipRect.y, mainClipRect.w, mainClipRect.h); ctx.clip();
+      drawGhost(toMain);
+      ctx.restore();
+    }
+
     cps.forEach(cp => {
       if (cp.frames.includes("main"))  drawCP(cp, toMain(cp.skiX, cp.skiY), 0.75, mainClipRect);
       if (cp.frames.includes("tip"))   drawCP(cp, toTip(cp.skiX, cp.skiY), 1.0, tipClip);
@@ -5531,7 +5606,51 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         ctx.textAlign = "left"; ctx.fillText(label, bx, by + 1);
       }
     }
-  }, [ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical, handleAngle, dragStart,
+
+    // Live change readout during a node / waist drag: every dimension that differs from the value at
+    // the start of the drag, as "start -> now (change)". Tangent handles keep the angle readout above.
+    if (dragging && dragStart && dragStart.ski && dragPtr && !String(dragging).includes("_t") && !String(dragging).startsWith("edgeExt")) {
+      const s0 = dragStart.ski, lines = [];
+      const fmt = v => (Math.round(v * 10) / 10).toString();
+      const sgn = v => (v > 0 ? "+" : v < 0 ? "\u2212" : "") + fmt(Math.abs(v));
+      const dims = [
+        ["length", "Overall length"], ["tipWidth", "Tip width"], ["waistWidth", "Waist width"],
+        ["waistInside", "Waist width, inside"], ["waistOutside", "Waist width, outside"],
+        ["tailWidth", "Tail width"], ["tipLength", "Tip length (shovel)"], ["tailLength", "Tail length"],
+      ];
+      dims.forEach(([k, name]) => {
+        const a = s0[k], b = ski[k];
+        if (typeof a === "number" && typeof b === "number" && Math.abs(b - a) >= 0.05) lines.push(`${name}: ${fmt(a)} \u2192 ${fmt(b)} mm (${sgn(b - a)})`);
+      });
+      try {
+        const w0 = computeOutline(s0).waistY;
+        if (Math.abs(waistY - w0) >= 0.5) lines.push(`Waist moved ${fmt(Math.abs(waistY - w0))} mm toward the ${waistY > w0 ? "tip" : "tail"}`);
+        const r0 = computeDerived(s0).sidecutRadius, r1 = computeDerived(ski).sidecutRadius;
+        if (isFinite(r0) && isFinite(r1) && Math.abs(r1 - r0) >= 0.05) lines.push(`Sidecut radius: ${r0.toFixed(1)} \u2192 ${r1.toFixed(1)} m`);
+      } catch (e) {}
+      if (!lines.length && dragStart.cp) {
+        const cp = cps.find(c => c.id === dragging);
+        if (cp) {
+          const dA = cp.skiY - dragStart.cp.skiY, dL = Math.abs(cp.skiX) - Math.abs(dragStart.cp.skiX);
+          if (Math.abs(dA) >= 0.05 || Math.abs(dL) >= 0.05) lines.push(`Point moved ${sgn(dA)} mm along, ${sgn(dL)} mm outward`);
+        }
+      }
+      if (lines.length) {
+        ctx.save();
+        ctx.font = "bold 10px 'JetBrains Mono', monospace";
+        const tw = Math.max(...lines.map(t => ctx.measureText(t).width));
+        const bw = tw + 12, bh = lines.length * 14 + 8;
+        let bx = dragPtr.x + 16, by = dragPtr.y + 16;
+        if (bx + bw > width - 4) bx = Math.max(4, dragPtr.x - 16 - bw);
+        if (by + bh > height - 4) by = Math.max(4, dragPtr.y - 16 - bh);
+        ctx.fillStyle = "rgba(20,18,16,0.92)"; ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = C.value; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        lines.forEach((t, i) => ctx.fillText(t, bx + 6, by + 5 + i * 14));
+        ctx.restore();
+      }
+    }
+  }, [showGrid, ghostOutline, dragPtr, ski, width, height, right, left, waistY, tipContactY, tailContactY, cps, hovered, dragging, isVertical, handleAngle, dragStart,
       mainScale, mainOriginX, mainCenterY, mainRowY, mainRowH,
       tailScale, tailOriginX, tailCenterY, tailZoomX, tailZoomY, zoomPanelW, zoomPanelH, zoomRowY, tailViewMinY, tailViewSpanY,
       tipScale, tipOriginX, tipCenterY, tipZoomX, tipZoomY, tipViewMinY, tipViewSpanY,
@@ -5624,7 +5743,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         mx, my,
         frame: findDragFrame(mx, my),
         ski: JSON.parse(JSON.stringify(ski)),
+        cp: (() => { const c0 = cps.find(c => c.id === id); return c0 ? { skiX: c0.skiX, skiY: c0.skiY } : null; })(),
       });
+      setDragPtr({ x: mx, y: my });
     } else {
       // No node/handle under cursor — start a PAN gesture for whichever region we're in.
       const frame = findDragFrame(mx, my);
@@ -5788,6 +5909,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
 
     if (dragging && dragStart) {
+      setDragPtr({ x: mx, y: my });
       const cp = cps.find(c => c.id === dragging); if (!cp) return;
 
       // Pixel-to-mm conversion (same scale for both axes within each frame, true aspect).
@@ -5978,7 +6100,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     }
   }, [dragging, dragStart, cps, mainScale, tailScale, tipScale, findCP, setSki, panning, tipZoom, tailZoom, mainZoom, isVertical]);
 
-  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); setPanning(null); setHandleAngle(null); }, []);
+  const handleUp = useCallback(() => { setDragging(null); setDragStart(null); setPanning(null); setHandleAngle(null); setDragPtr(null); }, []);
 
   const mainViewChanged = mainZoom > 1.01 || Math.abs(mainPan.x) > 0.5 || Math.abs(mainPan.y) > 0.5;
 
@@ -5994,6 +6116,19 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         onPointerLeave={() => { setHovered(null); }}
         onDoubleClick={handleDoubleClick}
       />
+      <button
+        onClick={() => setShowGrid(g => !g)}
+        title="Show a millimeter grid. Along the ski it is measured from the tail end; across the ski from the centerline."
+        style={{
+          // Phone layout: bottom-right of the zoom column so it never covers the tip node in the narrow main column.
+          position: "absolute", zIndex: 5, ...(isVertical ? { bottom: 8, right: 8 } : { top: 8, left: 8 }),
+          background: showGrid ? C.heading : "rgba(28,25,22,0.92)", color: showGrid ? "#141210" : C.heading,
+          border: `1px solid ${C.heading}`, borderRadius: 5,
+          padding: "4px 10px", fontSize: 10, fontWeight: 700,
+          fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
+          cursor: "pointer", textTransform: "uppercase",
+        }}
+      >Grid {showGrid ? "on" : "off"}</button>
       {mainViewChanged && (
         <button
           onClick={() => { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }}
