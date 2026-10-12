@@ -584,13 +584,13 @@ const WHATS_NEW = {
   title: "What's new",
   items: [
     { title: "Single-radius sidecut", go: "dimensions", target: "sidecut",
-      body: "New designs use a true circular sidecut arc, with a short transition before each contact (50 mm unless you change it) so the edge runs parallel where it meets the tip and tail. Under Dimensions, pick Single radius, Two radii, or Blended. Designs saved before this update open as Blended, so their shape doesn't change." },
+      body: "New designs use a true circular sidecut arc, with a short transition before each contact point (50 mm unless you change it) so the edge runs straight along the ski where it meets the tip and tail. Under Dimensions, pick Single radius, Two radii, or Blended. Designs saved before this update open as Blended, so their shape doesn't change." },
     { title: "Grid on by default", go: "plan", target: "grid",
-      body: "The millimeter grid in the plan view now starts on. Its button moved next to the Plan label." },
+      body: "The millimeter grid in the plan view now starts on. Use the Grid button next to the Plan label to turn it off." },
     { title: "Poured sidewalls", go: "cam", target: "cam-sidewalls",
-      body: "In the CAM workspace, both core jobs now ask how you do sidewalls. Choose Poured (channel) to cut a channel for poly sidewalls first, then plane the bottom and cut the core out through the poly. The steps and files update to match." },
+      body: "In the CAM workspace, Core without inserts and Core with inserts now ask how you do sidewalls. Choose Poured (channel) to cut a channel for poly sidewalls first, then plane the bottom and cut the core out through the poly. The steps and files update to match." },
     { title: "Edge rabbet step", go: "cam", target: "cam-rabbet",
-      body: "Each core job now has an edge rabbet step: a shallow step along the sides of the core's bottom so the edge tangs don't push the base out of flat. By default it explains how to do it on a router table. Switch it to CNC to get its own file, cut on the underside with the core on the alignment pins." },
+      body: "Core without inserts and Core with inserts now include an edge rabbet step: a shallow step along the sides of the core's bottom so the edge tangs don't push the base out of flat. By default it explains how to do it on a router table. Switch it to CNC to get its own file, cut on the underside with the core on the alignment pins." },
   ],
 };
 const WHATS_NEW_KEY = "bcs_whatsnew_seen";
@@ -2436,7 +2436,7 @@ function measurementRows(ski, extra = {}) {
     const wY = resolveWaistY(ski), tC = ski.tailLength, pC = ski.length - ski.tipLength;
     const wp0 = ski.waistFullLength ? wY / ski.length : (wY - tC) / (pC - tC);
     rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
-  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? `single radius (circular arc), ${sidecutBlendOf(ski)} mm transition at each contact` : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m, ${sidecutBlendOf(ski)} mm transition at each contact` : "blended (eased curve, radius by standard formula)"]); }
+  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? `single radius (circular arc), ${sidecutBlendOf(ski)} mm transition at each contact` : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m, ${sidecutBlendOf(ski)} mm transition at each contact` : "blended (smooth curve, not an arc; radius estimated from the widths and running edge)"]); }
   rows.push(["Edge inset", `${ski.edgeInset}`]);
   rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
   if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
@@ -4424,7 +4424,7 @@ function buildCoreCAM(ski, opt) {
       dIn = inset; dOut = inset - w;
       depth = o.stockThick - o.chanSkin;
       if (!(depth > 0)) throw new Error("The wood left under the channel is as thick as the blank, so there is nothing to cut.");
-      if (!(w > inset + 1e-6)) throw new Error("The channel has to reach past the ski's outline (wider than the " + f(inset) + " " + uu + " sidewall inset), or the cutout would leave wood at the edge instead of poly.");
+      if (!(w > inset + 1e-6)) throw new Error("The channel has to reach past the ski's outline (wider than your " + f(inset) + " " + uu + " sidewall thickness), or cutting out the core would leave wood at the edge instead of poly.");
       if (o.toolDia > w + 1e-6) throw new Error("The bit is wider than the channel.");
     }
     if (depth > o.stockThick + 1e-6) throw new Error("The cut is deeper than the blank.");
@@ -4451,8 +4451,8 @@ function buildCoreCAM(ski, opt) {
     useTool(o.toolNum);
     PB(); PC(isRab
       ? `===== EDGE RABBET (bottom face up on the pins) - ${f(dIn)} ${uu} in from the outside edge, ${f(depth)} ${uu} deep, sides only =====`
-      : `===== SIDEWALL CHANNEL (top face up) - ${f(dIn - dOut)} ${uu} wide from the core line outward, ${f(depth)} ${uu} deep (${f(o.chanSkin)} ${uu} of wood left under it)${fullLoop ? ", all the way around" : ", sides only"} =====`);
-    PC(fullLoop ? "Full-length core: runs the whole perimeter." : `Sides run from ${f(xa + R)} to ${f(xb - R)} ${uu} along the ski (where the tip/tail fill starts), plus one bit radius past each end.`);
+      : `===== SIDEWALL CHANNEL (top face up) - ${f(dIn - dOut)} ${uu} wide, from the core's edge outward, ${f(depth)} ${uu} deep (${f(o.chanSkin)} ${uu} of wood left under it)${fullLoop ? ", all the way around" : ", sides only"} =====`);
+    PC(fullLoop ? "Full-length core: runs the whole perimeter." : `Sides run from ${f(xa + R)} to ${f(xb - R)} ${uu} from the tail end (where the tip and tail filler starts), plus half a bit-width past each end.`);
     PC("Conventional milling on every pass.");
     const cutPath = (pts, z) => {
       if (pts.length < 2) return;
@@ -4469,10 +4469,10 @@ function buildCoreCAM(ski, opt) {
       }
     } else {
       for (const s of [1, -1]) {
-        PC(`-- ${s > 0 ? "first" : "second"} edge (the plan view's ${s > 0 ? "+x" : "-x"} edge) --`);
+        PC(`-- edge ${s > 0 ? 1 : 2} of 2 --`);
         for (const z of levels) for (const pa of paths) {
           let run = loopSideRun(pa.loop, s, xa, xb);
-          if (run.length < 2) throw new Error("Couldn't find the ski's side between the fill lines for this cut.");
+          if (run.length < 2) throw new Error("Couldn't work out the side of the ski for this cut. Check the tip and tail lengths and the core end settings.");
           // Travelling tail→tip on the +lateral side is clockwise in this frame (and tip→tail on the − side).
           const forwardIsCW = s > 0;
           if (forwardIsCW !== wantCW(pa.woodInside)) run = run.slice().reverse();
@@ -7433,9 +7433,9 @@ function SidecutShapeField({ ski, setSki, C }) {
       <div style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 3 }}>Sidecut shape</div>
       <div style={{ display: "flex", gap: 3 }}>{shapeBtn("single", "Single radius")}{shapeBtn("dual", "Two radii")}{shapeBtn("blended", "Blended")}</div>
       <div style={{ ...note, marginBottom: 8 }}>
-        {shape === "single" ? "One circular arc on both sides of the waist, with a short transition before each contact that brings the edge parallel there. The arc sets where the waist is."
-          : shape === "dual" ? "A circular arc on each side of the waist, so you choose where the waist goes. Each side has its own radius, with the same short transition before each contact."
-          : "The original eased curve. It is not a circular arc: the outer half of each side curves outward. The radius below is the standard formula estimate. Designs saved before this setting open here."}
+        {shape === "single" ? "One circular arc on both sides of the waist, with a short transition before each contact so the edge runs straight along the ski where it meets the tip and tail. The waist position is worked out from the arc."
+          : shape === "dual" ? "A circular arc on each side of the waist, so you choose where the waist goes. The front and back each get their own radius. Same short transition before each contact."
+          : "The original smooth curve. It isn't a circular arc: the outer half of each side bulges slightly outward. The radius below is an estimate from the usual shortcut formula (from the tip, waist and tail widths and the running edge). Designs saved before this option existed open with this setting."}
       </div>
       {shape !== "blended" && (
         <div style={{ marginTop: -2, marginBottom: 8 }}>
@@ -7443,7 +7443,7 @@ function SidecutShapeField({ ski, setSki, C }) {
           <NumberInput value={sidecutBlendOf(ski)} min={0} max={300} step={5}
             onCommit={v => setSki(s => ({ ...s, sidecutBlend: Math.max(0, Math.min(300, Math.round(v * 10) / 10)) }))}
             style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-          <div style={{ ...note }}>How far before each contact the arc starts turning, so the edge runs parallel to the centerline at the contact and meets the tip and tail curves smoothly. The contact is then the widest point. 0 = no transition: the arc meets the tip and tail at an angle. The radius shown is the main arc's.</div>
+          <div style={{ ...note }}>How far before each contact point the edge starts easing out of the arc, so it runs straight along the ski at the contact and flows smoothly into the tip and tail. The contact point is then the widest point. 0 = no transition: the arc meets the tip and tail at a slight angle. The sidecut radius shown is the arc's, not counting these short transitions.</div>
         </div>)}
       {shape === "single" && derived.waistSplit > 0.5 && <div style={{ ...note, marginTop: -4, marginBottom: 8 }}>The two edges are shaped differently, so each edge's narrowest point sits in a slightly different spot ({derived.waistSplit.toFixed(1)} mm apart). The waist line is drawn midway.</div>}
     </div>
@@ -7501,7 +7501,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   return (
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m){shape === "dual" ? " · standard formula" : ""}</span>
+        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m){shape === "dual" ? " · shortcut formula" : ""}</span>
         <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
           <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
           {segBtn("waist", "Waist")}
@@ -7533,8 +7533,8 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
           Waist off-center → each side turns at a different radius (highlighted on the plan view).
         </div>
       )}
-      {shape === "dual" && <div style={note}>Front and back are the radii of the two arcs as drawn. The number in the box uses the standard formula from the widths and running edge, and typing a radius solves with that formula.</div>}
-      {shape === "single" && !derived.apexOK && <div style={{ ...note, color: "#e8a33a" }}>No single arc fits: the waist has to be narrower than both the tip and the tail. Showing two arcs at your waist position instead, and the radius box uses the standard formula.</div>}
+      {shape === "dual" && <div style={note}>Front and back are the actual radii of the two arcs. The number in the box is the usual shortcut formula (from the tip, waist and tail widths and the running edge), and typing a radius there adjusts the design to match that formula.</div>}
+      {shape === "single" && !derived.apexOK && <div style={{ ...note, color: "#e8a33a" }}>A single arc can't fit: the waist has to be narrower than both the tip and the tail. Showing an arc on each side of your waist position instead. The radius box shows the usual shortcut formula (from the tip, waist and tail widths and the running edge).</div>}
       {derived.widestMismatch && <div style={{ ...note, color: "#e8a33a" }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact), so the ski's widest point is wider than that number. The outline shows the real shape.</div>}
     </div>
   );
@@ -9576,12 +9576,12 @@ export default function App() {
     if (camOpt.op === "channel") {
       rows.push(["Tools in this file", (ski.alignMarks && alignDrillOp === "channel" ? `T${camOpt.alignToolNum} alignment holes, then ` : "") + `T${camOpt.channelToolNum} channel`]);
       steps.splice(0, 0, "Step 1: cut the sidewall channel. Lay the FLAT blank TOP FACE UP.");
-      steps.push(`What this file cuts: ${ski.alignMarks && alignDrillOp === "channel" ? "the alignment holes through the blank into the spoilboard, then " : ""}the channel, ${camOpt.chanWidth} ${uu} wide from the core line outward, leaving ${camOpt.chanSkin} ${uu} of wood under it${limS.full ? ", all the way around" : ", along the sides only"}.`);
+      steps.push(`What this file cuts: ${ski.alignMarks && alignDrillOp === "channel" ? "the alignment holes through the blank into the spoilboard, then " : ""}the channel, ${camOpt.chanWidth} ${uu} wide from the core's edge outward, leaving ${camOpt.chanSkin} ${uu} of wood under it${limS.full ? ", all the way around" : ", along the sides only"}.`);
       steps.push(`Afterwards: fill the channel with poly and let it cure. Plane the bottom face until the poly shows full depth; the blank should then be ${+((camOpt.stockThick || 0) - (camOpt.chanSkin || 0)).toFixed(3)} ${uu} thick. Then run the ${camOpt.job === "core" ? "Cut out the core shape" : "bottom-face"} file with the same X/Y zero.`);
     } else if (camOpt.op === "rabbet") {
       rows.push(["Rabbet", `${camOpt.rabbetWidth} ${uu} in from the outside edge × ${camOpt.rabbetDepth} ${uu} deep, sides only`]);
       steps.splice(0, 1, pourS ? "Edge rabbet. The core has been cut out through the poly; clean up the tabs first." : "Edge rabbet. The core has been cut out and its sidewalls glued on and cured.", pinLine, camOpt.job === "core" ? "Turn the core over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it BOTTOM FACE UP on the pins. Hold it down with clamps, vacuum or tape. Nothing can stand proud of the face resting on the table." : bottomUpLine);
-      steps.push(limS.full ? `Sides only, between the contact points (${cvS(limS.tailC)} and ${cvS(limS.tipC)} ${uu} from the tail end), because the core runs the full length.` : `Sides only. It stops one bit radius past where the tip and tail fill starts (${cvS(limS.xa)} and ${cvS(limS.xb)} ${uu} from the tail end).`);
+      steps.push(limS.full ? `Sides only, between the contact points (${cvS(limS.tailC)} and ${cvS(limS.tipC)} ${uu} from the tail end), because the core runs the full length.` : `Sides only. It runs half a bit-width past where the tip and tail filler starts (${cvS(limS.xa)} and ${cvS(limS.xb)} ${uu} from the tail end), so the full width of the cut reaches that line.`);
       steps.push("Then run the Shape the top face file with the same X/Y zero.");
     } else if (camOpt.op === "bore" && pourS) {
       const tl = [`T${camOpt.boreToolNum} insert holes and flange pockets`]; if (camOpt.boreWithProfile) tl.push(`T${camOpt.outlineToolNum} core shape`);
@@ -10714,7 +10714,7 @@ export default function App() {
                     {sidecutShapeOf(ski) === "single" ? (() => {
                       // The arc decides the waist here, so show where it lands instead of an input.
                       const tC = ski.tailLength, pC = ski.length - ski.tipLength, f = ski.waistFullLength ? wmm / ski.length : (wmm - tC) / (pC - tC);
-                      return <div title="Set by the single-radius arc. Choose Two radii under Sidecut shape to place the waist yourself." style={{ width: "100%", background: "transparent", border: `1px dashed ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }}>{(fromTip ? 1 - f : f).toFixed(3)} <span style={{ color: C.labelDim, fontSize: 10 }}>set by the arc</span></div>;
+                      return <div title="Worked out from the single-radius arc. Choose Two radii under Sidecut shape to set the waist position yourself." style={{ width: "100%", background: "transparent", border: `1px dashed ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }}>{(fromTip ? 1 - f : f).toFixed(3)} <span style={{ color: C.labelDim, fontSize: 10 }}>set by the arc</span></div>;
                     })() : <NumberInput value={+(fromTip ? 1 - wp : wp).toFixed(2)} min={lo} max={hi} step={0.01}
                       onCommit={v => setSki(s => ({ ...s, waistPosition: Math.round((s.waistFromTip ? 1 - v : v) * 1000) / 1000 }))}
                       style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />}
@@ -12417,7 +12417,7 @@ export default function App() {
                   // Edge rabbet and channel: where the core's sides end (tip/tail fill line), for the instructions.
                   const lim = coreSideLimits(ski), cvL = v => cvG(v) + " " + uu;
                   const rabCnc = camOpt.rabbetHow === "cnc";
-                  const rabStops = lim.full ? "Your core runs the full length with no tip or tail fill, so it runs between the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "Sides only: it stops where the tip and tail fill starts, " + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end.";
+                  const rabStops = lim.full ? "Your core runs the full length with no tip or tail filler, so it runs between the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "Sides only: it stops where the tip and tail filler starts, " + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end.";
                   const Pins = pinsTxt.charAt(0).toUpperCase() + pinsTxt.slice(1);
                   // The rabbet step: always present. Router table = instructions only (no file); CNC = its own file on the underside.
                   const rabbetStep = (cncLead, handLead) => ({ op: "rabbet", wn: "cam-rabbet", noFile: !rabCnc,
@@ -12426,7 +12426,7 @@ export default function App() {
                   const tapStep = (lead) => ({ op: "taper", title: "Shape the top face", sub: lead + "Carves the thickness taper into the top, with the core seated on the pins. Don't re-zero X and Y." });
                   const turnTop = "Turn the core over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins." + holdTxt + " ";
                   const turnBottom = "Turn the core over sideways, so the tail and tip stay at the same ends, and seat it bottom face up on the pins.";
-                  const channelStep = { op: "channel", title: "Cut the sidewall channel", sub: "Flat blank, top face up. One file drills the alignment holes through the blank into the spoilboard, then cuts the channel " + (lim.full ? "all the way around the core" : "along each side of the core, stopping a bit-radius past where the tip and tail fill starts") + ", from the core line outward, leaving " + cvG(camOpt.chanSkin || 0) + " " + uu + " of wood under it." };
+                  const channelStep = { op: "channel", title: "Cut the sidewall channel", sub: "Flat blank, top face up. One file drills the alignment holes through the blank into the spoilboard, then cuts the channel " + (lim.full ? "all the way around the core" : "along each side of the core, running half a bit-width past where the tip and tail filler starts") + ", from the core's edge outward, leaving " + cvG(camOpt.chanSkin || 0) + " " + uu + " of wood under it." };
                   const pourStep = { title: "Pour, cure, and plane", sub: "Fill the channel with poly and let it cure. Plane the bottom face until the poly shows full depth along the whole channel. The blank should then be " + cvG(pourPlaned) + " " + uu + " thick (the channel depth). If you end up with a different thickness, enter it as Thickness after planing in the next step so the remaining files are right." };
                   const steps = job === "coreInserts" ? (isPour ? [
                     channelStep, pourStep,
@@ -12467,12 +12467,12 @@ export default function App() {
                     <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                       <div style={{ ...camLabel, color: C.heading }}>Sidewall channel</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>{numIn("chanWidth", "Channel width")}{numIn("chanSkin", "Wood left under it")}</div>
-                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>The inside wall sits on the core line (the ski outline minus the {cvG(inset0)} {uu} sidewall inset), so the channel reaches {cvG(Math.max(0, (camOpt.chanWidth || 0) - inset0))} {uu} past the outline and the cutout later goes through poly. Depth = stock thickness minus the wood left under it = {cvG(pourPlaned)} {uu}. The bit can't be wider than the channel; a narrower bit makes extra passes using the stepover.</div>
+                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>The inside wall of the channel is the core's edge: the ski's outline moved in by your {cvG(inset0)} {uu} sidewall thickness. So the channel reaches {cvG(Math.max(0, (camOpt.chanWidth || 0) - inset0))} {uu} past the outline, and when the core is cut out later, the cut goes through poly. Depth = stock thickness minus the wood left under it = {cvG(pourPlaned)} {uu}. The bit can't be wider than the channel; a narrower bit makes extra passes using the stepover.</div>
                     </div>) : camOpt.op === "rabbet" ? (
                     <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                       <div style={{ ...camLabel, color: C.heading }}>Edge rabbet</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>{numIn("rabbetDepth", "Thickness (depth)", true)}{numIn("rabbetWidth", "Inset from finished edge", true)}{numIn("edgeOverlap", "Edge overlap")}</div>
-                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>Inset is measured from the finished outer edge (the outside of the sidewall) inward. The cut runs from there out past the edge so no lip is left: {isPour ? "poured walls were cut on the outline," : "glued walls can stand out past the outline by the assembled width measured in the top-face step,"} plus the edge overlap. It's cut on the underside, with the core on the alignment pins, and every pass is conventional milling so a glued sidewall isn't pulled off.</div>
+                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>Inset is measured from the finished outer edge (the outside of the sidewall) inward. The cut runs from there out past the edge so no lip is left: {isPour ? "poured walls were cut on the outline," : "glued sidewalls can stick out past the outline (by however much the assembled core you measured for Shape the top face, under Width at the tip, is wider than the design),"} plus the edge overlap. It's cut on the underside, with the core on the alignment pins, and every pass is conventional milling so a glued sidewall isn't pulled off.</div>
                       {!(camOpt.rabbetWidth > 0 && camOpt.rabbetDepth > 0) && <div style={{ color: "#e8a33a", fontSize: 10.5, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Enter the thickness and inset for your edges.</div>}
                     </div>) : null;
                   const rabbetHowRow = (
@@ -12486,7 +12486,7 @@ export default function App() {
                     {rabbetHowRow}
                     <div style={{ ...camSmall, lineHeight: 1.5, fontSize: 10.5 }}>
                       Done by hand, so there's no file. The edge tangs lap over the base and add a little thickness there; a shallow step along each side of the core's bottom gives them room, so the base and edges sit flat against the core.
-                      <br /><br />Most builders cut it on a router table with a pattern bit, after the core is shaped and its sidewalls are on, and before the top is shaped. Set the bit height to the step's thickness and the cut width to how far it reaches in from the finished outer edge (the outside of the sidewall). Cut along the sides only, not the ends: {rabLim.full ? "your core runs the full length, so stop at the contact points (" + rabCv(rabLim.tailC) + " and " + rabCv(rabLim.tipC) + " from the tail end)." : "stop where the tip and tail fill starts (" + rabCv(rabLim.xa) + " and " + rabCv(rabLim.xb) + " from the tail end)."}
+                      <br /><br />Most builders cut it on a router table with a pattern bit, after the core is shaped and its sidewalls are on, and before the top is shaped. Set the bit height to the step's thickness and the cut width to how far it reaches in from the finished outer edge (the outside of the sidewall). Cut along the sides only, not the ends: {rabLim.full ? "your core runs the full length, so stop at the contact points (" + rabCv(rabLim.tailC) + " and " + rabCv(rabLim.tipC) + " from the tail end)." : "stop where the tip and tail filler starts (" + rabCv(rabLim.xa) + " and " + rabCv(rabLim.xb) + " from the tail end)."}
                       <br /><br />Choose CNC to have it cut as its own file on the underside, lined up on the alignment holes.
                     </div>
                   </>) : isBand ? (<>
@@ -12527,7 +12527,7 @@ export default function App() {
                         <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
                           {[["glue", "Glued-on strips"], ["pour", "Poured (channel)"]].map(([m, l]) => <button key={m} onClick={() => setCamMany({ sidewallMethod: m, ...camJobPatch(job, { ...camOpt, sidewallMethod: m }) })} style={{ ...camSeg(m === "pour" ? isPour : !isPour), padding: "4px 8px" }}>{l}</button>)}
                         </div>
-                        <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on the alignment pins." : "Strips are glued to the core after it's cut out."}</div>
+                        <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on the alignment pins." : "Sidewall strips are glued to the core after it's cut out."}</div>
                       </div>
                     )}
                     <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
