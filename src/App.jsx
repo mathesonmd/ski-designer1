@@ -10132,9 +10132,9 @@ export default function App() {
   // returning user).
   const [wnReturning] = useState(() => { try { return ["bcs_sections_open", "bcs_cam", "bcs_autosave", "bcs_autosave_ski", "bcs_autosave_board", "bcs_last_mode", "bcs-lang", "bcs_study"].some(k => localStorage.getItem(k) != null); } catch (e) { return false; } });
   const [wnOpen, setWnOpen] = useState(false);
-  const [wnSpot, setWnSpot] = useState(null);      // { target, title } while a spot is highlighted
-  const [wnRect, setWnRect] = useState(null);      // live screen rect of the highlighted element
-  const [wnMiss, setWnMiss] = useState(null);      // shown when the spot can't be found on screen
+  const [wnStep, setWnStep] = useState(null);      // index into WHATS_NEW.items while the guided tour runs
+  const [wnRect, setWnRect] = useState(null);      // live screen rect of the highlighted element (null = not found)
+  const [wnLost, setWnLost] = useState(false);     // true when this step's spot couldn't be brought on screen
   useEffect(() => {
     try {
       const seen = localStorage.getItem(WHATS_NEW_KEY);
@@ -10143,10 +10143,13 @@ export default function App() {
       else localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id);
     } catch (e) {}
   }, []);
-  const closeWhatsNew = () => { setWnOpen(false); try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (e) {} };
-  const showWhatsNewSpot = (it) => {
-    closeWhatsNew();
-    setWnMiss(null);
+  const markWhatsNewSeen = () => { try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (e) {} };
+  const closeWhatsNew = () => { setWnOpen(false); markWhatsNewSeen(); };
+  const endTour = () => { setWnStep(null); setWnRect(null); setWnLost(false); markWhatsNewSeen(); };
+  // Open whatever the step needs, then highlight it. Steps stay up until the user moves on or ends the tour.
+  const goTourStep = (i) => {
+    const it = WHATS_NEW.items[i]; if (!it) { endTour(); return; }
+    setWnOpen(false); markWhatsNewSeen(); setWnLost(false); setWnRect(null);
     if (it.go === "dimensions") {
       setCamOpen(false); setSidebarQuery("");
       if (isCompact) setDrawerOpen(true);
@@ -10158,33 +10161,30 @@ export default function App() {
       setCamOpen(true);
       if (camOpt.job !== "coreInserts") setCamMany(camJobPatch("coreInserts", camOpt));
     }
-    setWnSpot({ target: it.target, title: it.title });
+    setWnStep(i);
   };
-  // Find the target (it may take a render or two to appear), scroll it into view, then track it for a few seconds.
+  // Find the step's target (it can take a render or two to appear), scroll to it once, then keep the outline on it.
   useEffect(() => {
-    if (!wnSpot) return;
-    let raf = 0, tries = 0, found = null, t0 = 0, done = false;
-    const sel = `[data-wn="${wnSpot.target}"]`;
+    if (wnStep == null) return;
+    const it = WHATS_NEW.items[wnStep]; if (!it || !it.target) { setWnLost(true); return; }
+    let raf = 0, tries = 0, found = null, done = false;
+    const sel = `[data-wn="${it.target}"]`;
     const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const tick = (ts) => {
+    const tick = () => {
       if (done) return;
-      if (!found) {
+      if (!found || !found.isConnected) {
         const els = Array.from(document.querySelectorAll(sel)).filter(visible);
-        if (els.length) { found = els[0]; try { found.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} t0 = ts; }
-        else if (++tries > 90) { setWnMiss(wnSpot.title); setWnSpot(null); return; }
+        if (els.length) { found = els[0]; try { found.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} setWnLost(false); }
+        else if (++tries > 90) { setWnRect(null); setWnLost(true); return; }
       }
-      if (found) {
-        const r = found.getBoundingClientRect();
-        setWnRect({ x: r.left, y: r.top, w: r.width, h: r.height });
-        if (ts - t0 > 6000) { setWnSpot(null); return; }
-      }
+      if (found) { const r = found.getBoundingClientRect(); setWnRect(prev => (prev && prev.x === r.left && prev.y === r.top && prev.w === r.width && prev.h === r.height) ? prev : { x: r.left, y: r.top, w: r.width, h: r.height }); }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    const stop = () => { setWnSpot(null); };
-    const tm = setTimeout(() => window.addEventListener("pointerdown", stop, { once: true }), 400);
-    return () => { done = true; cancelAnimationFrame(raf); clearTimeout(tm); window.removeEventListener("pointerdown", stop); setWnRect(null); };
-  }, [wnSpot]);
+    const onKey = (ev) => { if (ev.key === "Escape") endTour(); };
+    window.addEventListener("keydown", onKey);
+    return () => { done = true; cancelAnimationFrame(raf); window.removeEventListener("keydown", onKey); };
+  }, [wnStep]);
 
   return (
     <div ref={containerRef} style={{
@@ -12675,32 +12675,51 @@ export default function App() {
               <div style={{ color: C.heading, fontSize: 15, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{WHATS_NEW.title}</div>
               <button onClick={closeWhatsNew} aria-label="Close" style={{ background: "transparent", border: "none", color: C.labelDim, fontSize: 18, cursor: "pointer" }}>{"\u00d7"}</button>
             </div>
-            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 12 }}>Changes since your last visit. Show me takes you to each one.</div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 12 }}>Changes since your last visit. Take the tour to step through each one, or Show me to start at a particular one.</div>
             {WHATS_NEW.items.map((it, i) => (
               <div key={i} style={{ borderTop: `1px solid ${C.inputBorder}`, padding: "10px 0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
                   <div style={{ color: C.value, fontSize: 12.5, fontWeight: 700 }}>{it.title}</div>
-                  {it.target && <button onClick={() => showWhatsNewSpot(it)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "3px 9px", fontSize: 10.5, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'JetBrains Mono', monospace" }}>Show me</button>}
+                  {it.target && <button onClick={() => goTourStep(i)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "3px 9px", fontSize: 10.5, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'JetBrains Mono', monospace" }}>Show me</button>}
                 </div>
                 <div style={{ color: C.label, fontSize: 11, lineHeight: 1.5, marginTop: 4 }}>{it.body}</div>
               </div>
             ))}
-            <button onClick={closeWhatsNew} style={{ marginTop: 8, width: "100%", background: C.heading, color: C.bgDeep, border: "none", borderRadius: 4, padding: "9px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Got it</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => goTourStep(0)} style={{ flex: 1, background: C.heading, color: C.bgDeep, border: "none", borderRadius: 4, padding: "9px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Take the tour</button>
+              <button onClick={closeWhatsNew} style={{ flex: 1, background: "transparent", color: C.label, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "9px 10px", fontSize: 12, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Skip, go to the app</button>
+            </div>
           </div>
         </div>
       )}
-      {wnSpot && wnRect && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 3000, pointerEvents: "none" }}>
-          <style>{"@keyframes bcsWnPulse{0%,100%{box-shadow:0 0 0 0 rgba(232,85,42,0.55),0 0 0 9999px rgba(0,0,0,0.45)}50%{box-shadow:0 0 0 8px rgba(232,85,42,0.15),0 0 0 9999px rgba(0,0,0,0.45)}}"}</style>
-          <div style={{ position: "absolute", left: wnRect.x - 6, top: wnRect.y - 6, width: wnRect.w + 12, height: wnRect.h + 12, border: "2px solid #e8552a", borderRadius: 6, animation: "bcsWnPulse 1.4s ease-in-out infinite" }} />
-          <div style={{ position: "absolute", left: Math.max(8, Math.min(wnRect.x - 6, (typeof window !== "undefined" ? window.innerWidth : 1200) - 260)), top: wnRect.y - 34 > 8 ? wnRect.y - 34 : wnRect.y + wnRect.h + 10, background: "#e8552a", color: "#141210", fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>New: {wnSpot.title}</div>
-        </div>
-      )}
-      {wnMiss && (
-        <div onClick={() => setWnMiss(null)} style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 3000, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "8px 14px", borderRadius: 4, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-          Couldn't bring "{wnMiss}" on screen here. Look for it in the panel named in What's new. (tap to close)
-        </div>
-      )}
+      {wnStep != null && WHATS_NEW.items[wnStep] && (() => {
+        const it = WHATS_NEW.items[wnStep], n = WHATS_NEW.items.length, last = wnStep === n - 1;
+        const vh = typeof window !== "undefined" ? window.innerHeight : 900;
+        const cardTop = wnRect && (wnRect.y + wnRect.h / 2) > vh / 2;   // spot in the lower half: card goes on top
+        const navBtn = (lbl, fn, primary, dis) => <button onClick={fn} disabled={dis} style={{ background: primary ? C.heading : "transparent", color: primary ? C.bgDeep : C.label, border: primary ? "none" : `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "7px 12px", fontSize: 11.5, fontWeight: primary ? 700 : 400, cursor: dis ? "default" : "pointer", opacity: dis ? 0.4 : 1, fontFamily: "'JetBrains Mono', monospace" }}>{lbl}</button>;
+        return (<>
+          {wnRect && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 3000, pointerEvents: "none" }}>
+              <style>{"@keyframes bcsWnPulse{0%,100%{box-shadow:0 0 0 0 rgba(232,85,42,0.55),0 0 0 9999px rgba(0,0,0,0.45)}50%{box-shadow:0 0 0 8px rgba(232,85,42,0.15),0 0 0 9999px rgba(0,0,0,0.45)}}"}</style>
+              <div style={{ position: "absolute", left: wnRect.x - 6, top: wnRect.y - 6, width: wnRect.w + 12, height: wnRect.h + 12, border: "2px solid #e8552a", borderRadius: 6, animation: "bcsWnPulse 1.4s ease-in-out infinite" }} />
+            </div>
+          )}
+          <div role="dialog" aria-label={"What's new: " + it.title} style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", ...(cardTop ? { top: 16 } : { bottom: 16 }), zIndex: 3001, width: "min(460px, calc(100vw - 32px))", background: C.panel || C.bgDeep, border: `1px solid ${C.heading}`, borderRadius: 8, padding: 14, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+              <div style={{ color: C.heading, fontSize: 12.5, fontWeight: 700 }}>New: {it.title}</div>
+              <div style={{ color: C.labelDim, fontSize: 10.5, whiteSpace: "nowrap" }}>{wnStep + 1} of {n}</div>
+            </div>
+            <div style={{ color: C.label, fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>{it.body}</div>
+            {wnLost && <div style={{ color: "#e8a33a", fontSize: 10.5, marginTop: 6 }}>Couldn't bring this spot on screen here. You can still go on to the next one.</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }}>
+              {navBtn("End tour", endTour, false, false)}
+              <span style={{ flex: 1 }} />
+              {navBtn("Back", () => goTourStep(wnStep - 1), false, wnStep === 0)}
+              {navBtn(last ? "Done" : "Next", () => (last ? endTour() : goTourStep(wnStep + 1)), true, false)}
+            </div>
+          </div>
+        </>);
+      })()}
       {dbMsg && (
         <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1100, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "12px 18px", borderRadius: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", maxWidth: "92vw", boxShadow: "0 8px 30px rgba(0,0,0,0.5)" }}>
           {dbMsg}
