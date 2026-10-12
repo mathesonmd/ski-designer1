@@ -550,6 +550,10 @@ const DEFAULT_SKI={
   rockerLinked:true,
   waistFromTip:true,     // waist position DISPLAYED tip-back (common convention); stored value is unchanged
   radiusTarget:"waist",  // what the Sidecut R input adjusts: "waist" (design) or "tiptail" (spec-match).
+  // Sidecut shape. "single" = one true circular arc from contact to contact (waist position follows from the
+  // arc); "dual" = a true circular arc on each side of a waist you place (two radii); "blended" = the original
+  // eased curve (not an arc). Files saved before this setting existed load as "blended" so they keep their shape.
+  sidecutShape:"single",
   tipRockerLen:240,   // mm from tip end to rocker takeoff. When linked, mirrors tipLength.
   tailRockerLen:170,  // mm from tail end to rocker takeoff. When linked, mirrors tailLength.
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
@@ -648,7 +652,10 @@ function parseDesignFile(jsonText) {
     }
     return out;
   };
+  const hadShape = ski.sidecutShape !== undefined;
   ski = mergeDefaults(DEFAULT_SKI, ski);
+  // Files saved before the sidecut-shape setting keep their original (blended) outline.
+  if (!hadShape) ski.sidecutShape = "blended";
 
   // Rocker-link migration: files saved before the linked/unlinked feature won't have rockerLinked or
   // the takeoff lengths. Default them to LINKED with takeoff = the file's own contacts, so old designs
@@ -765,14 +772,15 @@ function clearAutosave(mode) {
   } catch (e) {}
 }
 // ══════════════ EI ENGINE ══════════════
+// Full width at a fraction of the length, for the flex/weight model. Between the contacts it is the real
+// sidecut (both edges, any sidecut shape). Beyond the contacts the model keeps its long-standing simplification
+// of using the entered tip/tail width (the widest point) rather than tracing the tip/tail curve.
 function getWidthAtPos(ski,pos){
-  const L=ski.length,TL=ski.tipLength,TAIL=ski.tailLength;
-  const wp=ski.waistPosition!==undefined?ski.waistPosition:0.48;
-  const xmm=pos*L,tailC=TAIL,tipC=L-TL,waistPos=tailC+(tipC-tailC)*wp;
-  if(xmm<=0)return ski.tailWidth;if(xmm>=L)return ski.tipWidth;
+  const L=ski.length,xmm=pos*L,tailC=ski.tailLength,tipC=L-ski.tipLength;
   if(xmm<=tailC)return ski.tailWidth;if(xmm>=tipC)return ski.tipWidth;
-  if(xmm<=waistPos){const t=(xmm-tailC)/(waistPos-tailC);return ski.tailWidth+t*t*(3-2*t)*(ski.waistWidth-ski.tailWidth);}
-  const t=(xmm-waistPos)/(tipC-waistPos);return ski.waistWidth+t*t*(3-2*t)*(ski.tipWidth-ski.waistWidth);
+  const sc=sidecutSolve(ski);
+  const half=(s)=>xmm<=s.tailCY||xmm>=s.tipCY?(xmm<=s.tailCY?ski.tailWidth:ski.tipWidth)/2:sidecutHalfWidthAt(ski,s,xmm);
+  return half(sc.sides.in)+half(sc.sides.out);
 }
 // Fritsch–Carlson monotone cubic Hermite spline. Unlike per-segment smootherstep (which forces the
 // slope to ZERO at every control point and so makes a smooth rise look like a row of moguls), this is
@@ -1116,6 +1124,11 @@ function sampleShape(nodes, nPts) {
 //   • full-length mode:     0..1 maps across the whole tail-end..tip-end length (0.5 = geometric center),
 //     then clamped to stay strictly between the contacts (the sidecut must live inside the running edge)
 function resolveWaistY(ski) {
+  return sidecutSolve(ski).waistY;
+}
+// The waist position as the user set it (waistPosition). Used directly by "dual" and "blended"; ignored by
+// "single", where the arc itself decides where the narrowest point is.
+function resolveWaistYUser(ski) {
   const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
   const tipContactY = ski.length - ski.tipLength, tailContactY = ski.tailLength;
   if (ski.waistFullLength) {
@@ -1183,22 +1196,136 @@ function splitHardware(ski) {
   };
 }
 
+// ══════════════ SIDECUT GEOMETRY ══════════════
+// Missing or unknown values read as "blended" (designs saved before the setting existed).
+function sidecutShapeOf(ski) { const m = ski && ski.sidecutShape; return m === "single" || m === "dual" ? m : "blended"; }
+// One circular arc that is tangent to the centerline direction at the waist (half-width ww2) and reaches
+// half-width hc after an along-ski run Ls. Exact circle: R = (Ls² + d²) / (2|d|), d = hc − ww2.
+function arcSide(ww2, hc, Ls) {
+  const d = hc - ww2, ad = Math.abs(d);
+  if (ad < 1e-6 || !(Ls > 0)) return { R: Infinity, sgn: 0, Ls: Math.max(0, Ls || 0) };
+  return { R: (Ls * Ls + ad * ad) / (2 * ad), sgn: Math.sign(d), Ls };
+}
+function arcHW(ww2, a, dist) {
+  if (!a.sgn) return ww2;
+  const t = Math.min(Math.abs(dist), a.Ls);
+  return ww2 + a.sgn * (a.R - Math.sqrt(Math.max(0, a.R * a.R - t * t)));
+}
+// Slope of the arc at its contact end, in mm sideways per mm along (positive = widening toward the end).
+function arcEndSlope(a) { return a.sgn ? a.sgn * a.Ls / Math.sqrt(Math.max(1e-9, a.R * a.R - a.Ls * a.Ls)) : 0; }
+// One circle through both contacts whose narrowest point has half-width ww2. d1/d2 = how far each contact
+// sits outside the waist. Returns u = apex-to-tip-contact distance, or null when there is no such circle.
+function singleArcApex(tipCY, tailCY, d1, d2) {
+  const S = tipCY - tailCY;
+  if (!(S > 0) || !(d1 > 0.01) || !(d2 > 0.01)) return null;
+  let lo = 0, hi = S;
+  for (let i = 0; i < 100; i++) { const u = (lo + hi) / 2, f = (u * u + d1 * d1) / d1 - ((S - u) * (S - u) + d2 * d2) / d2; if (f > 0) hi = u; else lo = u; }
+  return (lo + hi) / 2;
+}
+// Arc modes: the end curve starts at the contact half-width (node 0 moved in to hcFrac of the end half-width)
+// with its outgoing handle turned to the arc's direction there, so the arc flows into the tip/tail with no
+// corner. The handle keeps its length in mm; only its direction is set by the arc.
+function effEndNodes(nodes, hcFrac, slope, W2, span) {
+  const arr = normalizeShape(nodes);
+  if (!arr || arr.length < 2 || !(W2 > 0) || !(span > 0)) return arr;
+  const n0 = { ...arr[0] };
+  const m = Math.hypot((n0.txOut || 0) * W2, (n0.tyOut || 0) * span);
+  const k = 1 / Math.sqrt(1 + slope * slope);
+  n0.x = hcFrac; n0.txOut = m * slope * k / W2; n0.tyOut = m * k / span;
+  return [n0, ...arr.slice(1)];
+}
+const _scCache = new WeakMap();
+// Solves the sidecut for both edges. Returns, per edge ("in" = +x, "out" = −x): waist y and half-width,
+// contact positions, contact half-widths (hcTip/hcTail), the two arcs (arc modes), the end-curve nodes to draw
+// (effTip/effTail, normalized like the stored nodes), and the widest half-width each end actually reaches.
+// Arc modes treat Tip/Tail width as the WIDEST point of the shovel/tail; the contact half-width is solved so
+// that the smooth arc-to-tip blend peaks exactly there.
+// Cache key check: the fields the solve reads (so an object edited in place after a solve never returns stale geometry).
+const _scSig = s => [s.length, s.tipWidth, s.waistWidth, s.tailWidth, s.tipLength, s.tailLength, s.waistPosition, s.waistFullLength, s.sidecutShape,
+  s.asymSidecut, s.waistInside, s.waistOutside, s.asymContact, s.tipLengthInside, s.tipLengthOutside, s.tailLengthInside, s.tailLengthOutside,
+  s.tipSymmetric, s.tailSymmetric, s.tipTailSym].join("|");
+function sidecutSolve(ski) {
+  if (ski && typeof ski === "object" && _scCache.has(ski)) {
+    const hit = _scCache.get(ski);
+    if (hit._sig === _scSig(ski) && hit._nodes[0] === ski.tipNodesR && hit._nodes[1] === ski.tipNodesL && hit._nodes[2] === ski.tailNodesR && hit._nodes[3] === ski.tailNodesL) return hit;
+  }
+  const mode = sidecutShapeOf(ski);
+  const L = ski.length, WW = ski.waistWidth;
+  const tipW2 = ski.tipWidth / 2, tailW2 = ski.tailWidth / 2;
+  const userWaistY = resolveWaistYUser(ski);
+  const asymW = !!ski.asymSidecut, ttSym = !!ski.tipTailSym;
+  const side = (key) => {
+    const isIn = key === "in";
+    const c = sideContact(ski, key);
+    const ww2 = (asymW ? (isIn ? (ski.waistInside != null ? ski.waistInside : WW) : (ski.waistOutside != null ? ski.waistOutside : WW)) : WW) / 2;
+    const tipCY = L - c.tipL, tailCY = c.tailL;
+    const tipNodes = isIn ? ski.tipNodesR : (ski.tipSymmetric ? ski.tipNodesR : ski.tipNodesL);
+    const tailNodes = ttSym ? tipNodes : (isIn ? ski.tailNodesR : (ski.tailSymmetric ? ski.tailNodesR : ski.tailNodesL));
+    const tipSpan = L - tipCY, tailSpan = tailCY;
+    if (mode === "blended") {
+      return { ww2, tipCY, tailCY, waistY: userWaistY, hcTip: tipW2, hcTail: tailW2, arcTip: null, arcTail: null,
+        effTip: tipNodes, effTail: tailNodes, widestTip: tipW2, widestTail: tailW2, apexOK: true };
+    }
+    const maxHalf = (nodes, W2) => { const pts = sampleShape(nodes, 800); let m = -Infinity; for (const p of pts) if (p.x > m) m = p.x; return m * W2; };
+    let hcT = tipW2, hcA = tailW2, waistY = userWaistY, apexOK = true, aT, aA, eT, eA, mT = tipW2, mA = tailW2;
+    for (let it = 0; it < 30; it++) {
+      if (mode === "single") {
+        const u = singleArcApex(tipCY, tailCY, hcT - ww2, hcA - ww2);
+        if (u != null) { waistY = tipCY - u; apexOK = true; } else { waistY = userWaistY; apexOK = false; }
+      }
+      aT = arcSide(ww2, hcT, tipCY - waistY); aA = arcSide(ww2, hcA, waistY - tailCY);
+      eT = effEndNodes(tipNodes, hcT / tipW2, arcEndSlope(aT), tipW2, tipSpan);
+      eA = effEndNodes(tailNodes, hcA / tailW2, arcEndSlope(aA), tailW2, tailSpan);
+      mT = maxHalf(eT, tipW2); mA = maxHalf(eA, tailW2);
+      const nT = Math.max(tipW2 - 25, Math.min(tipW2, hcT + (tipW2 - mT)));
+      const nA = Math.max(tailW2 - 25, Math.min(tailW2, hcA + (tailW2 - mA)));
+      const done = Math.abs(nT - hcT) < 1e-5 && Math.abs(nA - hcA) < 1e-5;
+      hcT = nT; hcA = nA;
+      if (done) break;
+    }
+    return { ww2, tipCY, tailCY, waistY, hcTip: hcT, hcTail: hcA, arcTip: aT, arcTail: aA, effTip: eT, effTail: eA,
+      widestTip: mT, widestTail: mA, apexOK };
+  };
+  const sIn = side("in"), sOut = side("out");
+  const res = { mode, sides: { in: sIn, out: sOut },
+    // One waist line for marks/readouts. Identical edges give one value; edges with different shapes or
+    // widths can put their narrowest points at slightly different spots, so the line sits midway.
+    waistY: mode === "single" ? (sIn.waistY + sOut.waistY) / 2 : userWaistY,
+    waistSplit: Math.abs(sIn.waistY - sOut.waistY),
+    // True when an arc mode could not make the end curve peak at the entered width (for example a tip shape
+    // with a point drawn wider than the contact). The widest values above are what the outline really reaches.
+    widestMismatch: mode !== "blended" && [sIn, sOut].some(s => Math.abs(s.widestTip - tipW2) > 0.01 || Math.abs(s.widestTail - tailW2) > 0.01),
+    apexOK: sIn.apexOK && sOut.apexOK };
+  if (ski && typeof ski === "object") { res._sig = _scSig(ski); res._nodes = [ski.tipNodesR, ski.tipNodesL, ski.tailNodesR, ski.tailNodesL]; _scCache.set(ski, res); }
+  return res;
+}
+// Half-width of one edge at along-ski position y, between the contacts (any mode).
+function sidecutHalfWidthAt(ski, s, y) {
+  const mode = sidecutShapeOf(ski);
+  if (mode === "blended") {
+    const tw2 = ski.tailWidth / 2, tipw2 = ski.tipWidth / 2;
+    if (y <= s.waistY) { const t = Math.max(0, Math.min(1, (y - s.tailCY) / (s.waistY - s.tailCY))), b = t * t * (3 - 2 * t); return tw2 + b * (s.ww2 - tw2); }
+    const t = Math.max(0, Math.min(1, (y - s.waistY) / (s.tipCY - s.waistY))), b = t * t * (3 - 2 * t); return s.ww2 + b * (tipw2 - s.ww2);
+  }
+  return y <= s.waistY ? arcHW(s.ww2, s.arcTail, s.waistY - y) : arcHW(s.ww2, s.arcTip, y - s.waistY);
+}
+
 function computeOutline(ski) {
   const { length: L, tipWidth: TW, waistWidth: WW, tailWidth: TAW, tipLength: TL, tailLength: TAIL } = ski;
   const tipContactY = L - TL, tailContactY = TAIL;
   const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
   const waistY = resolveWaistY(ski);
-  const nSamplesSidecut = ski.serratedEdge ? 200 : 60, nSamplesShape = 60;
+  // Arc modes sample the end curves finer so the drawn/exported widest point lands within ~0.002 mm of the entered width.
+  const nSamplesSidecut = ski.serratedEdge ? 200 : 60, nSamplesShape = sidecutShapeOf(ski) === "blended" ? 60 : 200;
 
-  const tipR = sampleShape(ski.tipNodesR, nSamplesShape);
-  const tipL = ski.tipSymmetric ? tipR : sampleShape(ski.tipNodesL, nSamplesShape);
-  // Snowboard twin: when tip/tail are locked symmetric, the tail curve mirrors the tip (same shape at both
-  // ends) rather than using its own nodes. Skis keep tip and tail independent (tipTailSym off).
-  const ttSym = !!ski.tipTailSym;
-  const tailR = ttSym ? tipR : sampleShape(ski.tailNodesR, nSamplesShape);
-  const tailL = ttSym ? tipL : (ski.tailSymmetric ? tailR : sampleShape(ski.tailNodesL, nSamplesShape));
+  // Sidecut + end curves come from sidecutSolve: the stored nodes in "blended", or (arc modes) the nodes with the
+  // contact node moved to the solved contact width and its handle turned to the arc, so the arc blends in.
+  const sc = sidecutSolve(ski);
+  const sIn = sc.sides.in, sOut = sc.sides.out;
+  const tipR = sampleShape(sIn.effTip, nSamplesShape), tailR = sampleShape(sIn.effTail, nSamplesShape);
+  const tipL = sampleShape(sOut.effTip, nSamplesShape), tailL = sampleShape(sOut.effTail, nSamplesShape);
 
-  const buildSide = (tailPtsNorm, tipPtsNorm, sign, ww2, tipCY, tailCY) => {
+  const buildSide = (tailPtsNorm, tipPtsNorm, sign, ww2, tipCY, tailCY, sd) => {
     const side = [];
     const tw2 = TAW / 2, tipw2 = TW / 2;
     // Tail curve: node 0 (pt.y=0) is the contact point, node 1 (pt.y=1) is the tail-end.
@@ -1217,19 +1344,18 @@ function computeOutline(ski) {
       const ph = (y - tailCY) / (tipCY - tailCY);
       return Math.sin(ph * Math.PI) * ski.serrationDepth * Math.sin(ph * ski.serrationCount * 2 * Math.PI);
     };
-    // Sidecut: tail-contact (width=TAW) → waist (width=WW)
-    const tailRunLen = waistY - tailCY;
+    // Sidecut: tail contact → waist → tip contact. "blended" = the original eased curve; arc modes = true
+    // circular arcs (see sidecutSolve). The contact points themselves come from the end curves.
+    const wY = sd.waistY;
+    const tailRunLen = wY - tailCY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
-      const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
-      const y = tailCY + t * tailRunLen;
-      side.push({ x: sign * (tw2 + b * (ww2 - tw2) + serr(y)), y });
+      const y = tailCY + (i / nSamplesSidecut) * tailRunLen;
+      side.push({ x: sign * (sidecutHalfWidthAt(ski, sd, y) + serr(y)), y });
     }
-    // Sidecut: waist → tip-contact (width=TW)
-    const tipRunLen = tipCY - waistY;
+    const tipRunLen = tipCY - wY;
     for (let i = 1; i <= nSamplesSidecut; i++) {
-      const t = i / nSamplesSidecut, b = t * t * (3 - 2 * t);
-      const y = waistY + t * tipRunLen;
-      side.push({ x: sign * (ww2 + b * (tipw2 - ww2) + serr(y)), y });
+      const y = wY + (i / nSamplesSidecut) * tipRunLen;
+      side.push({ x: sign * (sidecutHalfWidthAt(ski, sd, y) + serr(y)), y });
     }
     // Tip curve: pt.y=0 is tip-contact (skiY=tipCY), pt.y=1 is nose-end (skiY=L)
     const tipSpan = L - tipCY;
@@ -1242,26 +1368,22 @@ function computeOutline(ski) {
     return side;
   };
 
-  // Asymmetric sidecut: each edge can use its own waist width (→ its own sidecut radius). Off = both
-  // sides use WW, giving the original symmetric outline. +x side = OUTSIDE, -x side = INSIDE.
-  const asym = !!ski.asymSidecut;
-  const wOut2 = (asym && ski.waistOutside != null ? ski.waistOutside : WW) / 2;
-  const wIn2 = (asym && ski.waistInside != null ? ski.waistInside : WW) / 2;
-  // Per-side contact points (effective edge). Waist Y is a single shared line; each edge runs its own
-  // sidecut from its own contacts to that waist. Tip/tail curves span from each side's contact to the ends.
-  const oc = sideContact(ski, "out"), ic = sideContact(ski, "in");
-  const tipCYout = L - oc.tipL, tailCYout = oc.tailL;
-  const tipCYin = L - ic.tipL, tailCYin = ic.tailL;
+  // Each edge uses its own waist width and contacts when the asymmetric options are on (sidecutSolve
+  // handles that). +x edge = INSIDE, -x edge = OUTSIDE.
   return {
-    right: buildSide(tailR, tipR,  1, wIn2, tipCYin, tailCYin),     // +x edge = INSIDE
-    left:  buildSide(tailL, tipL, -1, wOut2, tipCYout, tailCYout),  // -x edge = OUTSIDE
-    waistY, tipContactY, tailContactY,
+    right: buildSide(tailR, tipR,  1, sIn.ww2, sIn.tipCY, sIn.tailCY, sIn),
+    left:  buildSide(tailL, tipL, -1, sOut.ww2, sOut.tipCY, sOut.tailCY, sOut),
+    waistY, tipContactY, tailContactY, sidecut: sc,
   };
 }
 
 function computeDerived(ski){
   const ee=ski.length-ski.tipLength-ski.tailLength,avg=(ski.tipWidth+ski.tailWidth)/2;
-  const depth=(avg-ski.waistWidth)/2,radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
+  const depth=(avg-ski.waistWidth)/2;
+  // Standard formula R = EE² / (8 × depth), depth from the entered widths. Used as the headline for "blended"
+  // (which is not an arc) and "dual" (which has two radii). "single" reports the arc's own radius below.
+  let radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
+  const shape=sidecutShapeOf(ski);
   // Per-side sidecut radii. The waist is the apex (edge tangent to centerline); each side is an arc
   // from a contact to the waist. Over a side run Ls the edge moves in by d=(endW−waist)/2, giving
   // R = Ls²/(2d). This reduces to the standard whole-edge formula when the waist is centered AND the
@@ -1277,8 +1399,15 @@ function computeDerived(ski){
     const d = (endW - ski.waistWidth) / 2;
     return d > 0.01 ? runLen * runLen / (2 * d) / 1000 : Infinity;
   };
-  const backRadius = sideR(backRun, ski.tailWidth);
-  const frontRadius = sideR(frontRun, ski.tipWidth);
+  let backRadius = sideR(backRun, ski.tailWidth);
+  let frontRadius = sideR(frontRun, ski.tipWidth);
+  // Arc modes: the radii ARE the drawn arcs (exact circle through the solved contact point, tangent at the waist).
+  const sc = sidecutSolve(ski);
+  const rOf = a => (a && a.sgn > 0 && isFinite(a.R)) ? a.R / 1000 : Infinity;
+  if (shape !== "blended") {
+    frontRadius = rOf(sc.sides.in.arcTip); backRadius = rOf(sc.sides.in.arcTail);
+    if (shape === "single" && sc.apexOK) radius = frontRadius;
+  }
   // Inside/outside (left/right edge) radii when asymmetric sidecut is on. Each edge uses its own waist
   // width across the full effective edge; a narrower waist on a side gives a tighter radius there.
   const asymOn = !!ski.asymSidecut;
@@ -1287,11 +1416,15 @@ function computeDerived(ski){
   const wOut = asymOn && ski.waistOutside != null ? ski.waistOutside : ski.waistWidth;
   const wIn = asymOn && ski.waistInside != null ? ski.waistInside : ski.waistWidth;
   const edgeR = (ee_, w) => { const d = (avg - w) / 2; return d > 0.5 ? (ee_ * ee_) / (8 * d) / 1000 : Infinity; };
-  const radiusOutside = edgeR(eeOut, wOut), radiusInside = edgeR(eeIn, wIn);
+  let radiusOutside = edgeR(eeOut, wOut), radiusInside = edgeR(eeIn, wIn);
+  if (shape === "single" && sc.apexOK) { radiusInside = rOf(sc.sides.in.arcTip); radiusOutside = rOf(sc.sides.out.arcTip); }
   const finiteBoth = isFinite(backRadius) && isFinite(frontRadius);
   const ratio = finiteBoth ? Math.max(backRadius, frontRadius) / Math.min(backRadius, frontRadius) : 1;
-  const asymmetric = finiteBoth && ratio > 1.15;   // >15% apart → worth showing per-side
-  return { effectiveEdge: ee, sidecutRadius: radius, backRadius, frontRadius, asymmetric,
+  // ">15% apart" decides when blended shows per-side radii; "dual" always has two radii, so it always shows them.
+  const asymmetric = (shape === "dual" && finiteBoth) || (finiteBoth && ratio > 1.15);
+  return { effectiveEdge: ee, sidecutRadius: radius, backRadius, frontRadius, asymmetric, sidecutShape: shape,
+           contactWidthTip: sc.sides.in.hcTip + sc.sides.out.hcTip, contactWidthTail: sc.sides.in.hcTail + sc.sides.out.hcTail,
+           widestMismatch: sc.widestMismatch, apexOK: sc.apexOK, waistSplit: sc.waistSplit,
            backRun, frontRun, radiusOutside, radiusInside, asymSidecut: asymOn,
            effectiveEdgeOutside: eeOut, effectiveEdgeInside: eeIn, asymContact: !!ski.asymContact };
 }
@@ -1342,7 +1475,23 @@ function computeInserts(ski){
 // the radius adjusts the waist because that's the free variable — the ends and running edge are
 // things you set deliberately. R = ee²/(8·depth)/1000, depth = (avg − waist)/2, so:
 //   depth = ee² / (8·R·1000),  waist = avg − 2·depth.
+// Solve a parameter by bisection so the headline radius (computeDerived, whatever the sidecut shape) equals
+// the target. f(v) must rise with v. Returns null when the target is outside what [lo, hi] can reach.
+function bisectRadius(radiusM, lo, hi, f) {
+  const rLo = f(lo), rHi = f(hi);
+  if (!isFinite(rLo) || !isFinite(rHi) || radiusM < Math.min(rLo, rHi) || radiusM > Math.max(rLo, rHi)) return null;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (f(m) < radiusM) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
 function waistWidthForRadius(ski, radiusM){
+  if (sidecutShapeOf(ski) === "single" && radiusM > 0) {
+    // Exact arc: wider waist → shallower sidecut → larger radius, so R rises with the waist width.
+    const hi = Math.min(ski.tipWidth, ski.tailWidth) - 0.2, lo = Math.max(10, hi - 150);
+    const w = bisectRadius(radiusM, lo, hi, v => computeDerived({ ...ski, waistWidth: v }).sidecutRadius);
+    if (w != null) return w;
+    const rLo = computeDerived({ ...ski, waistWidth: lo }).sidecutRadius;
+    return radiusM < rLo ? lo : hi;   // out of reach → nearest end (the caller clamps to its own limits too)
+  }
   const ee = ski.length - ski.tipLength - ski.tailLength;
   const avg = (ski.tipWidth + ski.tailWidth) / 2;
   if (!(radiusM > 0)) return avg;              // non-positive / blank → straight (no sidecut)
@@ -1354,6 +1503,13 @@ function waistWidthForRadius(ski, radiusM){
 // splitting it across tip/tail by their current ratio. This is the one you want for matching a spec
 // sheet: keep the published widths (incl. waist) and let the contacts move to hit the published radius.
 function tipTailForRadius(ski, radiusM){
+  if (sidecutShapeOf(ski) === "single") {
+    const curTotal = (ski.tipLength + ski.tailLength) || 1, tipFrac = ski.tipLength / curTotal;
+    const patchFor = span => { const ends = ski.length - span; return { tipLength: Math.max(40, Math.round(ends * tipFrac)), tailLength: Math.max(40, Math.round(ends * (1 - tipFrac))) }; };
+    // Longer contact span → larger radius. Rounding to whole mm makes the result land within a hair of the target.
+    const span = bisectRadius(radiusM, 300, ski.length - 80, s => computeDerived({ ...ski, ...patchFor(s) }).sidecutRadius);
+    return span == null ? null : patchFor(span);
+  }
   const avg = (ski.tipWidth + ski.tailWidth) / 2;
   const depth = (avg - ski.waistWidth) / 2;
   if (!(radiusM > 0) || depth <= 0) return null;   // no sidecut / invalid
@@ -1469,7 +1625,7 @@ function sideProfileHeightAt(ski, xmm) {
 }
 
 function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,layup){
-  const base={name,waistPosition:0.48,edgeInset:2.0,coreInset:5,...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
+  const base={name,waistPosition:0.48,edgeInset:2.0,coreInset:5,sidecutShape:"single",...dims,tipNodesR:tipR,tipNodesL:tipL||tipR,tailNodesR:tailR,tailNodesL:tailL||tailR,
     tipSymmetric:tipSym!==false,tailSymmetric:tailSym!==false,...profile,
     coreProfile:core||makeDefaultCore(),layup:layup||{...DEFAULT_LAYUP}};
   // Pin the core's contact/end nodes to THIS preset's contact positions (its tip/tail length differ).
@@ -2266,7 +2422,12 @@ function measurementRows(ski, extra = {}) {
   rows.push(["Tip height (rocker)", `${ski.tipHeight}`]);
   rows.push(["Tail height (rocker)", `${ski.tailHeight}`]);
   rows.push(["Camber height", `${ski.camberHeight}`]);
-  { const wp0 = ski.waistPosition !== undefined ? ski.waistPosition : 0.48; rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
+  { // Reported from where the waist actually is (in "single" the arc sets it, so the stored value isn't used).
+    const wY = resolveWaistY(ski), tC = ski.tailLength, pC = ski.length - ski.tipLength;
+    const wp0 = ski.waistFullLength ? wY / ski.length : (wY - tC) / (pC - tC);
+    rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
+  if (sidecutShapeOf(ski) !== "blended") rows.push(["Width at contacts (tip / tail)", `${derived.contactWidthTip.toFixed(1)} / ${derived.contactWidthTail.toFixed(1)} (tip/tail width above = widest point)`]);
+  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? "single radius (circular arc)" : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m` : "blended (eased curve, radius by standard formula)"]); }
   rows.push(["Edge inset", `${ski.edgeInset}`]);
   rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
   if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
@@ -3752,20 +3913,59 @@ function arcFitGcode(gcode, tol, dec, lineNum) {
 }
 
 // CAM jobs: what each "What are you cutting?" choice sets up, and which files (ops) belong to its steps.
-function camJobPatch(j) {
-  if (j === "coreInserts") return { job: j, op: "bore", pinOrigin: true, alignDrillOp: "bore" };
+function camJobPatch(j, o) {
+  // Poured sidewalls start with the channel cut (top face up), which also drills the alignment holes.
+  if (j === "coreInserts") return (o && o.sidewallMethod === "pour") ? { job: j, op: "channel", pinOrigin: true, alignDrillOp: "channel" } : { job: j, op: "bore", pinOrigin: true, alignDrillOp: "bore" };
   if (j === "core") return { job: j, op: "outline", outlineSide: "top", pinOrigin: false, alignDrillOp: "outline" };
   return { job: j, op: j === "mold" ? "mold" : j };
 }
 function camJobOps(j, o) {
-  if (j === "coreInserts") return o.boreWithProfile === false ? ["bore", "outline", "taper"] : ["bore", "taper"];
+  if (j === "coreInserts") return [...(o.sidewallMethod === "pour" ? ["channel"] : []), "bore", ...(o.boreWithProfile === false ? ["outline"] : []), ...(o.rabbetHow === "cnc" ? ["rabbet"] : []), "taper"];
   if (j === "core") return ["outline", "taper"];
   if (j === "mold") return ["mold", "slat"];
   return [j];
 }
 // Plain names for each kind of CAM file, used in the UI, download filenames and setup sheets.
-const CAM_STEP_NAMES = { outline: "Cut out the core shape", taper: "Shape the top face", mold: "Carved press mold", slat: "Press mold ribs", bore: "Machine the bottom face", pocket: "Clear a recess", base: "Cut the base material" };
-const CAM_FILE_SLUGS = { outline: "core-shape", taper: "top-face", mold: "press-mold", slat: "mold-ribs", bore: "bottom-face", pocket: "recess", base: "base" };
+const CAM_STEP_NAMES = { outline: "Cut out the core shape", taper: "Shape the top face", mold: "Carved press mold", slat: "Press mold ribs", bore: "Machine the bottom face", pocket: "Clear a recess", base: "Cut the base material", rabbet: "Cut the edge rabbet", channel: "Cut the sidewall channel" };
+const CAM_FILE_SLUGS = { outline: "core-shape", taper: "top-face", mold: "press-mold", slat: "mold-ribs", bore: "bottom-face", pocket: "recess", base: "base", rabbet: "edge-rabbet", channel: "sidewall-channel" };
+// Where the wood core's sides end, along the ski (mm from the tail end): the line where the tip/tail fill takes
+// over. V-cut and interlock ends start their fill at the contact; a plain core ends "coreEndExt" past the contact.
+// full = the core runs the whole length with no fill at either end (same test applyVCutToCore uses).
+function coreSideLimits(ski) {
+  const L = ski.length, tailC = ski.tailLength, tipC = L - ski.tipLength;
+  const vTip = !!ski.vcutTip, vTail = !!ski.vcutTail;
+  const iTip = !!ski.interlockTip && !vTip, iTail = !!ski.interlockTail && !vTail;
+  const endExt = ski.coreEndExt !== undefined ? ski.coreEndExt : 50;
+  const reachTip = !vTip && !iTip && (tipC + endExt >= L - 0.5);
+  const reachTail = !vTail && !iTail && (tailC - endExt <= 0.5);
+  return {
+    xa: (vTail || iTail) ? tailC : Math.max(0, tailC - endExt),
+    xb: (vTip || iTip) ? tipC : Math.min(L, tipC + endExt),
+    full: reachTip && reachTail, tailC, tipC,
+  };
+}
+// One side's run of a closed loop (internal coords: x = along, y = lateral): the contiguous stretch on side s
+// (s = +1 / -1 lateral) between along-ski positions xa and xb, with exact end points on those lines, ordered
+// tail to tip. Contiguous (not sorted) so a curve that doubles back is still followed in order.
+function loopSideRun(loop, s, xa, xb) {
+  const n = loop.length; if (n < 3) return [];
+  const aug = [];
+  for (let i = 0; i < n; i++) {
+    const a = loop[i], b = loop[(i + 1) % n]; aug.push({ x: a.x, y: a.y });
+    const xs = []; for (const X of [xa, xb]) if ((a.x - X) * (b.x - X) < 0) xs.push({ X, t: (X - a.x) / (b.x - a.x) });
+    xs.sort((p, q) => p.t - q.t); for (const { X, t } of xs) aug.push({ x: X, y: a.y + t * (b.y - a.y) });
+  }
+  const eps = 1e-9, ins = p => s * p.y > 0 && p.x >= xa - eps && p.x <= xb + eps;
+  const m = aug.length; let start = -1; for (let i = 0; i < m; i++) if (!ins(aug[i])) { start = i; break; }
+  if (start < 0) return [];
+  const runs = []; let cur = [];
+  for (let k = 1; k <= m; k++) { const p = aug[(start + k) % m]; if (ins(p)) cur.push(p); else { if (cur.length) runs.push(cur); cur = []; } }
+  if (cur.length) runs.push(cur);
+  const span = r => { let L = 0; for (let i = 1; i < r.length; i++) L += Math.hypot(r[i].x - r[i - 1].x, r[i].y - r[i - 1].y); return L; };
+  let best = []; for (const r of runs) if (span(r) > span(best)) best = r;
+  if (best.length > 1 && best[0].x > best[best.length - 1].x) best = best.slice().reverse();
+  return best;
+}
 function buildCoreCAM(ski, opt) {
   const o = Object.assign({ units: "mm", toolDia: 12.7, feed: 2500, plunge: 800, spindle: 18000,
     stepdown: 3, stepover: 6, safeZ: 6, stockThick: 13, zZero: "bed", doProfile: true, doPerimeter: true,
@@ -3776,13 +3976,15 @@ function buildCoreCAM(ski, opt) {
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth", "insToolDia", "insFeed", "insPlunge", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth", "insToolDia", "insFeed", "insPlunge", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "rabbetWidth", "rabbetDepth", "chanWidth", "chanSkin", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
   const lerp = (a, b, t) => a + (b - a) * t;
   const L = ski.length, prof = ski.coreProfile;
-  const core = applyVCutToCore(ski);
+  // Poured sidewalls: the poly fills out past the ski outline, so the part that gets cut out and carved is the
+  // core with no sidewall inset (sides on the outline itself, ends unchanged).
+  const core = applyVCutToCore(o.pouredSidewalls ? { ...ski, coreInset: 0 } : ski);
   // Assembled-core outline for the taper: the wood core (carved in the outline op) grown out to the MEASURED
   // assembled width the builder entered — that measurement already includes the glued-on sidewalls, so the
   // per-side wall extent is just (measured half-width − wood-core half-width). We only add the user's overlap
@@ -3849,6 +4051,8 @@ function buildCoreCAM(ski, opt) {
     else if (o.doProfile && !isBase) { const ext = Math.max(0, wallPerSide + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
+    // Band cuts reach outside the core (channel past the outline, rabbet past the assembled edge).
+    if (o.bandKind) { const reach = (o.bandKind === "channel" ? Math.max(0, (o.chanWidth || 0) - (ski.coreInset || 0)) : Math.max(0, wallPerSide) + (o.edgeOverlap || 0)) + R; try { const e = offsetPolygonOutward(getFullOutlinePoints(ski), reach); if (e && e.length >= 3) accXY(e.map(p => ({ x: p.y, y: p.x }))); } catch (er) {} }
   }
   const stockX = (sx1 - sx0) / uL, stockY = (sy1 - sy0) / uL;           // in output units
   // Origin shift (internal coords): corner = shift so the whole part is in +X/+Y (min -> 0), so every
@@ -3897,7 +4101,7 @@ function buildCoreCAM(ski, opt) {
   PC(pinTail ? "Origin: X0 Y0 = center of the TAIL dowel hole, on the ski centerline (two-sided, pin-registered)" : `Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
-  if (o.bottomSide) PC("BOTTOM FACE UP. Sections run in order: dowel holes, insert bores, outer profile. Each loads its own tool.");
+  if (o.bottomSide && !o.bandKind) PC("BOTTOM FACE UP. Sections run in order: dowel holes, insert bores, outer profile. Each loads its own tool.");
   if (!o.bottomSide) { toolChange(o.toolNum); P(o.baseOp ? "M5" : `S${o.spindle} M3`); } if (o.baseOp) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
@@ -4185,9 +4389,90 @@ function buildCoreCAM(ski, opt) {
       });
     }
   };
+  // ── Edge rabbet (bottom face) and poured-sidewall channel (top face): a band that follows the ski outline.
+  // Band edges are measured as distances INWARD from the ski outline (negative = outside it). Every number that
+  // sets the band comes from the builder: rabbet width/depth; channel width and the wood left under it; the
+  // assembled width and edge overlap already used by the top-face file; the sidewall inset from the design. ──
+  const runBand = () => {
+    const isRab = o.bandKind === "rabbet";
+    const what = isRab ? "The edge rabbet needs " : "The sidewall channel needs ";
+    const need = (v, w) => { if (!(v > 0)) throw new Error(what + w + "."); return v; };
+    const inset = ski.coreInset !== undefined ? ski.coreInset : 0;
+    let dIn, dOut, depth;
+    if (isRab) {
+      dIn = need(o.rabbetWidth, "a width (measured in from the outside edge of the ski)");
+      depth = need(o.rabbetDepth, "a depth");
+      // Cut out past the assembled edge so no lip of sidewall is left hanging below the rabbet: glued walls can
+      // stand proud of the outline (measured assembled width); poured walls were cut on the outline.
+      const proud = o.pouredSidewalls ? 0 : Math.max(0, wallPerSide - inset);
+      dOut = -(proud + Math.max(0, o.edgeOverlap || 0));
+    } else {
+      const w = need(o.chanWidth, "a width");
+      if (!(o.chanSkin >= 0)) throw new Error(what + "the wood to leave under it.");
+      dIn = inset; dOut = inset - w;
+      depth = o.stockThick - o.chanSkin;
+      if (!(depth > 0)) throw new Error("The wood left under the channel is as thick as the blank, so there is nothing to cut.");
+      if (!(w > inset + 1e-6)) throw new Error("The channel has to reach past the ski's outline (wider than the " + f(inset) + " " + uu + " sidewall inset), or the cutout would leave wood at the edge instead of poly.");
+      if (o.toolDia > w + 1e-6) throw new Error("The bit is wider than the channel.");
+    }
+    if (depth > o.stockThick + 1e-6) throw new Error("The cut is deeper than the blank.");
+    // Bit centers across the band: one pass when the band is no wider than the bit, else stepped by the stepover.
+    const lo = dOut + R, hi = dIn - R, centers = [];
+    if (hi - lo <= 1e-6) centers.push(hi);
+    else {
+      if (!(o.stepover > 0) || o.stepover >= 2 * R) throw new Error("The stepover must be more than zero and smaller than the bit diameter, or ridges are left uncut.");
+      for (let d = lo; d < hi - 1e-6; d += o.stepover) centers.push(d);
+      centers.push(hi);
+    }
+    // Rabbet: outside in, so after the first pass the wood is only on the inner side. Channel: core wall first.
+    if (!isRab) centers.reverse();
+    const lim = coreSideLimits(ski);
+    const fullLoop = !isRab && lim.full;
+    // Rabbet on a full-length core (no fill at the ends): sides only, between the contact points.
+    const xa = (isRab && lim.full ? lim.tailC : lim.xa) - R, xb = (isRab && lim.full ? lim.tipC : lim.xb) + R;   // + bit radius past the fill line
+    const outl = getFullOutlinePoints(ski);
+    const offAt = d => (d > 1e-9 ? offsetPolygonInward(outl, d) : d < -1e-9 ? offsetPolygonOutward(outl, -d) : offsetPolygonInward(outl, 0)).map(p => ({ x: p.y, y: p.x }));
+    // Conventional milling on every pass (climb can pull a glued sidewall off). Wood on the inner side of the
+    // pass = like an outside profile; wood on the outer side = like a pocket wall. Same frame rules as the outline.
+    const wantCW = (woodInside) => { let w = woodInside; if (!o.spindleCW) w = !w; if (o.bottomSide) w = !w; return w; };
+    const levels = []; { const n = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown))); for (let k = 1; k <= n; k++) levels.push(o.stockThick - depth * k / n); }
+    useTool(o.toolNum);
+    PB(); PC(isRab
+      ? `===== EDGE RABBET (bottom face up on the pins) - ${f(dIn)} ${uu} in from the outside edge, ${f(depth)} ${uu} deep, sides only =====`
+      : `===== SIDEWALL CHANNEL (top face up) - ${f(dIn - dOut)} ${uu} wide from the core line outward, ${f(depth)} ${uu} deep (${f(o.chanSkin)} ${uu} of wood left under it)${fullLoop ? ", all the way around" : ", sides only"} =====`);
+    PC(fullLoop ? "Full-length core: runs the whole perimeter." : `Sides run from ${f(xa + R)} to ${f(xb - R)} ${uu} along the ski (where the tip/tail fill starts), plus one bit radius past each end.`);
+    PC("Conventional milling on every pass.");
+    const cutPath = (pts, z) => {
+      if (pts.length < 2) return;
+      g0(pts[0].x, pts[0].y); g0z(MZ(o.stockThick + 1)); g1z(MZ(z));
+      for (let i = 1; i < pts.length; i++) { g1(pts[i].x, pts[i].y, MZ(z)); cutDist += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); }
+      g0z(safeZ);
+    };
+    const paths = centers.map((d, i) => ({ d, loop: offAt(d), woodInside: isRab || i === 0 }));
+    if (fullLoop) {
+      for (const z of levels) for (const pa of paths) {
+        let lp = pa.loop.slice(); let ar = 0; for (let i = 0; i < lp.length; i++) { const a = lp[i], b = lp[(i + 1) % lp.length]; ar += a.x * b.y - b.x * a.y; }
+        if ((ar < 0) !== wantCW(pa.woodInside)) lp.reverse();
+        lp.push(lp[0]); cutPath(lp, z);
+      }
+    } else {
+      for (const s of [1, -1]) {
+        PC(`-- ${s > 0 ? "first" : "second"} edge (the plan view's ${s > 0 ? "+x" : "-x"} edge) --`);
+        for (const z of levels) for (const pa of paths) {
+          let run = loopSideRun(pa.loop, s, xa, xb);
+          if (run.length < 2) throw new Error("Couldn't find the ski's side between the fill lines for this cut.");
+          // Travelling tail→tip on the +lateral side is clockwise in this frame (and tip→tail on the − side).
+          const forwardIsCW = s > 0;
+          if (forwardIsCW !== wantCW(pa.woodInside)) run = run.slice().reverse();
+          cutPath(run, z);
+        }
+      }
+    }
+  };
   // Bottom face (two-sided): dowels first (registration for everything after), then the insert bores while the
   // blank is still whole, then the outer profile last because it frees the core. Top-side ops keep their order.
-  if (o.bottomSide) { if (o.drillAlign) runDowels(); runBores(); if (o.doPerimeter) runPerimeter(); }
+  if (o.bandKind) { if (o.drillAlign) runDowels(); runBand(); }
+  else if (o.bottomSide) { if (o.drillAlign) runDowels(); runBores(); if (o.doPerimeter) runPerimeter(); }
   else if (o.drillAlign) runDowels();
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
   let _gc = G.join("\n"), _lines = G.length;
@@ -4647,8 +4932,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   const [dragging, setDragging] = useState(null);
   const [dragStart, setDragStart] = useState(null);
   const [handleAngle, setHandleAngle] = useState(null);  // live tangent-handle angle readout during drag
-  // Plan-view mm grid (off by default) and the pointer position during a drag (for the change readout).
-  const [showGrid, setShowGrid] = useState(false);
+  // Plan-view mm grid (on by default) and the pointer position during a drag (for the change readout).
+  const [showGrid, setShowGrid] = useState(true);
   const [dragPtr, setDragPtr] = useState(null);
   // Per-panel zoom (scale multiplier) and pan (screen-pixel offset). Default: 1× / no offset.
   const [tipZoom, setTipZoom] = useState(1);
@@ -4659,7 +4944,11 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
   const [mainPan, setMainPan] = useState({ x: 0, y: 0 });
   // Active pan gesture (when the user drags empty space inside a panel)
   const [panning, setPanning] = useState(null); // { frame, startMx, startMy, startPan }
-  const { right, left, waistY, tipContactY, tailContactY } = useMemo(() => computeOutline(ski), [ski]);
+  const { right, left, waistY, tipContactY, tailContactY, sidecut } = useMemo(() => computeOutline(ski), [ski]);
+  // End-curve nodes as drawn. In the arc sidecut shapes the contact node sits at the solved contact width with its
+  // handle turned to the arc (see sidecutSolve); in "blended" these are the stored nodes unchanged.
+  const effN = { tipR: sidecut.sides.in.effTip, tipL: sidecut.sides.out.effTip, tailR: sidecut.sides.in.effTail, tailL: sidecut.sides.out.effTail };
+  const arcShape = sidecut.mode !== "blended";
   // Drag ghost: the outline as it was when the current drag started (dragStart.ski is a snapshot taken on
   // pointer-down). Same coordinate frame as the live outline, so tail end = 0 mm and centerline = 0 mm.
   const ghostOutline = useMemo(() => {
@@ -4858,15 +5147,15 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         }
       });
     };
-    addShape(ski.tipNodesR, "tipR", true, 1, "tip");
-    if (!ski.tipSymmetric) addShape(ski.tipNodesL, "tipL", true, -1, "tip");
-    if (!ski.tipTailSym) { addShape(ski.tailNodesR, "tailR", false, 1, "tail");
-    if (!ski.tailSymmetric) addShape(ski.tailNodesL, "tailL", false, -1, "tail"); }
+    addShape(effN.tipR, "tipR", true, 1, "tip");
+    if (!ski.tipSymmetric) addShape(effN.tipL, "tipL", true, -1, "tip");
+    if (!ski.tipTailSym) { addShape(effN.tailR, "tailR", false, 1, "tail");
+    if (!ski.tailSymmetric) addShape(effN.tailL, "tailL", false, -1, "tail"); }
     else if (ski.mode === "snowboard") {
       // Twin board: the tail SHAPE follows the tip, but the tail contact is still adjustable. Expose the tail
       // contact node (both edges) so it's draggable for width + fore/aft; the drag mirrors to the tip.
-      cps.push({ id: "tailR_n0",  skiX:  ski.tailWidth / 2, skiY: tailContactY, type: "tailRNode", idx: 0, sign: 1,  isTip: false, frames: ["main", "tail"] });
-      cps.push({ id: "tailR_n0L", skiX: -ski.tailWidth / 2, skiY: tailContactY, type: "tailRNode", idx: 0, sign: -1, isTip: false, frames: ["main", "tail"] });
+      cps.push({ id: "tailR_n0",  skiX:  sidecut.sides.in.hcTail,  skiY: tailContactY, type: "tailRNode", idx: 0, sign: 1,  isTip: false, frames: ["main", "tail"] });
+      cps.push({ id: "tailR_n0L", skiX: -sidecut.sides.out.hcTail, skiY: tailContactY, type: "tailRNode", idx: 0, sign: -1, isTip: false, frames: ["main", "tail"] });
     }
     return cps;
   }, [ski, tipContactY, tailContactY, waistY]);
@@ -5121,8 +5410,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.restore();
       // Contact-point dots on each edge (both sides × tip/tail contact), per-side.
       ctx.fillStyle = C.contactLabel || "#f0895c";
-      [[ski.tailWidth / 2, tailCYin], [ski.tipWidth / 2, tipCYin],
-       [-ski.tailWidth / 2, tailCYout], [-ski.tipWidth / 2, tipCYout]].forEach(([x, y]) => {
+      // At the real contact width (narrower than the entered tip/tail width in the arc sidecut shapes).
+      [[sidecut.sides.in.hcTail, tailCYin], [sidecut.sides.in.hcTip, tipCYin],
+       [-sidecut.sides.out.hcTail, tailCYout], [-sidecut.sides.out.hcTip, tipCYout]].forEach(([x, y]) => {
         const s = toMain(x, y);
         ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill();
       });
@@ -5308,13 +5598,15 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.fillText(`${ski.length} mm`, mainOriginX + (ski.length * mainScale) / 2, mainRowY + mainRowH - 4);
     }
 
-    // Width values
+    // Width values. Tip/tail widths sit where the outline is widest (the contact in "blended"; a little past the
+    // contact in the arc sidecut shapes, where the arc carries on into the tip/tail before it turns in).
     ctx.fillStyle = C.heading;
     ctx.font = "bold 9px 'JetBrains Mono', monospace";
+    const widestY = (tip) => { let bx = -Infinity, by = tip ? tipContactY : tailContactY; for (const p of right) { if (tip ? p.y < tipContactY : p.y > tailContactY) continue; if (p.x > bx + 1e-9) { bx = p.x; by = p.y; } } return by; };
     [
-      { skiY: tailContactY, w: ski.tailWidth },
+      { skiY: widestY(false), w: ski.tailWidth },
       { skiY: waistY,       w: ski.waistWidth },
-      { skiY: tipContactY,  w: ski.tipWidth },
+      { skiY: widestY(true),  w: ski.tipWidth },
     ].forEach(d => {
       if (isVertical) {
         // Position label to the right of the right edge of the ski, at that skiY station
@@ -5444,10 +5736,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
     };
     const tailClip = { x: tailZoomX + 3, y: tailZoomY + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
     const tipClip  = { x: tipZoomX  + 3, y: tipZoomY  + 22, w: zoomPanelW - 6, h: zoomPanelH - 26 };
-    drawTangents(toTip, ski.tipNodesR, true, 1, tipClip);
-    if (!ski.tipSymmetric) drawTangents(toTip, ski.tipNodesL, true, -1, tipClip);
-    if (!ski.tipTailSym) { drawTangents(toTail, ski.tailNodesR, false, 1, tailClip);
-    if (!ski.tailSymmetric) drawTangents(toTail, ski.tailNodesL, false, -1, tailClip); }
+    drawTangents(toTip, effN.tipR, true, 1, tipClip);
+    if (!ski.tipSymmetric) drawTangents(toTip, effN.tipL, true, -1, tipClip);
+    if (!ski.tipTailSym) { drawTangents(toTail, effN.tailR, false, 1, tailClip);
+    if (!ski.tailSymmetric) drawTangents(toTail, effN.tailL, false, -1, tailClip); }
 
     // ── Draw control points ─────────────────────────────────────
     const drawCP = (cp, screenPos, scaleMul, doClip) => {
@@ -5594,7 +5886,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       if (cp) {
         const frame = dragStart?.frame;
         const s = frame === "tip" ? toTip(cp.skiX, cp.skiY) : frame === "tail" ? toTail(cp.skiX, cp.skiY) : toMain(cp.skiX, cp.skiY);
-        const label = `${handleAngle.deg}\u00B0${handleAngle.snapped ? " SNAP" : ""}`;
+        const label = handleAngle.locked ? "direction set by the sidecut arc; drag to change length" : `${handleAngle.deg}\u00B0${handleAngle.snapped ? " SNAP" : ""}`;
         ctx.font = "bold 11px 'JetBrains Mono', monospace";
         const tw = ctx.measureText(label).width;
         const bx = s.x + 12, by = s.y - 22;
@@ -5834,7 +6126,10 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       const toSki = (nx, ny) => isTip
         ? { x: nx * wHalf, y: (ski.length - ski.tipLength) + ny * ski.tipLength }
         : { x: nx * wHalf, y: ski.tailLength * (1 - ny) };
-      const arr0 = normalizeShape((isTip ? ski.tipNodesR : ski.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
+      // Arc sidecut shapes draw the curve from the solved nodes (contact node moved in, handle turned), so find and
+      // split on those; the stored contact node keeps its own position and only takes the new handle length.
+      const effFor = (s) => { const e = sidecutSolve(s).sides.in; return normalizeShape(isTip ? e.effTip : e.effTail); };
+      const arr0 = (arcShape ? effFor(ski) : null) || normalizeShape((isTip ? ski.tipNodesR : ski.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
       if (arr0.length < 8) {
         let best = { d: Infinity, seg: 0, t: 0.5 };
         for (let si = 0; si < arr0.length - 1; si++) {
@@ -5846,11 +6141,14 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         }
         if (best.d < 28) {
           setSki(s => {
-            const arr = normalizeShape((isTip ? s.tipNodesR : s.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
+            const stored = normalizeShape((isTip ? s.tipNodesR : s.tailNodesR) || (isTip ? makeRoundedTip() : makeRoundedTail()));
+            const useEff = sidecutShapeOf(s) !== "blended";
+            const arr = useEff ? effFor(s).map(n => ({ ...n })) : stored;
             if (arr.length >= 8) return s;
             const a = arr[best.seg], b = arr[best.seg + 1], sp = splitSegment(a, b, best.t);
             a.txOut = sp.aOut.x; a.tyOut = sp.aOut.y; b.txIn = sp.bIn.x; b.tyIn = sp.bIn.y;
             arr.splice(best.seg + 1, 0, sp.node);
+            if (useEff) arr[0] = { ...stored[0], txOut: arr[0].txOut, tyOut: arr[0].tyOut };   // keep the stored contact node
             const next = { ...s, [rKey]: arr };
             if ((isTip ? s.tipSymmetric : s.tailSymmetric)) next[lKey] = arr.map(n => ({ ...n }));
             return next;
@@ -5862,7 +6160,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       return;
     }
     if (frame === "main") { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }
-  }, [findCP, cps, findDragFrame, setSki, ski, toTip, toTail]);
+  }, [findCP, cps, findDragFrame, setSki, ski, toTip, toTail, arcShape]);
 
   // Attach the wheel listener as NON-PASSIVE so preventDefault() actually stops page scroll.
   // React's synthetic onWheel can be passive in some setups, which would let the page scroll.
@@ -5940,7 +6238,8 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         setSki(s => ({
           ...s,
           [wp]: clamp(Math.round(dragStart.ski[wp] + dSkiX * cp.mult), 50, 320),
-          waistPosition: span > 0 ? clamp(startWP + dSkiY / span, lo, hi) : startWP,
+          // "single": the arc decides where the waist is, so an along-ski drag doesn't move it.
+          waistPosition: sidecutShapeOf(dragStart.ski) === "single" ? startWP : (span > 0 ? clamp(startWP + dSkiY / span, lo, hi) : startWP),
         }));
         return;
       }
@@ -5966,6 +6265,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       if (cp.type.includes("Tangent")) {
         // Tangent handle drag — pure bezier shape edit, no dimension changes. Follows the cursor 1:1.
         const nd = newNodes[cp.idx], isOut = cp.type.includes("TangentOut"), isIn = cp.type.includes("TangentIn");
+        // A legacy single-tangent node shown with in/out handles (the arc sidecut shapes show the contact node
+        // that way): convert just this node to in/out form first so its existing handle is kept, not replaced.
+        if ((isOut || isIn) && nd.txIn === undefined && nd.txOut === undefined) {
+          const t0 = normalizeShape(newNodes)[cp.idx];
+          nd.txIn = t0.txIn; nd.tyIn = t0.tyIn; nd.txOut = t0.txOut; nd.tyOut = t0.tyOut; delete nd.tx; delete nd.ty;
+        }
         let hx, hy;
         if (isOut) {
           nd.txOut = (nd.txOut || 0) + dNx; nd.tyOut = (nd.tyOut || 0) + dNy;
@@ -5979,9 +6284,12 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           nd.tx = (nd.tx || 0) + dNx; nd.ty = (nd.ty || 0) + dNy;
           hx = nd.tx; hy = nd.ty;
         }
-        // Report the physical handle angle (0° = straight along ski); flag near notable angles.
+        // Report the physical handle angle (0° = straight along ski); flag near notable angles. In the arc sidecut
+        // shapes the contact node's handle direction is set by the arc, so only its length changes: say so.
         const mag = Math.hypot(hy * ySpan, hx * wHalf * sign);
-        if (mag > 1e-6) {
+        if (cp.idx === 0 && sidecutShapeOf(dragStart.ski) !== "blended") {
+          setHandleAngle({ locked: true });
+        } else if (mag > 1e-6) {
           let deg = Math.atan2(hx * wHalf * sign, hy * ySpan) * 180 / Math.PI;
           deg = ((deg % 360) + 360) % 360;
           const near = [0, 45, 90, 135, 180, 225, 270, 315, 360].some(d => Math.abs(((deg - d + 540) % 360) - 180) < 2.5);
@@ -6121,7 +6429,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         title="Show a millimeter grid. Along the ski it is measured from the tail end; across the ski from the centerline."
         style={{
           // Phone layout: bottom-right of the zoom column so it never covers the tip node in the narrow main column.
-          position: "absolute", zIndex: 5, ...(isVertical ? { bottom: 8, right: 8 } : { top: 8, left: 8 }),
+          position: "absolute", zIndex: 5, ...(isVertical ? { bottom: 8, right: 8 } : { top: 4, left: 64 }),   // left: 64 clears the "PLAN" view label chip
           background: showGrid ? C.heading : "rgba(28,25,22,0.92)", color: showGrid ? "#141210" : C.heading,
           border: `1px solid ${C.heading}`, borderRadius: 5,
           padding: "4px 10px", fontSize: 10, fontWeight: 700,
@@ -7089,6 +7397,41 @@ function InfoBubble({ C, children, width = 250 }) {
   );
 }
 
+// ══════════════ SIDECUT SHAPE FIELD ══════════════
+// Single radius / Two radii / Blended. Shown for every design (including asymmetric sidecuts).
+function SidecutShapeField({ ski, setSki, C }) {
+  const shape = sidecutShapeOf(ski);
+  const derived = computeDerived(ski);
+  // Switching shape keeps the waist where it is now: leaving "single" stores the arc's waist as the user value.
+  const setShape = (m) => setSki(s => {
+    if (sidecutShapeOf(s) === m) return s;
+    const wY = resolveWaistY(s), tC = s.tailLength, pC = s.length - s.tipLength;
+    const wp = s.waistFullLength ? wY / s.length : (wY - tC) / (pC - tC);
+    return { ...s, sidecutShape: m, waistPosition: Math.round(wp * 1000) / 1000 };
+  });
+  const shapeBtn = (m, lbl) => (
+    <button key={m} onClick={() => setShape(m)}
+      style={{ flex: 1, padding: "4px 4px", fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3,
+        background: shape === m ? C.heading : "transparent", color: shape === m ? C.bgDeep : C.labelDim,
+        border: `1px solid ${shape === m ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer", textTransform: "uppercase" }}>
+      {lbl}
+    </button>
+  );
+  const note = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 3 };
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 3 }}>Sidecut shape</div>
+      <div style={{ display: "flex", gap: 3 }}>{shapeBtn("single", "Single radius")}{shapeBtn("dual", "Two radii")}{shapeBtn("blended", "Blended")}</div>
+      <div style={{ ...note, marginBottom: 8 }}>
+        {shape === "single" ? "One circular arc from contact to contact, flowing smoothly into the tip and tail. The arc sets where the waist is. Tip and tail width are the widest points."
+          : shape === "dual" ? "A circular arc on each side of the waist, so you choose where the waist goes. Each side has its own radius. Tip and tail width are the widest points."
+          : "The original eased curve. It is not a circular arc, so the radius below is the standard formula estimate. Tip and tail width are the width at the contact points. Designs saved before this setting open here."}
+      </div>
+      {shape === "single" && derived.waistSplit > 0.5 && <div style={{ ...note, marginTop: -4, marginBottom: 8 }}>The two edges are shaped differently, so each edge's narrowest point sits in a slightly different spot ({derived.waistSplit.toFixed(1)} mm apart). The waist line is drawn midway.</div>}
+    </div>
+  );
+}
+
 // ══════════════ SIDECUT RADIUS FIELD ══════════════
 // Two-way sidecut radius (m). Displays the live derived radius and, when you type one, solves back
 // for it. The "R adjusts" selector chooses the FREE VARIABLE that flexes to hit the radius:
@@ -7126,6 +7469,8 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   };
 
   const setTarget = (t) => setSki(s => ({ ...s, radiusTarget: t }));
+  const shape = sidecutShapeOf(ski);
+  const note = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 3 };
   const segBtn = (t, lbl) => (
     <button onClick={() => setTarget(t)}
       style={{ flex: 1, padding: "3px 4px", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.3,
@@ -7138,7 +7483,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   return (
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m)</span>
+        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m){shape === "dual" ? " · standard formula" : ""}</span>
         <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
           <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
           {segBtn("waist", "Waist")}
@@ -7165,11 +7510,15 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
           </span>
         </div>
       )}
-      {derived.asymmetric && (
+      {derived.asymmetric && shape === "blended" && (
         <div style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 2 }}>
           Waist off-center → each side turns at a different radius (highlighted on the plan view).
         </div>
       )}
+      {shape === "dual" && <div style={note}>Front and back are the radii of the two arcs as drawn. The number in the box uses the standard formula from the widths and running edge, and typing a radius solves with that formula.</div>}
+      {shape !== "blended" && <div style={note}>Width at the contacts: tip {derived.contactWidthTip.toFixed(1)} mm, tail {derived.contactWidthTail.toFixed(1)} mm.</div>}
+      {shape === "single" && !derived.apexOK && <div style={{ ...note, color: "#e8a33a" }}>No single arc fits: the waist has to be narrower than both the tip and the tail. Showing two arcs at your waist position instead, and the radius box uses the standard formula.</div>}
+      {derived.widestMismatch && <div style={{ ...note, color: "#e8a33a" }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact). The outline shows the real shape.</div>}
     </div>
   );
 }
@@ -7342,6 +7691,7 @@ function decodeDesign(str) {
     if (!obj || typeof obj !== "object") return null;
     // Backfill any keys missing from older shares so renders don't break.
     const out = { ...DEFAULT_SKI, ...obj };
+    if (obj.sidecutShape === undefined) out.sidecutShape = "blended";   // links made before the setting keep their shape
     for (const k of Object.keys(DEFAULT_SKI)) {
       const bv = DEFAULT_SKI[k], lv = obj[k];
       if (bv && lv && typeof bv === "object" && typeof lv === "object" && !Array.isArray(bv) && !Array.isArray(lv)) {
@@ -8363,6 +8713,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
+  "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
@@ -9034,7 +9385,14 @@ export default function App() {
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
-      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional" };
+      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional",
+      // Sidewalls: "glue" (strips glued on after the cutout) or "pour" (channel cut first, filled with poly). Edge
+      // rabbet: "off", "router" (instructions only) or "cnc" (its own file). Rabbet sizes have no default: the
+      // builder enters them. Channel width 10 mm and 1.5 mm of wood left under it follow the builder's stated
+      // practice (10 mm wide, 1 to 2 mm shallower than the stock); both are editable.
+      sidewallMethod: "glue", rabbetHow: "off", rabbetWidth: null, rabbetDepth: null,
+      rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
+      chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
     try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
@@ -9108,11 +9466,11 @@ export default function App() {
   // Never leave the CAM steps with nothing open. If no job has been chosen yet, set up the one that fits the
   // design (same as clicking it). If the current file isn't one of the job's steps, open the job's first step.
   useEffect(() => {
-    if (!camOpt.job) { setCamMany(camJobPatch(designInsertPts.length ? "coreInserts" : "core")); return; }
+    if (!camOpt.job) { setCamMany(camJobPatch(designInsertPts.length ? "coreInserts" : "core", camOpt)); return; }
     const ops = camJobOps(camOpt.job, camOpt);
     const sideOk = camOpt.op !== "outline" || (camOpt.job === "core" ? (camOpt.outlineSide || "top") === "top" : camOpt.job !== "coreInserts" || camOpt.outlineSide === "bottom");
-    if (!ops.includes(camOpt.op) || !sideOk) setCamMany(camJobPatch(camOpt.job));
-  }, [camOpt.job, camOpt.op, camOpt.outlineSide, camOpt.boreWithProfile, designInsertPts.length]);
+    if (!ops.includes(camOpt.op) || !sideOk) setCamMany(camJobPatch(camOpt.job, camOpt));
+  }, [camOpt.job, camOpt.op, camOpt.outlineSide, camOpt.boreWithProfile, camOpt.sidewallMethod, camOpt.rabbetHow, designInsertPts.length]);
   const borePts = useMemo(() => {
     if (camOpt.op !== "bore") return null;
     if ((camOpt.boreSrc || "design") === "design") return designInsertPts;
@@ -9125,8 +9483,17 @@ export default function App() {
   }, [ski.length, camOpt.op, camOpt.boreSrc, camOpt.boreCenter, camOpt.boreSpaceX, camOpt.boreSpaceY, camOpt.boreCols, camOpt.boreRows, camOpt.units, designInsertPts]);
   const camResult = useMemo(() => {
     try {
-      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: camOpt.stockThick, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!(camOpt.pinOrigin && ski.alignMarks), alignPinDepth: camOpt.alignPinDepth };
-      const opt = camOpt.op === "outline"
+      // Poured sidewalls (two-sided job): every file after the pour runs on the planed blank, whose thickness is the
+      // channel depth unless the builder enters what they actually ended up with.
+      const pour = camOpt.job === "coreInserts" && camOpt.sidewallMethod === "pour";
+      const postThick = pour ? (camOpt.pourThick > 0 ? camOpt.pourThick : camOpt.stockThick - (camOpt.chanSkin || 0)) : camOpt.stockThick;
+      if ((camOpt.op === "rabbet" || camOpt.op === "channel") && !ski.alignMarks) throw new Error((camOpt.op === "rabbet" ? "The edge rabbet" : "The sidewall channel") + " needs the alignment holes, so the core goes back on the pins in the same place. Turn on Drill alignment holes.");
+      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: (pour && camOpt.op !== "channel") ? postThick : camOpt.stockThick, pouredSidewalls: pour, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!(camOpt.pinOrigin && ski.alignMarks), alignPinDepth: camOpt.alignPinDepth };
+      const opt = camOpt.op === "rabbet"
+        ? { ...b, bottomSide: true, doProfile: false, doPerimeter: false, bandKind: "rabbet", rabbetWidth: camOpt.rabbetWidth, rabbetDepth: camOpt.rabbetDepth, toolNum: camOpt.rabbetToolNum, toolDia: camOpt.rabbetToolDia, feed: camOpt.rabbetFeed, plunge: camOpt.rabbetPlunge, stepover: camOpt.stepover, edgeOverlap: camOpt.edgeOverlap }
+        : camOpt.op === "channel"
+        ? { ...b, bottomSide: false, doProfile: false, doPerimeter: false, bandKind: "channel", chanWidth: camOpt.chanWidth, chanSkin: camOpt.chanSkin, toolNum: camOpt.channelToolNum, toolDia: camOpt.channelToolDia, feed: camOpt.channelFeed, plunge: camOpt.channelPlunge, stepover: camOpt.stepover, drillAlign: !!ski.alignMarks && alignDrillOp === "channel", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
+        : camOpt.op === "outline"
         ? { ...b, bottomSide: camOpt.outlineSide === "bottom", doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks && alignDrillOp === "outline", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
@@ -9176,14 +9543,34 @@ export default function App() {
     rows.push([so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`], ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
     if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
     const pinOn = !!(camOpt.pinOrigin && ski.alignMarks);
-    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? (camOpt.op === "bore" ? `Before anything else: jog to where you want the TAIL-side alignment hole, on the lengthwise centerline of the blank, and zero X and Y there. The toolpath is laid out from that point.` : `Zero X and Y on the center of the TAIL-side alignment pin (the same point as the Bore op). Do not re-zero anywhere else.`) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const pourS = camOpt.job === "coreInserts" && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" ? `Before anything else: jog to where you want the TAIL-side alignment hole, on the lengthwise centerline of the blank, and zero X and Y there. The toolpath is laid out from that point.` : `Zero X and Y on the center of the TAIL-side alignment pin (the same point you zeroed for the first file). Do not re-zero anywhere else.`) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
     const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
     const ahS = ski.alignMarks ? alignHoles(ski) : [];
     const pinMaxS = ahS.length ? Math.min(...ahS.map(h => getCoreThickAt(ski.coreProfile, Math.min(1, Math.max(0, h.y / ski.length))))) : null;
     const pinLine = pinMaxS != null ? `Put the registration pins in the spoilboard holes. They must stand NO TALLER than ${cvS(pinMaxS)} ${uu} above the spoilboard (the finished core thickness at the alignment holes), or the taper cutter will hit them.` : "Put the registration pins in the spoilboard holes.";
     const flipLine = "Turn the core over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it TOP FACE UP on the pins. Hold it down with clamps, vacuum or tape: the pins locate it but don't hold it.";
-    if (camOpt.op === "bore") {
+    const limS = coreSideLimits(ski);
+    const bottomUpLine = "Seat the core BOTTOM FACE UP on the pins, the same way it sat for the bottom-face file (don't turn it over). Hold it down with clamps, vacuum or tape. Nothing can stand proud of the face resting on the table.";
+    if (camOpt.op === "channel") {
+      rows.push(["Tools in this file", (ski.alignMarks && alignDrillOp === "channel" ? `T${camOpt.alignToolNum} alignment holes, then ` : "") + `T${camOpt.channelToolNum} channel`]);
+      steps.splice(0, 0, "Step 1: cut the sidewall channel. Lay the FLAT blank TOP FACE UP.");
+      steps.push(`What this file cuts: ${ski.alignMarks && alignDrillOp === "channel" ? "the alignment holes through the blank into the spoilboard, then " : ""}the channel, ${camOpt.chanWidth} ${uu} wide from the core line outward, leaving ${camOpt.chanSkin} ${uu} of wood under it${limS.full ? ", all the way around" : ", along the sides only"}.`);
+      steps.push(`Afterwards: fill the channel with poly and let it cure. Plane the bottom face until the poly shows full depth; the blank should then be ${+((camOpt.stockThick || 0) - (camOpt.chanSkin || 0)).toFixed(3)} ${uu} thick. Then run the bottom-face file with the same X/Y zero.`);
+    } else if (camOpt.op === "rabbet") {
+      rows.push(["Rabbet", `${camOpt.rabbetWidth} ${uu} in from the outside edge × ${camOpt.rabbetDepth} ${uu} deep, sides only`]);
+      steps.splice(0, 1, pourS ? "Edge rabbet. The core has been cut out through the poly; clean up the tabs first." : "Edge rabbet. The core has been cut out and its sidewalls glued on and cured.", pinLine, bottomUpLine);
+      steps.push(limS.full ? `Sides only, between the contact points (${cvS(limS.tailC)} and ${cvS(limS.tipC)} ${uu} from the tail end), because the core runs the full length.` : `Sides only. It stops one bit radius past where the tip and tail fill starts (${cvS(limS.xa)} and ${cvS(limS.xb)} ${uu} from the tail end).`);
+      steps.push("Then run the Shape the top face file with the same X/Y zero.");
+    } else if (camOpt.op === "bore" && pourS) {
+      const tl = [`T${camOpt.boreToolNum} insert holes and flange pockets`]; if (camOpt.boreWithProfile) tl.push(`T${camOpt.outlineToolNum} core shape`);
+      rows.push(["Tools in this file", tl.join(", then ")]);
+      steps.splice(0, 1, "Machine the bottom face. The channel has been poured and the bottom planed.", pinLine, "Turn the blank over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it BOTTOM FACE UP on the pins. Hold it down.");
+      steps.push(`Stock thickness in this file: ${s.setThick} ${uu} (the planed blank).`);
+      steps.push("What this file cuts, in order: insert holes and flange pockets" + (camOpt.boreWithProfile ? ", then the core shape last, through the poly on the ski outline (it frees the core)" : "") + ".");
+      steps.push(rabCnc ? "Then clean up the tabs and run the Cut the edge rabbet file with the same X/Y zero." : "Then clean up the tabs and run the Shape the top face file with the same X/Y zero.");
+    } else if (camOpt.op === "bore") {
       const tl = [];
       if (ski.alignMarks && alignDrillOp === "bore") tl.push(`T${camOpt.alignToolNum} alignment holes`);
       tl.push(`T${camOpt.boreToolNum} insert holes and flange pockets`);
@@ -9194,10 +9581,11 @@ export default function App() {
       steps.push("What this file cuts, in order: " + [ski.alignMarks && alignDrillOp === "bore" ? "alignment holes through the blank into the spoilboard" : null, "insert holes and flange pockets", camOpt.boreWithProfile ? "the core shape last, which frees the core" : null].filter(Boolean).join(", then ") + ".");
       steps.push("Afterwards: remove the core and glue on the sidewalls.");
       steps.push(pinLine);
-      steps.push(flipLine);
-      steps.push(camOpt.boreWithProfile ? "Then run the Shape the top face file with the same X/Y zero." : "Next, run the Cut out the core shape file in this same setup, before removing anything. After the sidewalls, run the Shape the top face file with the same X/Y zero.");
+      steps.push(rabCnc ? bottomUpLine : flipLine);
+      const nextF = rabCnc ? "the Cut the edge rabbet file" : "the Shape the top face file";
+      steps.push(camOpt.boreWithProfile ? `Then run ${nextF} with the same X/Y zero.` : `Next, run the Cut out the core shape file in this same setup, before removing anything. After the sidewalls, run ${nextF} with the same X/Y zero.`);
     } else if (pinOn && camOpt.op === "taper") {
-      steps.splice(0, 1, "Last step: shape the top face. The core has been cut out and its sidewalls glued on.", pinLine, flipLine);
+      steps.splice(0, 1, pourS ? "Last step: shape the top face. The core has been cut out through the poly." : "Last step: shape the top face. The core has been cut out and its sidewalls glued on.", pinLine, flipLine);
     } else if (pinOn && camOpt.op === "outline" && camOpt.outlineSide === "bottom") {
       steps.splice(0, 0, "Cut out the core shape, as its own file: same setup as the bottom-face file (bottom face still up, same zero), right after it.");
     } else if (pinOn && camOpt.op === "outline") {
@@ -10207,6 +10595,7 @@ export default function App() {
                 {inputField(board ? t("dim.noseW", "Nose W") : t("dim.tipW", "Tip W"), "tipWidth", 60, wMax)}
                 {!ski.asymSidecut && inputField(t("dim.waist", "Waist"), "waistWidth", waistMin, waistMax)}
                 {inputField(t("dim.tailW", "Tail W"), "tailWidth", 60, wMax)}
+                <SidecutShapeField ski={ski} setSki={setSki} C={C} />
                 {!ski.asymSidecut && <SidecutRadiusField ski={ski} setSki={setSki} C={C} WAIST_MIN={waistMin} WAIST_MAX={waistMax} />}
                 {!ski.asymContact && inputField(board ? t("dim.noseLen", "Nose Len") : t("dim.tipLen", "Tip Len"), "tipLength", board ? 40 : 80, 500)}
                 {!ski.asymContact && inputField(t("dim.tailLen", "Tail Len"), "tailLength", board ? 10 : 60, 400)}
@@ -10240,9 +10629,13 @@ export default function App() {
                       <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{t("dim.waistPos", "Waist Pos")}</span>
                       <span style={{ display: "flex", gap: 3 }}>{[["from tail", false], ["from tip", true]].map(([lb, v]) => { const on = fromTip === v; return <button key={lb} onClick={() => setSki(s => ({ ...s, waistFromTip: v }))} style={{ padding: "2px 7px", fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.labelDim, border: `1px solid ${on ? C.heading : C.inputBorder}`, borderRadius: 3, cursor: "pointer" }}>{lb}</button>; })}</span>
                     </div>
-                    <NumberInput value={+(fromTip ? 1 - wp : wp).toFixed(2)} min={lo} max={hi} step={0.01}
+                    {sidecutShapeOf(ski) === "single" ? (() => {
+                      // The arc decides the waist here, so show where it lands instead of an input.
+                      const tC = ski.tailLength, pC = ski.length - ski.tipLength, f = ski.waistFullLength ? wmm / ski.length : (wmm - tC) / (pC - tC);
+                      return <div title="Set by the single-radius arc. Choose Two radii under Sidecut shape to place the waist yourself." style={{ width: "100%", background: "transparent", border: `1px dashed ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", boxSizing: "border-box" }}>{(fromTip ? 1 - f : f).toFixed(3)} <span style={{ color: C.labelDim, fontSize: 10 }}>set by the arc</span></div>;
+                    })() : <NumberInput value={+(fromTip ? 1 - wp : wp).toFixed(2)} min={lo} max={hi} step={0.01}
                       onCommit={v => setSki(s => ({ ...s, waistPosition: Math.round((s.waistFromTip ? 1 - v : v) * 1000) / 1000 }))}
-                      style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                      style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />}
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>= {Math.round(ref)} mm from the {fromTip ? (ski.waistFullLength ? "tip" : "tip contact") : (ski.waistFullLength ? "tail" : "tail contact")}</div>
                   </div>); })()}
                 <div style={{ display: "flex", gap: 5, marginTop: -2, marginBottom: 8 }}>
@@ -11546,6 +11939,10 @@ export default function App() {
             const uu = camOpt.units === "inch" ? "in" : "mm", uf = camOpt.units === "inch" ? "in/min" : "mm/min";
             const st = camOpt.units === "inch" ? 0.01 : 0.5, stf = camOpt.units === "inch" ? 10 : 50;
             const isOutline = camOpt.op === "outline", isMold = camOpt.op === "mold", isSlat = camOpt.op === "slat", isBore = camOpt.op === "bore", isPocket = camOpt.op === "pocket", isBaseOp = camOpt.op === "base", tK = k => camOpt.op + k;
+            // Poured sidewalls: files after the pour use the planed thickness (the channel depth unless entered).
+            const isPour = camOpt.job === "coreInserts" && camOpt.sidewallMethod === "pour";
+            const pourPlaned = (camOpt.stockThick || 0) - (camOpt.chanSkin || 0);
+            const pourPost = isPour && ["bore", "outline", "rabbet", "taper"].includes(camOpt.op);
             // Pieces of the CAM panel, composed into the step cards below. Wording only; behavior unchanged.
             const toolRow = pre => (<div style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
               {[["Tool number", "ToolNum", 1], ["Bit diameter", "ToolDia", st], ["Feed rate", "Feed", stf], ["Plunge rate", "Plunge", stf]].map(([lab, kk, step]) => (
@@ -11554,8 +11951,8 @@ export default function App() {
               ))}</div>);
             const commonRow = (<>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
-                  {[["Stock thickness " + uu, "stockThick", st], ["Spindle speed (rpm)", "spindle", 500], ["Safe height " + uu, "safeZ", st], ["Depth per pass " + uu, "stepdown", st]].concat(isOutline || isSlat || isBore ? [] : [["Stepover " + uu, "stepover", st]]).map(([lab, key, step]) => (
-                    <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                  {[pourPost ? ["Thickness after planing " + uu, "pourThick", st] : ["Stock thickness " + uu, "stockThick", st], ["Spindle speed (rpm)", "spindle", 500], ["Safe height " + uu, "safeZ", st], ["Depth per pass " + uu, "stepdown", st]].concat(isOutline || isSlat || isBore ? [] : [["Stepover " + uu, "stepover", st]]).map(([lab, key, step]) => (
+                    <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={key === "pourThick" ? (camOpt.pourThick > 0 ? camOpt.pourThick : +pourPlaned.toFixed(camOpt.units === "inch" ? 4 : 2)) : camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
                   ))}
                 </div>
               <div style={{ ...camSmall, marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>Safe height: how high the bit lifts to move between cuts. Depth per pass: how deep each pass cuts.{isOutline || isSlat || isBore ? "" : " Stepover: how far the bit moves sideways between passes."}</div>
@@ -11577,13 +11974,13 @@ export default function App() {
                     return (<>
                       <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
                         <span style={camSmall}>Drill them in</span>
-                        {[["bore", "Bottom-face file"], ["outline", "Core shape file"]].map(([v, l]) => <button key={v} onClick={() => setCam("alignDrillOp", v)} style={{ ...camSeg(alignDrillOp === v), flex: "none", padding: "4px 8px" }}>{l}</button>)}
+                        {(isPour ? [["channel", "Sidewall channel file"]] : [["bore", "Bottom-face file"], ["outline", "Core shape file"]]).map(([v, l]) => <button key={v} onClick={() => setCam("alignDrillOp", v)} style={{ ...camSeg(alignDrillOp === v), flex: "none", padding: "4px 8px" }}>{l}</button>)}
                       </div>
                       <div style={{ color: camOpt.op === alignDrillOp ? C.labelDim : C.heading, fontSize: 10, margin: "2px 0 6px", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                         {camOpt.op === alignDrillOp
                           ? "Drilled in this file, through the blank and into the spoilboard so pins can go in later. A bit smaller than the hole cuts it in a spiral; a bit the same size plunges straight down."
-                          : "\u2192 Drilled in the " + (alignDrillOp === "bore" ? "bottom-face file" : "core shape file") + ". Set the sizes here."}
-                        {alignDrillOp === "bore" ? " Drilling them first lets the core be turned over onto pins and stay lined up for the top face." : ""}
+                          : "\u2192 Drilled in the " + (alignDrillOp === "bore" ? "bottom-face file" : alignDrillOp === "channel" ? "sidewall channel file" : "core shape file") + ". Set the sizes here."}
+                        {alignDrillOp === "bore" ? " Drilling them first lets the core be turned over onto pins and stay lined up for the top face." : alignDrillOp === "channel" ? " Drilling them first lets the planed blank go back on pins in the same place for every later step." : ""}
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                         <div><div style={camSmall}>Hole diameter {uu}</div><input type="number" value={dowelDisp} step={st} onChange={e => { const v = parseFloat(e.target.value); if (isFinite(v)) setSki(s => ({ ...s, alignDowelDia: inchU ? +(v * 25.4).toFixed(3) : v })); }} style={camInput} /></div>
@@ -11932,15 +12329,63 @@ export default function App() {
                   if (camOpt.insBarrelMode === "depth" && !(camOpt.insBarrelDepth > 0)) insMissing.push("hole depth");
                   const JOBS = [["coreInserts", "Core with inserts", "Cut on both faces"], ["core", "Core without inserts", "Top face only"], ["mold", "Press mold", "Carved mold or ribs"], ["base", "Base material", "Drag knife cut"], ["pocket", "Clear a recess", "Flat pocket"]];
                   const pickJob = j => setCamMany(camJobPatch(j));
-                  const glueInserts = "Remove the core from the blank and glue on the sidewalls. When they've cured, put pins into the two alignment holes in the spoilboard" + (pinMax != null ? ", standing no taller than " + cvG(pinMax) + " " + uu + " (the finished core thickness at the holes, so the bit can't reach them)" : "") + ". Turn the core over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins. Hold it down with clamps, vacuum, or tape; the pins only keep it from sliding.";
-                  const steps = job === "coreInserts" ? [
+                  const pinsTxt = "put pins into the two alignment holes in the spoilboard" + (pinMax != null ? ", standing no taller than " + cvG(pinMax) + " " + uu + " (the finished core thickness at the holes, so the bit can't reach them)" : "");
+                  const holdTxt = " Hold it down with clamps, vacuum, or tape; the pins only keep it from sliding.";
+                  const flatTxt = " The core has to sit flat, so nothing can stand proud of the face that rests on the table.";
+                  const glueInserts = "Remove the core from the blank and glue on the sidewalls. When they've cured, " + pinsTxt + ". Turn the core over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins." + holdTxt;
+                  // Edge rabbet and channel: where the core's sides end (tip/tail fill line), for the instructions.
+                  const lim = coreSideLimits(ski), cvL = v => cvG(v) + " " + uu;
+                  const rabOn = camOpt.rabbetHow === "cnc" || camOpt.rabbetHow === "router";
+                  const rabW = camOpt.rabbetWidth, rabD = camOpt.rabbetDepth, rabReady = rabW > 0 && rabD > 0;
+                  const rabStops = lim.full ? "Your core runs the full length with no tip or tail fill, so it runs between the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "It stops where the tip and tail fill starts, " + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end.";
+                  const routerStep = { title: "Rout the edge rabbet", sub: (rabReady ? "Cut a step " + cvG(rabW) + " " + uu + " wide and " + cvG(rabD) + " " + uu + " deep" : "Cut a step (enter its width and depth in the options above)") + " into each side of the core's bottom face, measured in from the ski's finished outside edge (if your sidewalls stand out past it, add that much). It makes room for the edge tangs where they lap over the base, so the base and edges sit flat against the core. Sides only, not the ends. " + rabStops + " On a router table, guide off the outside edge: a pattern bit following a template, or a bearing-guided rabbeting bit." };
+                  const jobOpts = (job === "coreInserts" || job === "core") && (() => {
+                    const seg = (on, lbl, fn) => <button key={lbl} onClick={fn} style={{ ...camSeg(on), padding: "4px 8px" }}>{lbl}</button>;
+                    const setMethod = m => setCamMany({ sidewallMethod: m, ...camJobPatch("coreInserts", { ...camOpt, sidewallMethod: m }) });
+                    const lenIn = (key, label) => (<div><div style={camSmall}>{label} {uu}</div><input type="number" value={camOpt[key] == null ? "" : camOpt[key]} placeholder="enter" step={st} min={0} onChange={e => { const v = parseFloat(e.target.value); setCam(key, isFinite(v) && v > 0 ? v : null); }} style={camInput} /></div>);
+                    return (
+                      <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
+                        {job === "coreInserts" && (<>
+                          <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Sidewalls</div>
+                          <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{seg(!isPour, "Glued-on strips", () => setMethod("glue"))}{seg(isPour, "Poured (channel)", () => setMethod("pour"))}</div>
+                          <div style={{ ...camSmall, lineHeight: 1.4, marginBottom: 10 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline." : "Strips are glued to the core after it's cut out."}</div>
+                        </>)}
+                        <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Edge rabbet</div>
+                        <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{seg(!rabOn, "None", () => setCam("rabbetHow", "off"))}{seg(camOpt.rabbetHow === "router", "Router table", () => setCam("rabbetHow", "router"))}{job === "coreInserts" && seg(camOpt.rabbetHow === "cnc", "CNC", () => setCam("rabbetHow", "cnc"))}</div>
+                        <div style={{ ...camSmall, lineHeight: 1.4, marginBottom: rabOn ? 6 : 0 }}>A shallow step along the sides of the core's bottom so the edge tangs (which lap over the base and add a little thickness) don't push the base out of flat.{job === "core" ? " To cut it, or a poured-sidewall channel, on the CNC, choose Core with inserts: it registers both faces on the alignment pins and works with no inserts too." : camOpt.rabbetHow === "cnc" ? " The CNC file puts the core back on the alignment pins, bottom face up." : ""}</div>
+                        {rabOn && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>{lenIn("rabbetWidth", "Width, in from the outside edge")}{lenIn("rabbetDepth", "Depth")}</div>}
+                        {rabOn && !rabReady && <div style={{ color: "#e8a33a", fontSize: 10.5, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Enter the width and depth for your edges.</div>}
+                      </div>);
+                  })();
+                  const tapStep = (lead) => ({ op: "taper", title: "Shape the top face", sub: lead + "Carves the thickness taper into the top, with the core seated on the pins. Don't re-zero X and Y." });
+                  const turnTop = "Turn the core over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins." + holdTxt + " ";
+                  const steps = job === "coreInserts" ? (isPour ? [
+                    { op: "channel", title: "Cut the sidewall channel", sub: "Flat blank, top face up. One file drills the alignment holes through the blank into the spoilboard, then cuts the channel " + (lim.full ? "all the way around the core" : "along each side of the core, stopping a bit-radius past where the tip and tail fill starts") + ", from the core line outward, leaving " + cvG(camOpt.chanSkin || 0) + " " + uu + " of wood under it." },
+                    { title: "Pour, cure, and plane", sub: "Fill the channel with poly and let it cure. Plane the bottom face until the poly shows full depth along the whole channel. The blank should then be " + cvG(pourPlaned) + " " + uu + " thick (the channel depth). If you end up with a different thickness, enter it as Thickness after planing in the next step so the remaining files are right." },
+                    { op: "bore", title: "Machine the bottom face", sub: pinsTxt.charAt(0).toUpperCase() + pinsTxt.slice(1) + ". Turn the blank over sideways, so the tail and tip stay at the same ends, and seat it bottom face up on the pins. Don't re-zero X and Y. One file cuts, in order:", parts: [["Alignment holes", !!ski.alignMarks, ski.alignMarks ? "drilled in step 1" : "turned off"], ["Insert holes", nIns > 0 && insMissing.length === 0, nIns === 0 ? "no inserts in the design" : (insMissing.length ? insMissing.length + (insMissing.length > 1 ? " sizes" : " size") + " needed" : nIns + " holes")]].concat(camOpt.boreWithProfile ? [["Cut out the core shape", true, "last, through the poly on the ski outline"]] : []) },
+                    ...(camOpt.boreWithProfile ? [] : [{ op: "outline", side: "bottom", title: "Cut out the core shape", sub: "Same setup, bottom face still up, before anything is moved. Cuts through the poly on the ski outline. Separate file." }]),
+                    ...(camOpt.rabbetHow === "cnc" ? [{ op: "rabbet", title: "Cut the edge rabbet", sub: "Remove the core from the blank and clean up the tabs. Seat it bottom face up on the pins again, the same way (don't turn it over)." + holdTxt + flatTxt + " Don't re-zero X and Y. " + rabStops }] : camOpt.rabbetHow === "router" ? [{ ...routerStep, sub: "Remove the core from the blank and clean up the tabs. " + routerStep.sub }] : []),
+                    tapStep((rabOn ? "" : "Remove the core from the blank and clean up the tabs. ") + turnTop),
+                  ] : [
                     { op: "bore", title: "Machine the bottom face", sub: "Flat blank with the core's bottom face up. One file cuts, in order:", parts: [["Alignment holes", !!ski.alignMarks, ski.alignMarks ? "" : "turned off"], ["Insert holes", nIns > 0 && insMissing.length === 0, nIns === 0 ? "no inserts in the design" : (insMissing.length ? insMissing.length + (insMissing.length > 1 ? " sizes" : " size") + " needed" : nIns + " holes")]].concat(camOpt.boreWithProfile ? [["Cut out the core shape", true, "last, because it frees the core"]] : []) },
                     ...(camOpt.boreWithProfile ? [] : [{ op: "outline", side: "bottom", title: "Cut out the core shape", sub: "Same setup, bottom face still up, before anything is moved. Separate file." }]),
-                    { title: "Glue on the sidewalls", sub: glueInserts },
-                    { op: "taper", title: "Shape the top face", sub: "Carves the thickness taper into the top, with the core seated on the pins. Don't re-zero X and Y." },
-                  ] : job === "core" ? [
+                    ...(camOpt.rabbetHow === "cnc" ? [
+                      { title: "Glue on the sidewalls", sub: "Remove the core from the blank and glue on the sidewalls. Let them cure." },
+                      { op: "rabbet", title: "Cut the edge rabbet", sub: pinsTxt.charAt(0).toUpperCase() + pinsTxt.slice(1) + ". Seat the core bottom face up on the pins, the same way it sat in step 1 (don't turn it over)." + holdTxt + flatTxt + " Don't re-zero X and Y. " + rabStops },
+                      tapStep(turnTop),
+                    ] : camOpt.rabbetHow === "router" ? [
+                      { title: "Glue on the sidewalls", sub: "Remove the core from the blank and glue on the sidewalls. Let them cure." },
+                      routerStep,
+                      tapStep(pinsTxt.charAt(0).toUpperCase() + pinsTxt.slice(1) + ". " + turnTop),
+                    ] : [
+                      { title: "Glue on the sidewalls", sub: glueInserts },
+                      tapStep(""),
+                    ]),
+                  ])
+                  : job === "core" ? [
                     { op: "outline", side: "top", title: "Cut out the core shape", sub: "Flat blank, top face up." },
                     { title: "Glue on the sidewalls", sub: "Glue the sidewalls onto the cut core and let them cure before the next step." },
+                    ...(camOpt.rabbetHow === "router" ? [routerStep] : []),
                     { op: "taper", title: "Shape the top face", sub: "Carves the thickness taper into the assembled core." },
                   ] : job === "mold" ? [
                     { op: "mold", alt: true, title: "Carved press mold", sub: "One solid block carved to the ski's camber and rocker." },
@@ -11951,7 +12396,26 @@ export default function App() {
                   const openStep = s => setCamMany({ op: s.op, ...(s.side ? { outlineSide: s.side } : {}) });
                   const partHead = t => <div style={{ color: C.heading, fontSize: 11.5, fontWeight: 700, margin: "10px 0 6px", paddingTop: 8, borderTop: `1px solid ${C.inputBorder}`, fontFamily: "'JetBrains Mono', monospace" }}>{t}</div>;
                   const showAlign = camOpt.op === alignDrillOp || (!ski.alignMarks && (isBore || isOutline));
-                  const body = isBore ? (<>
+                  const isBand = camOpt.op === "rabbet" || camOpt.op === "channel";
+                  const inset0 = ski.coreInset || 0;
+                  const numIn = (key, label, allowNull) => (<div><div style={camSmall}>{label} {uu}</div><input type="number" value={camOpt[key] == null ? "" : camOpt[key]} placeholder={allowNull ? "enter" : undefined} step={st} min={0} onChange={e => { const v = parseFloat(e.target.value); setCam(key, isFinite(v) && v >= 0 ? v : (allowNull ? null : 0)); }} style={camInput} /></div>);
+                  const bandPanel = camOpt.op === "channel" ? (
+                    <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                      <div style={{ ...camLabel, color: C.heading }}>Sidewall channel</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>{numIn("chanWidth", "Channel width")}{numIn("chanSkin", "Wood left under it")}</div>
+                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>The inside wall sits on the core line (the ski outline minus the {cvG(inset0)} {uu} sidewall inset), so the channel reaches {cvG(Math.max(0, (camOpt.chanWidth || 0) - inset0))} {uu} past the outline and the cutout later goes through poly. Depth = stock thickness minus the wood left under it = {cvG(pourPlaned)} {uu}. The bit can't be wider than the channel; a narrower bit makes extra passes using the stepover.</div>
+                    </div>) : camOpt.op === "rabbet" ? (
+                    <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
+                      <div style={{ ...camLabel, color: C.heading }}>Edge rabbet</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>{numIn("rabbetWidth", "Width", true)}{numIn("rabbetDepth", "Depth", true)}{numIn("edgeOverlap", "Edge overlap")}</div>
+                      <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>Width is measured in from the outside edge of the ski. The cut runs from there out past the edge so no lip is left: {isPour ? "poured walls were cut on the outline," : "glued walls can stand out past the outline by the assembled width measured in the top-face step,"} plus the edge overlap. Every pass is conventional milling, so a glued sidewall isn't pulled off.</div>
+                    </div>) : null;
+                  const body = isBand ? (<>
+                    {partHead("This file")}{commonRow}{toolRow(camOpt.op)}{feedsHelper}
+                    {camOpt.op === "channel" && <>{partHead("Alignment holes")}{alignBox}</>}
+                    {bandPanel}
+                    {partHead("Get the file")}{outputBody}
+                  </>) : isBore ? (<>
                     {partHead("This file")}{commonRow}
                     {partHead("Alignment holes")}{alignBox}
                     {partHead("Insert holes")}{toolRow("bore")}{feedsHelper}{opPanel}
@@ -11976,6 +12440,7 @@ export default function App() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
                       {JOBS.map(([k, t, d]) => (<button key={k} onClick={() => pickJob(k)} style={{ textAlign: "left", padding: "8px 9px", borderRadius: 5, cursor: "pointer", background: C.inputBg, border: job === k ? `2px solid ${C.heading}` : `1px solid ${C.inputBorder}`, color: C.label, fontFamily: "'JetBrains Mono', monospace" }}><div style={{ fontSize: 12, fontWeight: 700, color: job === k ? C.heading : C.label }}>{t}</div><div style={{ fontSize: 10, color: C.labelDim, marginTop: 2 }}>{d}</div></button>))}
                     </div>
+                    {jobOpts}
                     <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
                     {steps.map((s, i) => { const n = s.alt ? null : ++num, active = isActive(s); return (
                       <div key={i} style={{ border: active ? `2px solid ${C.heading}` : `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 8, background: active ? "transparent" : C.inputBg }}>
