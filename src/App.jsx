@@ -554,6 +554,7 @@ const DEFAULT_SKI={
   // arc); "dual" = a true circular arc on each side of a waist you place (two radii); "blended" = the original
   // eased curve (not an arc). Files saved before this setting existed load as "blended" so they keep their shape.
   sidecutShape:"single",
+  sidecutBlend:50,   // mm along the ski before each contact where the arc turns parallel (arc shapes only); editable
   tipRockerLen:240,   // mm from tip end to rocker takeoff. When linked, mirrors tipLength.
   tailRockerLen:170,  // mm from tail end to rocker takeoff. When linked, mirrors tailLength.
   edgeInset:2.0,    // mm. P-Tex base cut inset from outer edge (steel edge width).
@@ -574,6 +575,25 @@ const DEFAULT_SKI={
 const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
+// ── What's new ──
+// Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
+// ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
+// `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
+const WHATS_NEW = {
+  id: "2026-10-12",
+  title: "What's new",
+  items: [
+    { title: "Single-radius sidecut", go: "dimensions", target: "sidecut",
+      body: "New designs use a true circular sidecut arc, with a short transition before each contact (50 mm unless you change it) so the edge runs parallel where it meets the tip and tail. Under Dimensions, pick Single radius, Two radii, or Blended. Designs saved before this update open as Blended, so their shape doesn't change." },
+    { title: "Grid on by default", go: "plan", target: "grid",
+      body: "The millimeter grid in the plan view now starts on. Its button moved next to the Plan label." },
+    { title: "Edge rabbet", go: "cam", target: "cam-options",
+      body: "In the CAM workspace, under Core with inserts, you can add an edge rabbet: a shallow step along the sides of the core's bottom so the edge tangs don't push the base out of flat. Cut it on a router table or as its own CNC file." },
+    { title: "Poured sidewalls", go: "cam", target: "cam-options",
+      body: "Also under Core with inserts: choose Poured (channel) to cut a channel for poly sidewalls first, then plane the bottom and cut the core out through the poly. The steps and files update to match." },
+  ],
+};
+const WHATS_NEW_KEY = "bcs_whatsnew_seen";
 
 // The Topsheet Designer's default layer stack (just a solid-dark background). A factory so each reset gets a
 // fresh object rather than a shared reference.
@@ -1199,51 +1219,18 @@ function splitHardware(ski) {
 // ══════════════ SIDECUT GEOMETRY ══════════════
 // Missing or unknown values read as "blended" (designs saved before the setting existed).
 function sidecutShapeOf(ski) { const m = ski && ski.sidecutShape; return m === "single" || m === "dual" ? m : "blended"; }
-// One circular arc that is tangent to the centerline direction at the waist (half-width ww2) and reaches
-// half-width hc after an along-ski run Ls. Exact circle: R = (Ls² + d²) / (2|d|), d = hc − ww2.
-function arcSide(ww2, hc, Ls) {
-  const d = hc - ww2, ad = Math.abs(d);
-  if (ad < 1e-6 || !(Ls > 0)) return { R: Infinity, sgn: 0, Ls: Math.max(0, Ls || 0) };
-  return { R: (Ls * Ls + ad * ad) / (2 * ad), sgn: Math.sign(d), Ls };
-}
-function arcHW(ww2, a, dist) {
-  if (!a.sgn) return ww2;
-  const t = Math.min(Math.abs(dist), a.Ls);
-  return ww2 + a.sgn * (a.R - Math.sqrt(Math.max(0, a.R * a.R - t * t)));
-}
-// Slope of the arc at its contact end, in mm sideways per mm along (positive = widening toward the end).
-function arcEndSlope(a) { return a.sgn ? a.sgn * a.Ls / Math.sqrt(Math.max(1e-9, a.R * a.R - a.Ls * a.Ls)) : 0; }
-// One circle through both contacts whose narrowest point has half-width ww2. d1/d2 = how far each contact
-// sits outside the waist. Returns u = apex-to-tip-contact distance, or null when there is no such circle.
-function singleArcApex(tipCY, tailCY, d1, d2) {
-  const S = tipCY - tailCY;
-  if (!(S > 0) || !(d1 > 0.01) || !(d2 > 0.01)) return null;
-  let lo = 0, hi = S;
-  for (let i = 0; i < 100; i++) { const u = (lo + hi) / 2, f = (u * u + d1 * d1) / d1 - ((S - u) * (S - u) + d2 * d2) / d2; if (f > 0) hi = u; else lo = u; }
-  return (lo + hi) / 2;
-}
-// Arc modes: the end curve starts at the contact half-width (node 0 moved in to hcFrac of the end half-width)
-// with its outgoing handle turned to the arc's direction there, so the arc flows into the tip/tail with no
-// corner. The handle keeps its length in mm; only its direction is set by the arc.
-function effEndNodes(nodes, hcFrac, slope, W2, span) {
-  const arr = normalizeShape(nodes);
-  if (!arr || arr.length < 2 || !(W2 > 0) || !(span > 0)) return arr;
-  const n0 = { ...arr[0] };
-  const m = Math.hypot((n0.txOut || 0) * W2, (n0.tyOut || 0) * span);
-  const k = 1 / Math.sqrt(1 + slope * slope);
-  n0.x = hcFrac; n0.txOut = m * slope * k / W2; n0.tyOut = m * k / span;
-  return [n0, ...arr.slice(1)];
-}
+// Transition length (mm along the ski) before each contact in the arc modes. Missing = the 50 mm default.
+function sidecutBlendOf(ski) { const v = ski && ski.sidecutBlend; return typeof v === "number" && v >= 0 ? v : 50; }
 const _scCache = new WeakMap();
 // Solves the sidecut for both edges. Returns, per edge ("in" = +x, "out" = −x): waist y and half-width,
 // contact positions, contact half-widths (hcTip/hcTail), the two arcs (arc modes), the end-curve nodes to draw
 // (effTip/effTail, normalized like the stored nodes), and the widest half-width each end actually reaches.
-// Arc modes treat Tip/Tail width as the WIDEST point of the shovel/tail; the contact half-width is solved so
-// that the smooth arc-to-tip blend peaks exactly there.
+// Arc modes: each run is a true arc from the waist plus a short tangent transition (sidecutBlend mm) that brings the
+// edge parallel at the contact, so the contact is the widest point and the tip/tail shape stays fully editable.
 // Cache key check: the fields the solve reads (so an object edited in place after a solve never returns stale geometry).
 const _scSig = s => [s.length, s.tipWidth, s.waistWidth, s.tailWidth, s.tipLength, s.tailLength, s.waistPosition, s.waistFullLength, s.sidecutShape,
   s.asymSidecut, s.waistInside, s.waistOutside, s.asymContact, s.tipLengthInside, s.tipLengthOutside, s.tailLengthInside, s.tailLengthOutside,
-  s.tipSymmetric, s.tailSymmetric, s.tipTailSym].join("|");
+  s.tipSymmetric, s.tailSymmetric, s.tipTailSym, s.sidecutBlend].join("|");
 function sidecutSolve(ski) {
   if (ski && typeof ski === "object" && _scCache.has(ski)) {
     const hit = _scCache.get(ski);
@@ -1254,6 +1241,8 @@ function sidecutSolve(ski) {
   const tipW2 = ski.tipWidth / 2, tailW2 = ski.tailWidth / 2;
   const userWaistY = resolveWaistYUser(ski);
   const asymW = !!ski.asymSidecut, ttSym = !!ski.tipTailSym;
+  const blendReq = sidecutBlendOf(ski);
+  const maxHalf = (nodes, W2) => { const pts = sampleShape(nodes, 400); let m = -Infinity; for (const p of pts) if (p.x > m) m = p.x; return pts.length ? m * W2 : W2; };
   const side = (key) => {
     const isIn = key === "in";
     const c = sideContact(ski, key);
@@ -1261,43 +1250,64 @@ function sidecutSolve(ski) {
     const tipCY = L - c.tipL, tailCY = c.tailL;
     const tipNodes = isIn ? ski.tipNodesR : (ski.tipSymmetric ? ski.tipNodesR : ski.tipNodesL);
     const tailNodes = ttSym ? tipNodes : (isIn ? ski.tailNodesR : (ski.tailSymmetric ? ski.tailNodesR : ski.tailNodesL));
-    const tipSpan = L - tipCY, tailSpan = tailCY;
-    if (mode === "blended") {
-      return { ww2, tipCY, tailCY, waistY: userWaistY, hcTip: tipW2, hcTail: tailW2, arcTip: null, arcTail: null,
-        effTip: tipNodes, effTail: tailNodes, widestTip: tipW2, widestTail: tailW2, apexOK: true };
+    // The tip/tail curves are always the stored nodes: the contact node sits at the entered tip/tail width, so in
+    // every mode the contact is where the edge reaches that width.
+    const base = { ww2, tipCY, tailCY, hcTip: tipW2, hcTail: tailW2, effTip: tipNodes, effTail: tailNodes,
+      widestTip: maxHalf(tipNodes, tipW2), widestTail: maxHalf(tailNodes, tailW2) };
+    if (mode === "blended") return { ...base, waistY: userWaistY, arcTip: null, arcTail: null, apexOK: true };
+    let waistY = userWaistY, apexOK = true;
+    if (mode === "single") {
+      // One radius for both runs: slide the waist until the front and back arcs (each with its transition) match.
+      const lo = tailCY + 1, hi = tipCY - 1;
+      const g = a => arcRunWithBlend(ww2, tipW2, tipCY - a, blendReq).R - arcRunWithBlend(ww2, tailW2, a - tailCY, blendReq).R;
+      const gLo = g(lo), gHi = g(hi);
+      if (tipW2 - ww2 > 0.01 && tailW2 - ww2 > 0.01 && isFinite(gLo) && isFinite(gHi) && gLo > 0 && gHi < 0) {
+        let a0 = lo, a1 = hi;
+        for (let i = 0; i < 100; i++) { const m = (a0 + a1) / 2; if (g(m) > 0) a0 = m; else a1 = m; }
+        waistY = (a0 + a1) / 2;
+      } else apexOK = false;
     }
-    const maxHalf = (nodes, W2) => { const pts = sampleShape(nodes, 800); let m = -Infinity; for (const p of pts) if (p.x > m) m = p.x; return m * W2; };
-    let hcT = tipW2, hcA = tailW2, waistY = userWaistY, apexOK = true, aT, aA, eT, eA, mT = tipW2, mA = tailW2;
-    for (let it = 0; it < 30; it++) {
-      if (mode === "single") {
-        const u = singleArcApex(tipCY, tailCY, hcT - ww2, hcA - ww2);
-        if (u != null) { waistY = tipCY - u; apexOK = true; } else { waistY = userWaistY; apexOK = false; }
-      }
-      aT = arcSide(ww2, hcT, tipCY - waistY); aA = arcSide(ww2, hcA, waistY - tailCY);
-      eT = effEndNodes(tipNodes, hcT / tipW2, arcEndSlope(aT), tipW2, tipSpan);
-      eA = effEndNodes(tailNodes, hcA / tailW2, arcEndSlope(aA), tailW2, tailSpan);
-      mT = maxHalf(eT, tipW2); mA = maxHalf(eA, tailW2);
-      const nT = Math.max(tipW2 - 25, Math.min(tipW2, hcT + (tipW2 - mT)));
-      const nA = Math.max(tailW2 - 25, Math.min(tailW2, hcA + (tailW2 - mA)));
-      const done = Math.abs(nT - hcT) < 1e-5 && Math.abs(nA - hcA) < 1e-5;
-      hcT = nT; hcA = nA;
-      if (done) break;
-    }
-    return { ww2, tipCY, tailCY, waistY, hcTip: hcT, hcTail: hcA, arcTip: aT, arcTail: aA, effTip: eT, effTail: eA,
-      widestTip: mT, widestTail: mA, apexOK };
+    return { ...base, waistY, apexOK, arcTip: arcRunWithBlend(ww2, tipW2, tipCY - waistY, blendReq), arcTail: arcRunWithBlend(ww2, tailW2, waistY - tailCY, blendReq) };
   };
   const sIn = side("in"), sOut = side("out");
   const res = { mode, sides: { in: sIn, out: sOut },
-    // One waist line for marks/readouts. Identical edges give one value; edges with different shapes or
-    // widths can put their narrowest points at slightly different spots, so the line sits midway.
+    // One waist line for marks/readouts. Identical edges give one value; edges with different widths can put their
+    // narrowest points at slightly different spots, so the line sits midway.
     waistY: mode === "single" ? (sIn.waistY + sOut.waistY) / 2 : userWaistY,
     waistSplit: Math.abs(sIn.waistY - sOut.waistY),
-    // True when an arc mode could not make the end curve peak at the entered width (for example a tip shape
-    // with a point drawn wider than the contact). The widest values above are what the outline really reaches.
-    widestMismatch: mode !== "blended" && [sIn, sOut].some(s => Math.abs(s.widestTip - tipW2) > 0.01 || Math.abs(s.widestTail - tailW2) > 0.01),
+    // True when a tip/tail curve reaches wider than the entered width (a point drawn outside the contact).
+    widestMismatch: [sIn, sOut].some(s => s.widestTip - tipW2 > 0.01 || s.widestTail - tailW2 > 0.01),
     apexOK: sIn.apexOK && sOut.apexOK };
   if (ski && typeof ski === "object") { res._sig = _scSig(ski); res._nodes = [ski.tipNodesR, ski.tipNodesL, ski.tailNodesR, ski.tailNodesL]; _scCache.set(ski, res); }
   return res;
+}
+// Arc modes, one run from the waist to a contact: a circular arc tangent at the waist (half-width ww2), then a short
+// transition of along-ski length `blend` that turns the edge back to parallel with the centerline exactly at the
+// contact, where it reaches the end half-width. The transition is itself a circular arc (a fillet) tangent to the
+// main arc, so the whole edge is arcs with no corners, and the tip/tail curve starts from a parallel edge.
+// Solves the main arc radius R. Fillet: radius r = blend / sin(theta), rise = blend * tan(theta / 2), where theta is
+// the main arc's angle at the start of the transition (sin(theta) = run / R).
+function arcRunWithBlend(ww2, end2, U, blendReq) {
+  const d = end2 - ww2, ad = Math.abs(d), sgn = Math.sign(d);
+  if (!(U > 0) || ad < 1e-6) return { R: Infinity, sgn: 0, Ls: Math.max(0, U || 0), U: Math.max(0, U || 0), b: 0, r: Infinity, end2 };
+  const b = Math.max(0, Math.min(blendReq, U * 0.9));   // the transition can't use up the whole run
+  const Ls = U - b;
+  const rise = R => { const s = Math.min(1, Ls / R), th = Math.asin(s); return (R - Math.sqrt(Math.max(0, R * R - Ls * Ls))) + b * Math.tan(th / 2); };
+  // rise(R) falls as R grows; bracket and bisect.
+  let lo = Ls * (1 + 1e-12), hi = Math.max(Ls * 2, 1);
+  while (rise(hi) > ad && hi < 1e9) hi *= 2;
+  if (rise(lo) < ad) return { R: Ls, sgn, Ls, U, b, r: b > 0 ? b : Infinity, end2, short: true };   // can't reach: steepest arc
+  for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (rise(m) > ad) lo = m; else hi = m; }
+  const R = (lo + hi) / 2, th = Math.asin(Math.min(1, Ls / R));
+  return { R, sgn, Ls, U, b, r: b > 1e-9 && th > 1e-12 ? b / Math.sin(th) : Infinity, end2 };
+}
+// Half-width at distance `dist` from the waist along one run (arc modes).
+function arcHW(ww2, a, dist) {
+  if (!a || !a.sgn) return ww2;
+  const t = Math.max(0, Math.min(Math.abs(dist), a.U));
+  if (t <= a.Ls || !isFinite(a.r)) return ww2 + a.sgn * (a.R - Math.sqrt(Math.max(0, a.R * a.R - Math.min(t, a.Ls) ** 2)));
+  const fromContact = a.U - t;   // inside the transition: fillet centered level with the contact
+  return a.end2 - a.sgn * (a.r - Math.sqrt(Math.max(0, a.r * a.r - fromContact * fromContact)));
 }
 // Half-width of one edge at along-ski position y, between the contacts (any mode).
 function sidecutHalfWidthAt(ski, s, y) {
@@ -1315,8 +1325,8 @@ function computeOutline(ski) {
   const tipContactY = L - TL, tailContactY = TAIL;
   const wp = ski.waistPosition !== undefined ? ski.waistPosition : 0.48;
   const waistY = resolveWaistY(ski);
-  // Arc modes sample the end curves finer so the drawn/exported widest point lands within ~0.002 mm of the entered width.
-  const nSamplesSidecut = ski.serratedEdge ? 200 : 60, nSamplesShape = sidecutShapeOf(ski) === "blended" ? 60 : 200;
+  // Arc modes sample the sidecut finer so the short transitions before the contacts get enough points.
+  const nSamplesSidecut = ski.serratedEdge ? 200 : (sidecutShapeOf(ski) === "blended" ? 60 : 160), nSamplesShape = 60;
 
   // Sidecut + end curves come from sidecutSolve: the stored nodes in "blended", or (arc modes) the nodes with the
   // contact node moved to the solved contact width and its handle turned to the arc, so the arc blends in.
@@ -2426,8 +2436,7 @@ function measurementRows(ski, extra = {}) {
     const wY = resolveWaistY(ski), tC = ski.tailLength, pC = ski.length - ski.tipLength;
     const wp0 = ski.waistFullLength ? wY / ski.length : (wY - tC) / (pC - tC);
     rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
-  if (sidecutShapeOf(ski) !== "blended") rows.push(["Width at contacts (tip / tail)", `${derived.contactWidthTip.toFixed(1)} / ${derived.contactWidthTail.toFixed(1)} (tip/tail width above = widest point)`]);
-  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? "single radius (circular arc)" : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m` : "blended (eased curve, radius by standard formula)"]); }
+  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? `single radius (circular arc), ${sidecutBlendOf(ski)} mm transition at each contact` : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m, ${sidecutBlendOf(ski)} mm transition at each contact` : "blended (eased curve, radius by standard formula)"]); }
   rows.push(["Edge inset", `${ski.edgeInset}`]);
   rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
   if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
@@ -5886,7 +5895,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       if (cp) {
         const frame = dragStart?.frame;
         const s = frame === "tip" ? toTip(cp.skiX, cp.skiY) : frame === "tail" ? toTail(cp.skiX, cp.skiY) : toMain(cp.skiX, cp.skiY);
-        const label = handleAngle.locked ? "direction set by the sidecut arc; drag to change length" : `${handleAngle.deg}\u00B0${handleAngle.snapped ? " SNAP" : ""}`;
+        const label = `${handleAngle.deg}\u00B0${handleAngle.snapped ? " SNAP" : ""}`;
         ctx.font = "bold 11px 'JetBrains Mono', monospace";
         const tw = ctx.measureText(label).width;
         const bx = s.x + 12, by = s.y - 22;
@@ -6284,12 +6293,9 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           nd.tx = (nd.tx || 0) + dNx; nd.ty = (nd.ty || 0) + dNy;
           hx = nd.tx; hy = nd.ty;
         }
-        // Report the physical handle angle (0° = straight along ski); flag near notable angles. In the arc sidecut
-        // shapes the contact node's handle direction is set by the arc, so only its length changes: say so.
+        // Report the physical handle angle (0° = straight along ski); flag near notable angles.
         const mag = Math.hypot(hy * ySpan, hx * wHalf * sign);
-        if (cp.idx === 0 && sidecutShapeOf(dragStart.ski) !== "blended") {
-          setHandleAngle({ locked: true });
-        } else if (mag > 1e-6) {
+        if (mag > 1e-6) {
           let deg = Math.atan2(hx * wHalf * sign, hy * ySpan) * 180 / Math.PI;
           deg = ((deg % 360) + 360) % 360;
           const near = [0, 45, 90, 135, 180, 225, 270, 315, 360].some(d => Math.abs(((deg - d + 540) % 360) - 180) < 2.5);
@@ -6425,6 +6431,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         onDoubleClick={handleDoubleClick}
       />
       <button
+        data-wn="grid"
         onClick={() => setShowGrid(g => !g)}
         title="Show a millimeter grid. Along the ski it is measured from the tail end; across the ski from the centerline."
         style={{
@@ -7419,14 +7426,22 @@ function SidecutShapeField({ ski, setSki, C }) {
   );
   const note = { color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.4, marginTop: 3 };
   return (
-    <div style={{ marginBottom: 7 }}>
+    <div data-wn="sidecut" style={{ marginBottom: 7 }}>
       <div style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 3 }}>Sidecut shape</div>
       <div style={{ display: "flex", gap: 3 }}>{shapeBtn("single", "Single radius")}{shapeBtn("dual", "Two radii")}{shapeBtn("blended", "Blended")}</div>
       <div style={{ ...note, marginBottom: 8 }}>
-        {shape === "single" ? "One circular arc from contact to contact, flowing smoothly into the tip and tail. The arc sets where the waist is. Tip and tail width are the widest points."
-          : shape === "dual" ? "A circular arc on each side of the waist, so you choose where the waist goes. Each side has its own radius. Tip and tail width are the widest points."
-          : "The original eased curve. It is not a circular arc, so the radius below is the standard formula estimate. Tip and tail width are the width at the contact points. Designs saved before this setting open here."}
+        {shape === "single" ? "One circular arc on both sides of the waist, with a short transition before each contact that brings the edge parallel there. The arc sets where the waist is."
+          : shape === "dual" ? "A circular arc on each side of the waist, so you choose where the waist goes. Each side has its own radius, with the same short transition before each contact."
+          : "The original eased curve. It is not a circular arc: the outer half of each side curves outward. The radius below is the standard formula estimate. Designs saved before this setting open here."}
       </div>
+      {shape !== "blended" && (
+        <div style={{ marginTop: -2, marginBottom: 8 }}>
+          <div style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, marginBottom: 3 }}>Transition before each contact (mm)</div>
+          <NumberInput value={sidecutBlendOf(ski)} min={0} max={300} step={5}
+            onCommit={v => setSki(s => ({ ...s, sidecutBlend: Math.max(0, Math.min(300, Math.round(v * 10) / 10)) }))}
+            style={{ width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "7px 10px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ ...note }}>How far before each contact the arc starts turning, so the edge runs parallel to the centerline at the contact and meets the tip and tail curves smoothly. The contact is then the widest point. 0 = no transition: the arc meets the tip and tail at an angle. The radius shown is the main arc's.</div>
+        </div>)}
       {shape === "single" && derived.waistSplit > 0.5 && <div style={{ ...note, marginTop: -4, marginBottom: 8 }}>The two edges are shaped differently, so each edge's narrowest point sits in a slightly different spot ({derived.waistSplit.toFixed(1)} mm apart). The waist line is drawn midway.</div>}
     </div>
   );
@@ -7516,9 +7531,8 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         </div>
       )}
       {shape === "dual" && <div style={note}>Front and back are the radii of the two arcs as drawn. The number in the box uses the standard formula from the widths and running edge, and typing a radius solves with that formula.</div>}
-      {shape !== "blended" && <div style={note}>Width at the contacts: tip {derived.contactWidthTip.toFixed(1)} mm, tail {derived.contactWidthTail.toFixed(1)} mm.</div>}
       {shape === "single" && !derived.apexOK && <div style={{ ...note, color: "#e8a33a" }}>No single arc fits: the waist has to be narrower than both the tip and the tail. Showing two arcs at your waist position instead, and the radius box uses the standard formula.</div>}
-      {derived.widestMismatch && <div style={{ ...note, color: "#e8a33a" }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact). The outline shows the real shape.</div>}
+      {derived.widestMismatch && <div style={{ ...note, color: "#e8a33a" }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact), so the ski's widest point is wider than that number. The outline shows the real shape.</div>}
     </div>
   );
 }
@@ -10113,6 +10127,65 @@ export default function App() {
     }}>{text}</div>
   );
 
+  // ── What's new: once per release, for people who have used the app before (first-time visitors skip it). ──
+  // Decide during the first render, before any effect writes its own keys (which would make everyone look like a
+  // returning user).
+  const [wnReturning] = useState(() => { try { return ["bcs_sections_open", "bcs_cam", "bcs_autosave", "bcs_autosave_ski", "bcs_autosave_board", "bcs_last_mode", "bcs-lang", "bcs_study"].some(k => localStorage.getItem(k) != null); } catch (e) { return false; } });
+  const [wnOpen, setWnOpen] = useState(false);
+  const [wnSpot, setWnSpot] = useState(null);      // { target, title } while a spot is highlighted
+  const [wnRect, setWnRect] = useState(null);      // live screen rect of the highlighted element
+  const [wnMiss, setWnMiss] = useState(null);      // shown when the spot can't be found on screen
+  useEffect(() => {
+    try {
+      const seen = localStorage.getItem(WHATS_NEW_KEY);
+      if (seen === WHATS_NEW.id) return;
+      if (wnReturning) setWnOpen(true);
+      else localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id);
+    } catch (e) {}
+  }, []);
+  const closeWhatsNew = () => { setWnOpen(false); try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (e) {} };
+  const showWhatsNewSpot = (it) => {
+    closeWhatsNew();
+    setWnMiss(null);
+    if (it.go === "dimensions") {
+      setCamOpen(false); setSidebarQuery("");
+      if (isCompact) setDrawerOpen(true);
+      setSectionsOpen(prev => { const next = { ...prev, dimensions: true }; try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {} return next; });
+    } else if (it.go === "plan") {
+      setCamOpen(false); if (isCompact) setDrawerOpen(false);
+    } else if (it.go === "cam") {
+      if (isCompact) setDrawerOpen(false);
+      setCamOpen(true);
+      if (camOpt.job !== "coreInserts") setCamMany(camJobPatch("coreInserts", camOpt));
+    }
+    setWnSpot({ target: it.target, title: it.title });
+  };
+  // Find the target (it may take a render or two to appear), scroll it into view, then track it for a few seconds.
+  useEffect(() => {
+    if (!wnSpot) return;
+    let raf = 0, tries = 0, found = null, t0 = 0, done = false;
+    const sel = `[data-wn="${wnSpot.target}"]`;
+    const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tick = (ts) => {
+      if (done) return;
+      if (!found) {
+        const els = Array.from(document.querySelectorAll(sel)).filter(visible);
+        if (els.length) { found = els[0]; try { found.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} t0 = ts; }
+        else if (++tries > 90) { setWnMiss(wnSpot.title); setWnSpot(null); return; }
+      }
+      if (found) {
+        const r = found.getBoundingClientRect();
+        setWnRect({ x: r.left, y: r.top, w: r.width, h: r.height });
+        if (ts - t0 > 6000) { setWnSpot(null); return; }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const stop = () => { setWnSpot(null); };
+    const tm = setTimeout(() => window.addEventListener("pointerdown", stop, { once: true }), 400);
+    return () => { done = true; cancelAnimationFrame(raf); clearTimeout(tm); window.removeEventListener("pointerdown", stop); setWnRect(null); };
+  }, [wnSpot]);
+
   return (
     <div ref={containerRef} style={{
       display: "flex",
@@ -11797,7 +11870,7 @@ export default function App() {
         </AccordionSection>
 
         <div style={{ marginTop: "auto", padding: "8px 12px", borderTop: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.  ·  v{APP_VERSION}</div>
+          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.  ·  v{APP_VERSION}  ·  <button onClick={() => setWnOpen(true)} style={{ background: "none", border: "none", padding: 0, color: C.heading, fontSize: 7, letterSpacing: 1, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}>WHAT'S NEW</button></div>
         </div>
       </div>
 
@@ -12344,7 +12417,7 @@ export default function App() {
                     const setMethod = m => setCamMany({ sidewallMethod: m, ...camJobPatch("coreInserts", { ...camOpt, sidewallMethod: m }) });
                     const lenIn = (key, label) => (<div><div style={camSmall}>{label} {uu}</div><input type="number" value={camOpt[key] == null ? "" : camOpt[key]} placeholder="enter" step={st} min={0} onChange={e => { const v = parseFloat(e.target.value); setCam(key, isFinite(v) && v > 0 ? v : null); }} style={camInput} /></div>);
                     return (
-                      <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
+                      <div data-wn="cam-options" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
                         {job === "coreInserts" && (<>
                           <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Sidewalls</div>
                           <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>{seg(!isPour, "Glued-on strips", () => setMethod("glue"))}{seg(isPour, "Poured (channel)", () => setMethod("pour"))}</div>
@@ -12593,6 +12666,39 @@ export default function App() {
               <button onClick={() => setPreviewSvg(null)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, padding: "9px 16px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>{t("btn.close", "Close")}</button>
             </div>
           </div>
+        </div>
+      )}
+      {wnOpen && (
+        <div onClick={closeWhatsNew} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 2500, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} role="dialog" aria-label={WHATS_NEW.title} style={{ background: C.panel || C.bgDeep, border: `1px solid ${C.heading}`, borderRadius: 8, maxWidth: 520, width: "100%", maxHeight: "86vh", overflow: "auto", padding: 18, fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <div style={{ color: C.heading, fontSize: 15, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{WHATS_NEW.title}</div>
+              <button onClick={closeWhatsNew} aria-label="Close" style={{ background: "transparent", border: "none", color: C.labelDim, fontSize: 18, cursor: "pointer" }}>{"\u00d7"}</button>
+            </div>
+            <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 12 }}>Changes since your last visit. Show me takes you to each one.</div>
+            {WHATS_NEW.items.map((it, i) => (
+              <div key={i} style={{ borderTop: `1px solid ${C.inputBorder}`, padding: "10px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                  <div style={{ color: C.value, fontSize: 12.5, fontWeight: 700 }}>{it.title}</div>
+                  {it.target && <button onClick={() => showWhatsNewSpot(it)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "3px 9px", fontSize: 10.5, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'JetBrains Mono', monospace" }}>Show me</button>}
+                </div>
+                <div style={{ color: C.label, fontSize: 11, lineHeight: 1.5, marginTop: 4 }}>{it.body}</div>
+              </div>
+            ))}
+            <button onClick={closeWhatsNew} style={{ marginTop: 8, width: "100%", background: C.heading, color: C.bgDeep, border: "none", borderRadius: 4, padding: "9px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Got it</button>
+          </div>
+        </div>
+      )}
+      {wnSpot && wnRect && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3000, pointerEvents: "none" }}>
+          <style>{"@keyframes bcsWnPulse{0%,100%{box-shadow:0 0 0 0 rgba(232,85,42,0.55),0 0 0 9999px rgba(0,0,0,0.45)}50%{box-shadow:0 0 0 8px rgba(232,85,42,0.15),0 0 0 9999px rgba(0,0,0,0.45)}}"}</style>
+          <div style={{ position: "absolute", left: wnRect.x - 6, top: wnRect.y - 6, width: wnRect.w + 12, height: wnRect.h + 12, border: "2px solid #e8552a", borderRadius: 6, animation: "bcsWnPulse 1.4s ease-in-out infinite" }} />
+          <div style={{ position: "absolute", left: Math.max(8, Math.min(wnRect.x - 6, (typeof window !== "undefined" ? window.innerWidth : 1200) - 260)), top: wnRect.y - 34 > 8 ? wnRect.y - 34 : wnRect.y + wnRect.h + 10, background: "#e8552a", color: "#141210", fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>New: {wnSpot.title}</div>
+        </div>
+      )}
+      {wnMiss && (
+        <div onClick={() => setWnMiss(null)} style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 3000, background: C.panel || C.inputBg, border: `1px solid ${C.heading}`, color: C.value, padding: "8px 14px", borderRadius: 4, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+          Couldn't bring "{wnMiss}" on screen here. Look for it in the panel named in What's new. (tap to close)
         </div>
       )}
       {dbMsg && (
