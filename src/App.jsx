@@ -12302,6 +12302,11 @@ export default function App() {
                     </div>
                   </>
                 )}
+                {camResult && !camResult.stats && (() => {
+                  // Say exactly why there's no file, right above the greyed-out button.
+                  const msg = String(camResult.gcode || "").startsWith("; error") ? String(camResult.gcode).split("\n").slice(1).join(" ").replace(/^\s*Error:\s*/, "").trim() : "";
+                  return msg ? <div style={{ background: "rgba(232,163,58,0.10)", border: "1px solid #e8a33a", color: "#e8a33a", borderRadius: 4, padding: "8px 10px", marginBottom: 8, fontSize: 11, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Can't make this file yet: {msg}</div> : null;
+                })()}
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={downloadCAM} disabled={!camResult || !camResult.stats} title={!camResult || !camResult.stats ? "Fix the problem shown above first" : undefined} style={{ ...primaryBtn, flex: 1, padding: "10px 8px", opacity: (!camResult || !camResult.stats) ? 0.45 : 1, cursor: (!camResult || !camResult.stats) ? "not-allowed" : "pointer" }}>Download file</button>
                   <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ ...secondaryBtn, color: C.label, padding: "10px 14px", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
@@ -12478,7 +12483,7 @@ export default function App() {
                   const rabbetHowRow = (
                     <div style={{ marginTop: 8 }}>
                       <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                        {[["router", "Router table"], ["cnc", "CNC"]].map(([m, l]) => <button key={m} onClick={() => setCam("rabbetHow", m)} style={{ ...camSeg((camOpt.rabbetHow === "cnc" ? "cnc" : "router") === m), padding: "4px 8px" }}>{l}</button>)}
+                        {[["router", "Router table"], ["cnc", "CNC"]].map(([m, l]) => <button key={m} onClick={() => { if (m === "cnc" && !ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); setCam("rabbetHow", m); }} style={{ ...camSeg((camOpt.rabbetHow === "cnc" ? "cnc" : "router") === m), padding: "4px 8px" }}>{l}</button>)}
                       </div>
                     </div>);
                   const rabLim = coreSideLimits(ski), rabCv = v => cvG(v) + " " + uu;
@@ -12525,9 +12530,9 @@ export default function App() {
                       <div data-wn="cam-sidewalls" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
                         <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Sidewalls</div>
                         <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                          {[["glue", "Glued-on strips"], ["pour", "Poured (channel)"]].map(([m, l]) => <button key={m} onClick={() => setCamMany({ sidewallMethod: m, ...camJobPatch(job, { ...camOpt, sidewallMethod: m }) })} style={{ ...camSeg(m === "pour" ? isPour : !isPour), padding: "4px 8px" }}>{l}</button>)}
+                          {[["glue", "Glued-on strips"], ["pour", "Poured (channel)"]].map(([m, l]) => <button key={m} onClick={() => { if (m === "pour" && !ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); setCamMany({ sidewallMethod: m, ...camJobPatch(job, { ...camOpt, sidewallMethod: m }) }); }} style={{ ...camSeg(m === "pour" ? isPour : !isPour), padding: "4px 8px" }}>{l}</button>)}
                         </div>
-                        <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on the alignment pins." : "Sidewall strips are glued to the core after it's cut out."}</div>
+                        <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them." : "Sidewall strips are glued to the core after it's cut out."}</div>
                       </div>
                     )}
                     <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
