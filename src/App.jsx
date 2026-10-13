@@ -580,7 +580,7 @@ const APP_VERSION = "1.0";
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-12",
+  id: "2026-10-13",
   title: "What's new",
   items: [
     { title: "Single-radius sidecut", go: "dimensions", target: "sidecut",
@@ -589,6 +589,8 @@ const WHATS_NEW = {
       body: "The millimeter grid in the plan view now starts on. Use the Grid button next to the Plan label to turn it off." },
     { title: "Poured sidewalls", go: "cam", target: "cam-sidewalls",
       body: "In the CAM workspace, Core without inserts and Core with inserts now ask how you do sidewalls. Choose Poured (channel) to cut a channel for poly sidewalls first, then plane the bottom and cut the core out through the poly. The steps and files update to match." },
+    { title: "Walk me through it", go: "cam", target: "cam-walk",
+      body: "In the CAM workspace, Walk me through it shows each step on its own page with a picture of how the part sits on the table, which face is up, where the alignment pins go, and where X0 Y0 is, so every file lines up with the last." },
     { title: "Edge rabbet step", go: "cam", target: "cam-rabbet",
       body: "Core without inserts and Core with inserts now include an edge rabbet step: a shallow step along the sides of the core's bottom so the edge tangs don't push the base out of flat. By default it explains how to do it on a router table. Switch it to CNC to get its own file, cut on the underside with the core on the alignment pins." },
   ],
@@ -4520,10 +4522,16 @@ function drawToolpathCanvas(cv, data, machine, view, stock) {
   const bedX1 = machine ? machine.short : 0, bedY1 = machine ? machine.long : 0;
   const hasStock = !!(stock && stock.xExt > 0 && isFinite(bx0));
   const stkX1 = stock ? stock.xExt : 0, stkY1 = stock ? stock.yExt : 0;
+  // Where the bed and stock corners sit in G-code coordinates. Corner-zeroed files: at X0 Y0. Files zeroed on the
+  // tail alignment hole (zero inside the part): centered on the toolpath, the way the blank sits on the table.
+  const pinZero = !!((machine && machine.pinZero) || (stock && stock.pinZero));
+  const pcx = (bx0 + bx1) / 2, pcy = (by0 + by1) / 2;
+  const bedOX = pinZero ? pcx - bedX1 / 2 : 0, bedOY = pinZero ? pcy - bedY1 / 2 : 0;
+  const stkOX = pinZero ? pcx - stkX1 / 2 : 0, stkOY = pinZero ? pcy - stkY1 / 2 : 0;
   let mnx = bx0, mxx = bx1, mny = by0, mxy = by1;
-  if (hasBed || hasStock) { mnx = Math.min(mnx, 0); mny = Math.min(mny, 0); }   // include the zero corner
-  if (hasBed) { mxx = Math.max(mxx, bedX1); mxy = Math.max(mxy, bedY1); }
-  if (hasStock) { mxx = Math.max(mxx, stkX1); mxy = Math.max(mxy, stkY1); }
+  if (hasBed) { mnx = Math.min(mnx, bedOX); mny = Math.min(mny, bedOY); mxx = Math.max(mxx, bedOX + bedX1); mxy = Math.max(mxy, bedOY + bedY1); }
+  if (hasStock) { mnx = Math.min(mnx, stkOX); mny = Math.min(mny, stkOY); mxx = Math.max(mxx, stkOX + stkX1); mxy = Math.max(mxy, stkOY + stkY1); }
+  if ((hasBed || hasStock) && !pinZero) { mnx = Math.min(mnx, 0); mny = Math.min(mny, 0); }   // include the zero corner
   const bw = (mxx - mnx) || 1, bh = (mxy - mny) || 1, pad = 26;
   const sBase = Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh);
   const zoom = (view && view.zoom) || 1, s = sBase * zoom;
@@ -4533,24 +4541,33 @@ function drawToolpathCanvas(cv, data, machine, view, stock) {
   if (hasBed) {
     ctx.strokeStyle = machine.fits ? "rgba(120,180,120,0.55)" : "rgba(232,85,42,0.85)";
     ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
-    ctx.strokeRect(MXc(0, 0), MYc(0, bedY1), machine.short * s, machine.long * s);
+    ctx.strokeRect(MXc(bedOX, 0), MYc(0, bedOY + bedY1), machine.short * s, machine.long * s);
     ctx.setLineDash([]);
     ctx.fillStyle = machine.fits ? "rgba(120,180,120,0.7)" : "rgba(232,85,42,0.9)";
     ctx.font = "9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
-    ctx.fillText(machine.fits ? "MACHINE BED" : "EXCEEDS BED", MXc(0, 0) + 3, MYc(0, bedY1) + 11);
+    ctx.fillText(machine.fits ? "MACHINE BED" : "EXCEEDS BED", MXc(bedOX, 0) + 3, MYc(0, bedOY + bedY1) + 11);
   }
   if (hasStock) {
     const col = stock.fits ? "200,147,90" : "232,85,42";
-    ctx.fillStyle = `rgba(${col},0.12)`; ctx.fillRect(MXc(0, 0), MYc(0, stkY1), stock.xExt * s, stock.yExt * s);
+    ctx.fillStyle = `rgba(${col},0.12)`; ctx.fillRect(MXc(stkOX, 0), MYc(0, stkOY + stkY1), stock.xExt * s, stock.yExt * s);
     ctx.strokeStyle = `rgba(${col},0.95)`; ctx.lineWidth = 2; ctx.setLineDash([]);
-    ctx.strokeRect(MXc(0, 0), MYc(0, stkY1), stock.xExt * s, stock.yExt * s);
+    ctx.strokeRect(MXc(stkOX, 0), MYc(0, stkOY + stkY1), stock.xExt * s, stock.yExt * s);
     // stock centerlines (dashed) so you can confirm the profile follows the stringer
     ctx.strokeStyle = `rgba(${col},0.4)`; ctx.lineWidth = 1; ctx.setLineDash([6, 5]);
-    ctx.beginPath(); ctx.moveTo(MXc(stock.xExt / 2, 0), MYc(0, 0)); ctx.lineTo(MXc(stock.xExt / 2, 0), MYc(0, stkY1)); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(MXc(0, 0), MYc(0, stock.yExt / 2)); ctx.lineTo(MXc(stkX1, 0), MYc(0, stock.yExt / 2)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(MXc(stkOX + stock.xExt / 2, 0), MYc(0, stkOY)); ctx.lineTo(MXc(stkOX + stock.xExt / 2, 0), MYc(0, stkOY + stkY1)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(MXc(stkOX, 0), MYc(0, stkOY + stock.yExt / 2)); ctx.lineTo(MXc(stkOX + stkX1, 0), MYc(0, stkOY + stock.yExt / 2)); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = `rgba(${col},1)`; ctx.font = "bold 10px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
-    ctx.fillText(stock.fits ? "YOUR STOCK" : "TOOLPATH EXCEEDS STOCK", MXc(0, 0) + 4, MYc(0, stkY1) + 14);
+    ctx.fillText(stock.fits ? "YOUR STOCK" : "TOOLPATH EXCEEDS STOCK", MXc(stkOX, 0) + 4, MYc(0, stkOY + stkY1) + 14);
+  }
+  if (pinZero) {
+    // X0 Y0 marker: the center of the tail alignment hole, where these files are zeroed.
+    const zx = MXc(0, 0), zy = MYc(0, 0);
+    ctx.strokeStyle = "#5bb3d8"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(zx - 9, zy); ctx.lineTo(zx + 9, zy); ctx.moveTo(zx, zy - 9); ctx.lineTo(zx, zy + 9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(zx, zy, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#5bb3d8"; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
+    ctx.fillText("X0 Y0 = tail alignment hole", zx + 10, zy + 12);
   }
   ctx.strokeStyle = "rgba(155,147,136,0.28)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath();
   for (const g of segs) if (!g.cut) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
@@ -4638,7 +4655,9 @@ function Toolpath3DView({ gcode, machine }) {
       // Machine bed footprint on the floor (short X x long Y), anchored at the toolpath's corner —
       // matches the 2D view. Falls back to a tight grid hugging the part when no bed is set.
       if (machine && machine.short > 0) {
-        const bx = bx0, by = by0, bX = machine.short, bY = machine.long;   // gcode X=width(short), Y=length(long)
+        const bX = machine.short, bY = machine.long;   // gcode X=width(short), Y=length(long)
+        // Corner-zeroed files: bed corner at the toolpath corner. Zeroed on the tail alignment hole: bed centered on the part.
+        const bx = machine.pinZero ? (bx0 + bx1) / 2 - bX / 2 : bx0, by = machine.pinZero ? (by0 + by1) / 2 - bY / 2 : by0;
         const corners = [[bx, by], [bx + bX, by], [bx + bX, by + bY], [bx, by + bY], [bx, by]];
         const pts = corners.map(([mX, mY]) => new THREE.Vector3(mX - cx, floorY, -(mY - cy)));
         const bgeo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -9234,6 +9253,7 @@ export default function App() {
   const [previewSvg, setPreviewSvg] = useState(null);
   const [showToolpath, setShowToolpath] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
+  const [camWalk, setCamWalk] = useState(null);   // index of the open walk-through page in the CAM steps, or null
   const [camMachineOpen, setCamMachineOpen] = useState(false);   // machine/post panel collapsed by default once set
   const [camSec, setCamSec] = useState({ setup: true, materials: true, operation: true, tools: false, output: true });
   const toggleCamSec = k => setCamSec(s => ({ ...s, [k]: !s[k] }));
@@ -9538,16 +9558,19 @@ export default function App() {
     const mx = camResult.stats.machX != null ? camResult.stats.machX : camResult.stats.stockY;
     const my = camResult.stats.machY != null ? camResult.stats.machY : camResult.stats.stockX;
     const fits = mx <= mShort && my <= mLong;   // actual toolpath X-extent vs short bed, Y-extent vs long
-    return { short: mShort, long: mLong, fits };
-  }, [camOpt.showMachine, camOpt.machineX, camOpt.machineY, camOpt.units, camResult]);
+    // Files zeroed on the tail alignment hole have X0 Y0 inside the part, not at a corner, so the preview centers the
+    // part on the bed instead of hanging it off the bed's corner, and marks where the zero is.
+    const pinZero = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks);
+    return { short: mShort, long: mLong, fits, pinZero };
+  }, [camOpt.showMachine, camOpt.machineX, camOpt.machineY, camOpt.units, camOpt.pinOrigin, camOpt.op, ski.alignMarks, camResult]);
   const camStock = useMemo(() => {
     const isB = camOpt.op === "base";
     const L = (isB ? camOpt.baseStockL : camOpt.stockL) || 0, W = (isB ? camOpt.baseStockW : camOpt.stockW) || 0;   // base op uses its own material size
     if (!L || !W || !camResult || !camResult.stats) return null;
     const xExt = camOpt.partAxis === "y" ? W : L, yExt = camOpt.partAxis === "y" ? L : W;   // along machine X / Y
     const s = camResult.stats, mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
-    return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2) };
-  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camResult]);
+    return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks) };
+  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, ski.alignMarks, camResult]);
   const openSetupSheet = useCallback(() => {
     const s = camResult.stats; if (!s) return;
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
@@ -9564,7 +9587,7 @@ export default function App() {
     const pinOn = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks);
     const pourS = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
     const firstZeroed = !(camOpt.op === "rabbet" && camOpt.job === "core" && !camOpt.pinOrigin);   // core job, glued walls: the first file was zeroed on the stock corner
-    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" ? `Before anything else: jog to where you want the TAIL-side alignment hole, on the lengthwise centerline of the blank, and zero X and Y there. The toolpath is laid out from that point.` : (firstZeroed ? `Zero X and Y on the center of the TAIL-side alignment pin (the same point you zeroed for the first file). Do not re-zero anywhere else.` : `Zero X and Y on the center of the TAIL-side alignment pin. This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" ? `Before anything else: jog to where you want the TAIL-side alignment hole, on the lengthwise centerline of the blank, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
     const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
     const ahS = ski.alignMarks ? alignHoles(ski) : [];
@@ -12462,6 +12485,142 @@ export default function App() {
                   ] : job === "base" ? [{ op: "base", title: "Cut the base material", sub: "Cuts the base sheet with a drag knife. The spindle stays off." }]
                     : [{ op: "pocket", title: "Clear a recess", sub: "Clears a flat pocket to a set depth." }];
                   const isActive = s => !!s.op && s.op === camOpt.op && (!s.side || (camOpt.outlineSide || "top") === s.side);
+                  // ── Walk-through: one page per step, with a simple picture of how the part sits and plain instructions,
+                  // including how the X/Y zero carries from one file to the next. ──
+                  const walkPages = (() => {
+                    if (job !== "core" && job !== "coreInserts") return [];
+                    const pinJob = job === "coreInserts" || isPour;       // every file zeroed on the tail alignment hole
+                    const ahW = alignHoles(ski), tailHole = ahW.length ? ahW.reduce((a, b) => (b.y < a.y ? b : a)) : null;
+                    const zText = camOpt.zZero === "bed" ? "Set Z0 on the table surface (the bed), not on top of the blank, so planing or surfacing never changes it." : "Set Z0 on the top of the blank.";
+                    const pinsH = pinMax != null ? " Pins should stand no taller than " + cvG(pinMax) + " " + uu + " above the table, so the bit can't reach them." : "";
+                    const setZero = (face) => [
+                      "Lay the flat blank on the table, " + face + " face up, with its length running along the machine's long axis. Hold it down clear of the cut.",
+                      "Jog to where the tail alignment hole should go: on the blank's lengthwise centerline" + (tailHole ? ", with room for the ski behind it (the hole is " + cvL(tailHole.y) + " in from the ski's tail end)" : "") + ".",
+                      "Set X0 Y0 there. " + zText,
+                      "Write down the machine coordinates of that point (your controller shows them as machine position). Every later file starts from this exact point.",
+                    ];
+                    const keepZero = [
+                      "Don't re-zero X and Y.",
+                      "If the zero was lost (power cut, re-homing, or a cleared offset), jog back to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there again.",
+                    ];
+                    let cutFree = false;   // the core was just cut out of the blank: free it before seating it on the pins
+                    const onPins = (face, flip, what) => [
+                      ...(cutFree ? ["Take the core out of the blank and clean up the small tabs that held it."] : []),
+                      "Put pins in the two alignment holes in the table." + pinsH,
+                      flip ? "Turn the " + what + " over sideways, so the tail and tip stay at the same ends, and set it " + face + " face up on the pins." : "Set the " + what + " " + face + " face up on the pins, facing the same way as before (tail at the same end).",
+                      "Hold it down with clamps, vacuum, or tape. The pins only stop it sliding. Nothing can stand proud of the face resting on the table.",
+                    ];
+                    const pages = [];
+                    let lastFace = null;
+                    for (const s of steps) {
+                      if (s.alt) continue;
+                      const pg = { title: s.title, scene: { kind: "bench" }, points: [] };
+                      if (s.op === "channel") {
+                        pg.scene = { kind: "machine", part: "blank", face: "top", drill: true, zero: "set", channel: true };
+                        pg.points = [...setZero("top"), "Run the file. It drills both alignment holes through the blank and into the table, then cuts the channel along the core's sides, leaving " + cvG(camOpt.chanSkin || 0) + " " + uu + " of wood under it.", "The holes in the table now mark this setup. Leave them alone until the ski is finished."];
+                        lastFace = "top";
+                      } else if (s.title === "Pour, cure, and plane") {
+                        pg.scene = { kind: "bench", label: "Pour, cure, plane" };
+                        pg.points = ["Take the blank off the machine. Leave the machine's X/Y zero as it is.", "Fill the channel with poly and let it cure fully.", "Plane the bottom face until the poly shows full depth along the whole channel. The blank should end up " + cvG(pourPlaned) + " " + uu + " thick (the channel depth).", "Measure it. If it's a different thickness, enter that as Thickness after planing in the next step."];
+                      } else if (s.op === "bore" && !isPour) {
+                        pg.scene = { kind: "machine", part: "blank", face: "bottom", drill: !!ski.alignMarks, zero: "set" };
+                        pg.points = [...setZero("bottom"), "Run the file. It drills the alignment holes through the blank into the table, cuts the insert holes, then cuts the core out (unless you chose a separate file for that)."];
+                        lastFace = "bottom"; cutFree = !!camOpt.boreWithProfile;
+                      } else if (s.op === "bore" && isPour) {
+                        pg.scene = { kind: "machine", part: "blank", face: "bottom", pins: true, flip: true, zero: "keep" };
+                        pg.points = [...onPins("bottom", true, "planed blank"), ...keepZero, "Run the file. It cuts the insert holes, then cuts the core out through the poly on the ski's outline."];
+                        lastFace = "bottom"; cutFree = !!camOpt.boreWithProfile;
+                      } else if (s.op === "outline" && s.side === "bottom") {
+                        pg.scene = { kind: "machine", part: "blank", face: "bottom", pins: isPour, zero: "keep" };
+                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Run the file. It cuts the core out of the blank."];
+                        cutFree = true;
+                      } else if (s.op === "outline" && isPour) {
+                        pg.scene = { kind: "machine", part: "blank", face: "top", pins: true, zero: "keep" };
+                        pg.points = [...onPins("top", false, "planed blank"), ...keepZero, "Run the file. It cuts the core out through the poly on the ski's outline."];
+                        lastFace = "top"; cutFree = true;
+                      } else if (s.op === "outline") {
+                        pg.scene = { kind: "machine", part: "blank", face: "top", drill: !!ski.alignMarks && alignDrillOp === "outline", zero: "corner" };
+                        pg.points = ["Lay the flat blank on the table, top face up, and hold it down clear of the cut.", "Zero X and Y at the blank's front-left corner (or wherever your setup sheet says), and Z as the setup sheet says.", ...(ski.alignMarks && alignDrillOp === "outline" ? ["This file also drills the alignment holes through the blank into the table, for any later step that puts the core on pins."] : []), "Run the file. It cuts the core out of the blank."];
+                        lastFace = "top"; cutFree = true;
+                      } else if (s.title === "Glue on the sidewalls") {
+                        pg.scene = { kind: "bench", label: "Glue sidewalls" };
+                        cutFree = false;
+                        pg.points = ["Take the core out of the blank and off the machine" + (pinJob ? ". Leave the machine's X/Y zero and the holes in the table as they are." : "."), "Glue the sidewall strips to the core and let them cure fully.", "Trim or sand them so nothing stands proud of the core's top or bottom face, so it sits flat in the next step."];
+                      } else if (s.op === "rabbet" && !rabCnc) {
+                        pg.scene = { kind: "bench", label: "Router table" };
+                        cutFree = false;
+                        pg.points = ["Done by hand, with no file.", "On a router table, usually with a pattern bit, cut a shallow step along each side of the core's bottom face: as deep as the edge tangs are thick, reaching in from the finished outer edge (the outside of the sidewall) as far as the edges reach.", "Sides only, not the ends: " + (lim.full ? "stop at the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "stop where the tip and tail filler starts (" + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end)."), "It gives the edge tangs room where they lap over the base, so the base and edges sit flat against the core."];
+                      } else if (s.op === "rabbet") {
+                        const flip = lastFace !== "bottom";
+                        const zeroFresh = job === "core" && !isPour && !camOpt.pinOrigin;
+                        pg.scene = { kind: "machine", part: "core", face: "bottom", pins: true, flip, zero: zeroFresh ? "pin" : "keep" };
+                        pg.points = [...onPins("bottom", flip, "core"), ...(zeroFresh ? ["Center the spindle on the tail-side pin (an edge finder or centering pin helps) and set X0 Y0 there. This file is laid out from the center of that hole.", zText] : keepZero), "Run the file. It cuts the rabbet along the sides of the core's bottom."];
+                        lastFace = "bottom"; cutFree = false;
+                      } else if (s.op === "taper" && (pinJob || lastFace === "bottom")) {
+                        const flip = lastFace === "bottom";
+                        pg.scene = { kind: "machine", part: "core", face: "top", pins: true, flip, zero: "keep" };
+                        pg.points = [...onPins("top", flip, "core"), ...keepZero, "Run the file. It carves the thickness taper into the top face."];
+                        lastFace = "top";
+                      } else if (s.op === "taper") {
+                        pg.scene = { kind: "machine", part: "core", face: "top", zero: "corner" };
+                        pg.points = ["Lay the assembled core (sidewalls on) top face up, centered on the table's long axis, and hold it down.", "Measure its length and its width at the tip, and enter them under Your material sizes for this step.", "Zero X and Y at the front-left corner of the box around the core's widest points, as the setup sheet says.", "Run the file. It carves the thickness taper into the top face."];
+                        lastFace = "top";
+                      } else continue;
+                      pages.push(pg);
+                    }
+                    return pages;
+                  })();
+                  const walkScene = (sc) => {
+                    const W = 170, H = 270;
+                    if (sc.kind === "bench") return (
+                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+                        <rect x="8" y="150" width={W - 16} height="10" fill="rgba(200,147,90,0.35)" />
+                        <rect x="22" y="160" width="8" height="70" fill="rgba(200,147,90,0.25)" /><rect x={W - 30} y="160" width="8" height="70" fill="rgba(200,147,90,0.25)" />
+                        <rect x="30" y="138" width={W - 60} height="12" rx="3" fill="rgba(237,230,216,0.25)" stroke="rgba(237,230,216,0.6)" />
+                        <text x={W / 2} y="110" textAnchor="middle" fill="#c8935a" fontSize="12" fontWeight="700" fontFamily="JetBrains Mono, monospace">{sc.label || "Off the machine"}</text>
+                        <text x={W / 2} y="128" textAnchor="middle" fill="#9b9388" fontSize="9.5" fontFamily="JetBrains Mono, monospace">off the machine</text>
+                      </svg>);
+                    const bx = 14, by = 26, bw = W - 28, bh = H - 52;            // the table
+                    const px = W / 2, pw = 34, py0 = by + 20, py1 = by + bh - 20;  // the part, tail at the bottom
+                    const hy = f => py1 - (py1 - py0) * f;                        // position along the part (0 = tail end)
+                    const ahS = alignHoles(ski), L = ski.length || 1;
+                    const holes = ahS.length ? ahS.map(h => hy(h.y / L)) : [hy(0.25), hy(0.75)];
+                    const tailY = Math.max(...holes);
+                    const coreShape = `M ${px - 13} ${py1} L ${px - 15} ${hy(0.12)} Q ${px - 10} ${hy(0.5)} ${px - 16} ${hy(0.86)} L ${px - 14} ${py0} L ${px + 14} ${py0} L ${px + 16} ${hy(0.86)} Q ${px + 10} ${hy(0.5)} ${px + 15} ${hy(0.12)} L ${px + 13} ${py1} Z`;
+                    const faceCol = sc.face === "bottom" ? "#5bb3d8" : "#c8935a";
+                    return (
+                      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+                        <rect x={bx} y={by} width={bw} height={bh} fill="rgba(155,147,136,0.06)" stroke="rgba(155,147,136,0.45)" strokeDasharray="3 3" />
+                        <text x={bx + 4} y={by - 6} fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">MACHINE TABLE</text>
+                        {sc.part === "blank"
+                          ? <rect x={px - pw / 2} y={py0 - 8} width={pw} height={py1 - py0 + 16} fill={sc.face === "bottom" ? "rgba(91,179,216,0.16)" : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />
+                          : <path d={coreShape} fill={sc.face === "bottom" ? "rgba(91,179,216,0.16)" : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />}
+                        {sc.channel && [-1, 1].map(sg => <line key={sg} x1={px + sg * 11} y1={hy(0.1)} x2={px + sg * 11} y2={hy(0.88)} stroke="#e8552a" strokeWidth="3" opacity="0.8" />)}
+                        {sc.channel && <text x={px + pw / 2 + 6} y={hy(0.82)} fill="#e8552a" fontSize="8" fontFamily="JetBrains Mono, monospace">channel</text>}
+                        <line x1={px} y1={py0 - 8} x2={px} y2={py1 + 8} stroke="rgba(237,230,216,0.3)" strokeDasharray="4 3" />
+                        <text x={px} y={py1 + 20} textAnchor="middle" fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">TAIL</text>
+                        <text x={px} y={py0 - 12} textAnchor="middle" fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">TIP</text>
+                        <text x={px + pw / 2 + 6} y={hy(0.55)} fill={faceCol} fontSize="8.5" fontWeight="700" fontFamily="JetBrains Mono, monospace">{(sc.face || "top").toUpperCase()}</text>
+                        <text x={px + pw / 2 + 6} y={hy(0.55) + 10} fill={faceCol} fontSize="8.5" fontWeight="700" fontFamily="JetBrains Mono, monospace">FACE UP</text>
+                        {(sc.pins || sc.drill) && holes.map((y, i) => <circle key={i} cx={px} cy={y} r="3.6" fill={sc.pins ? "#5bb3d8" : "none"} stroke="#5bb3d8" strokeWidth="1.3" />)}
+                        {sc.drill && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill="#5bb3d8" fontSize="8" fontFamily="JetBrains Mono, monospace">holes</text>}
+                        {sc.pins && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill="#5bb3d8" fontSize="8" fontFamily="JetBrains Mono, monospace">pins</text>}
+                        {(sc.zero === "set" || sc.zero === "keep" || sc.zero === "pin") && (() => { const zc = sc.zero === "keep" ? "#9b9388" : "#e8552a"; return (<g>
+                          <line x1={px - 11} y1={tailY} x2={px + 11} y2={tailY} stroke={zc} strokeWidth="1.5" /><line x1={px} y1={tailY - 11} x2={px} y2={tailY + 11} stroke={zc} strokeWidth="1.5" />
+                          <text x={px - pw / 2 - 4} y={tailY + 14} textAnchor="end" fill={zc} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono, monospace">{sc.zero === "keep" ? "same X0 Y0" : "X0 Y0 here"}</text>
+                        </g>); })()}
+                        {sc.zero === "corner" && (<g>
+                          <line x1={px - pw / 2 - 8} y1={py1 + 8} x2={px - pw / 2 + 8} y2={py1 + 8} stroke="#e8552a" strokeWidth="1.5" /><line x1={px - pw / 2} y1={py1} x2={px - pw / 2} y2={py1 + 16} stroke="#e8552a" strokeWidth="1.5" />
+                          <text x={px - pw / 2 - 3} y={py1 + 28} textAnchor="end" fill="#e8552a" fontSize="8" fontWeight="700" fontFamily="JetBrains Mono, monospace">X0 Y0</text>
+                        </g>)}
+                        {sc.flip && (<g>
+                          <path d={`M ${px + pw / 2 + 10} ${hy(0.22)} a 14 9 0 1 1 16 -10`} fill="none" stroke="#e8a33a" strokeWidth="1.5" />
+                          <path d={`M ${px + pw / 2 + 26} ${hy(0.22) - 10} l -1 -6 l 5 3 z`} fill="#e8a33a" />
+                          <text x={px + pw / 2 + 6} y={hy(0.22) + 18} fill="#e8a33a" fontSize="8" fontFamily="JetBrains Mono, monospace">turned over</text>
+                          <text x={px + pw / 2 + 6} y={hy(0.22) + 28} fill="#e8a33a" fontSize="8" fontFamily="JetBrains Mono, monospace">sideways</text>
+                        </g>)}
+                      </svg>);
+                  };
                   const openStep = s => setCamMany({ op: s.op, ...(s.side ? { outlineSide: s.side } : {}) });
                   const partHead = t => <div style={{ color: C.heading, fontSize: 11.5, fontWeight: 700, margin: "10px 0 6px", paddingTop: 8, borderTop: `1px solid ${C.inputBorder}`, fontFamily: "'JetBrains Mono', monospace" }}>{t}</div>;
                   const showAlign = camOpt.op === alignDrillOp || (!ski.alignMarks && (isBore || isOutline));
@@ -12535,7 +12694,35 @@ export default function App() {
                         <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them." : "Sidewall strips are glued to the core after it's cut out."}</div>
                       </div>
                     )}
-                    <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 0 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
+                      {walkPages.length > 0 && <button data-wn="cam-walk" onClick={() => setCamWalk(0)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "3px 9px", fontSize: 10.5, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Walk me through it</button>}
+                    </div>
+                    {camWalk != null && walkPages[camWalk] && (() => {
+                      const pg = walkPages[camWalk], n = walkPages.length, last = camWalk === n - 1;
+                      const nb = (lbl, fn, primary, dis) => <button onClick={fn} disabled={dis} style={{ background: primary ? C.heading : "transparent", color: primary ? C.bgDeep : C.label, border: primary ? "none" : `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "7px 12px", fontSize: 11.5, fontWeight: primary ? 700 : 400, cursor: dis ? "default" : "pointer", opacity: dis ? 0.4 : 1, fontFamily: "'JetBrains Mono', monospace" }}>{lbl}</button>;
+                      return (
+                        <div onClick={() => setCamWalk(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 1400, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                          <div onClick={e => e.stopPropagation()} role="dialog" aria-label={"Walk-through: " + pg.title} style={{ background: C.panel || C.bgDeep, border: `1px solid ${C.heading}`, borderRadius: 8, width: "min(640px, 100%)", maxHeight: "90vh", overflow: "auto", padding: 16, fontFamily: "'JetBrains Mono', monospace" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                              <div style={{ color: C.heading, fontSize: 14, fontWeight: 700 }}>Step {camWalk + 1} {"\u00b7"} {pg.title}</div>
+                              <div style={{ color: C.labelDim, fontSize: 10.5, whiteSpace: "nowrap" }}>{camWalk + 1} of {n}</div>
+                            </div>
+                            <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+                              <div style={{ flex: "0 0 auto", border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 4 }}>{walkScene(pg.scene)}</div>
+                              <ol style={{ flex: "1 1 260px", margin: 0, paddingLeft: 18, color: C.label, fontSize: 11.5, lineHeight: 1.55 }}>
+                                {pg.points.map((t, k) => <li key={k} style={{ marginBottom: 6 }}>{t}</li>)}
+                              </ol>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, marginTop: 12, alignItems: "center" }}>
+                              {nb("Close", () => setCamWalk(null), false, false)}
+                              <span style={{ flex: 1 }} />
+                              {nb("Back", () => setCamWalk(camWalk - 1), false, camWalk === 0)}
+                              {nb(last ? "Done" : "Next", () => setCamWalk(last ? null : camWalk + 1), true, false)}
+                            </div>
+                          </div>
+                        </div>);
+                    })()}
                     {steps.map((s, i) => { const n = s.alt ? null : ++num, active = isActive(s); return (
                       <div key={i} data-wn={s.wn} style={{ border: active ? `2px solid ${C.heading}` : `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 8, background: active ? "transparent" : C.inputBg }}>
                         <div onClick={s.op && !active ? () => openStep(s) : undefined} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, cursor: s.op && !active ? "pointer" : "default" }}>
