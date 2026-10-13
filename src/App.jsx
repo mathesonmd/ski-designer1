@@ -575,6 +575,8 @@ const DEFAULT_SKI={
 const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
+// Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
+const APP_BUILD = "2026-10-13b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -11902,7 +11904,7 @@ export default function App() {
         </AccordionSection>
 
         <div style={{ marginTop: "auto", padding: "8px 12px", borderTop: `1px solid ${C.panelBorder}` }}>
-          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.  ·  v{APP_VERSION}  ·  <button onClick={() => setWnOpen(true)} style={{ background: "none", border: "none", padding: 0, color: C.heading, fontSize: 7, letterSpacing: 1, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}>WHAT'S NEW</button></div>
+          <div style={{ color: C.labelDim, fontSize: 7, letterSpacing: 1 }}>WORSHIP THE WORK.  ·  v{APP_VERSION} ({APP_BUILD})  ·  <button onClick={() => setWnOpen(true)} style={{ background: "none", border: "none", padding: 0, color: C.heading, fontSize: 7, letterSpacing: 1, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}>WHAT'S NEW</button></div>
         </div>
       </div>
 
@@ -12694,10 +12696,8 @@ export default function App() {
                         <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them." : "Sidewall strips are glued to the core after it's cut out."}</div>
                       </div>
                     )}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 0 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
-                      {walkPages.length > 0 && <button data-wn="cam-walk" onClick={() => setCamWalk(0)} style={{ background: "transparent", border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, padding: "3px 9px", fontSize: 10.5, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Walk me through it</button>}
-                    </div>
+                    {walkPages.length > 0 && <button data-wn="cam-walk" onClick={() => setCamWalk(0)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, borderRadius: 5, padding: "9px 10px", marginBottom: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>{"\u25B6"} Walk me through it, step by step</button>}
+                    <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
                     {camWalk != null && walkPages[camWalk] && (() => {
                       const pg = walkPages[camWalk], n = walkPages.length, last = camWalk === n - 1;
                       const nb = (lbl, fn, primary, dis) => <button onClick={fn} disabled={dis} style={{ background: primary ? C.heading : "transparent", color: primary ? C.bgDeep : C.label, border: primary ? "none" : `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "7px 12px", fontSize: 11.5, fontWeight: primary ? 700 : 400, cursor: dis ? "default" : "pointer", opacity: dis ? 0.4 : 1, fontFamily: "'JetBrains Mono', monospace" }}>{lbl}</button>;
