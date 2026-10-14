@@ -590,25 +590,23 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-13b";
+const APP_BUILD = "2026-10-14";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-13",
+  id: "2026-10-14",
   title: "What's new",
   items: [
-    { title: "Single-radius sidecut", go: "dimensions", target: "sidecut",
-      body: "New designs use a true circular sidecut arc, with a short transition before each contact point (50 mm unless you change it) so the edge runs straight along the ski where it meets the tip and tail. Under Dimensions, pick Single radius, Two radii, or Blended. Designs saved before this update open as Blended, so their shape doesn't change." },
-    { title: "Grid on by default", go: "plan", target: "grid",
-      body: "The millimeter grid in the plan view now starts on. Use the Grid button next to the Plan label to turn it off." },
-    { title: "Poured sidewalls", go: "cam", target: "cam-sidewalls",
-      body: "In the CAM workspace, Core without inserts and Core with inserts now ask how you do sidewalls. Choose Poured (channel) to cut a channel for poly sidewalls first, then plane the bottom and cut the core out through the poly. The steps and files update to match." },
-    { title: "Walk me through it", go: "cam", target: "cam-walk",
-      body: "In the CAM workspace, Walk me through it shows each step on its own page with a picture of how the part sits on the table, which face is up, where the alignment pins go, and where X0 Y0 is, so every file lines up with the last." },
-    { title: "Edge rabbet step", go: "cam", target: "cam-rabbet",
-      body: "Core without inserts and Core with inserts now include an edge rabbet step: a shallow step along the sides of the core's bottom so the edge tangs don't push the base out of flat. By default it explains how to do it on a router table. Switch it to CNC to get its own file, cut on the underside with the core on the alignment pins." },
+    { title: "Simulate the cut", go: "cam", target: "cam-sim",
+      body: "Below the toolpath preview in the CAM workspace, Simulate the cut plays the bit along the file, in 2D or 3D, and shows what it has cut so far. Play or pause it, drag the slider to any point in the file, or change the speed. The button under Download file starts it too." },
+    { title: "Tab length", go: "cam", op: "outline", target: "cam-tabs",
+      body: "When the CNC cuts out a core, you can now set how long the holding tabs are, next to Tab height. Tabs also come out exactly that long now: the bit steps straight up onto each tab and straight back down after it, where before it sloped up and down and stretched each tab. The note under the fields shows how much wood is left in the middle of each tab with your bit." },
+    { title: "Cutting past the tip and tail", go: "cam", op: "taper", target: "cam-endover",
+      body: "The Shape the top face file now carries the bit past the tip and tail ends of the core by one bit radius, plus any extra you set, so the very ends (including the point of a V-cut) don't keep an uncut sliver." },
+    { title: "Mixed-wood cores in the layup view",
+      body: "When a core is made of strips of different woods, the layup view now draws each strip in its own wood, and the label wraps onto more lines instead of running off the edge. The build card lists every species in the core." },
   ],
 };
 const WHATS_NEW_KEY = "bcs_whatsnew_seen";
@@ -4263,6 +4261,36 @@ function buildCoreCAM(ski, opt) {
   if (o.baseOp) {
     emitDragKnife(baseEdge, baseLbl);
   }
+  // Holding tabs: short bridges left on the final pass. Each tab gets exact start and end points on the path
+  // and the bit steps straight up and straight down there, so the tab is exactly as long as asked. (Raising Z
+  // only at the existing path points would put a sloped ramp on each side and stretch the tab.)
+  const tabSpans = per => { const a = []; if (!(o.tabN > 0) || !(o.tabLen > 0)) return a; for (let t = 0; t < o.tabN; t++) { const ctr = (t + 0.5) / o.tabN * per; a.push([ctr - o.tabLen / 2, ctr + o.tabLen / 2]); } return a; };
+  const inTab = (spans, per, run) => { const rr = ((run % per) + per) % per; return spans.some(([a, b]) => rr > a && rr < b); };
+  const splitAtRuns = (verts, cutsIn) => {
+    const cuts = cutsIn.slice().sort((a, b) => a - b), out = [verts[0]]; let ci = 0;
+    for (let i = 1; i < verts.length; i++) {
+      const a = verts[i - 1], b = verts[i];
+      while (ci < cuts.length && cuts[ci] <= a.run + 1e-9) ci++;
+      while (ci < cuts.length && cuts[ci] < b.run - 1e-6) { const r = cuts[ci], t = (r - a.run) / ((b.run - a.run) || 1); out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, run: r }); ci++; }
+      out.push(b);
+    }
+    return out;
+  };
+  // Cut one lap of a closed path. hAt(run) gives the cut height (ramp included); tabs apply when withTabs.
+  const cutLap = (verts, per, hAt, withTabs) => {
+    const spans = withTabs ? tabSpans(per) : [];
+    const cuts = []; for (const [a, b] of spans) cuts.push(a, b, a + per, b + per);
+    const vs = spans.length ? splitAtRuns(verts, cuts) : verts;
+    let inPrev = false;
+    for (let i = 1; i < vs.length; i++) {
+      const a = vs[i - 1], v = vs[i];
+      const inT = spans.length > 0 && inTab(spans, per, (a.run + v.run) / 2);
+      const zz = r => MZ(inT ? Math.max(hAt(r), o.tabHeight) : hAt(r));
+      if (inT !== inPrev) g1z(zz(a.run));   // straight up onto the tab, or straight back down after it
+      g1(v.x, v.y, zz(v.run)); cutDist += Math.abs(v.run - a.run);
+      inPrev = inT;
+    }
+  };
   const runPerimeter = () => {
     if (o.bottomSide) { useTool(o.toolNum); PB(); PC("===== OUTER PROFILE (bottom face up; cut last, it frees the core) ====="); }
     let path = core;
@@ -4284,22 +4312,15 @@ function buildCoreCAM(ski, opt) {
     const verts = [{ x: path[0].x, y: path[0].y, run: 0 }]; let per = 0;
     for (let i = 1; i <= path.length; i++) { const a = path[(i - 1) % path.length], b = path[i % path.length]; per += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: per }); }
     if (o.rampEntry) { let orun = per, i = 1; while (orun - per < o.rampLen && i < path.length) { const a = path[(i - 1) % path.length], b = path[i % path.length]; orun += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: orun }); i++; } }
-    const tabAt = []; for (let t = 0; t < o.tabN; t++) tabAt.push((t + 0.5) / o.tabN * per);
     const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown));
     for (let k = 1; k <= pPass; k++) {
       const targetH = Math.max(botH, o.stockThick - k * o.stepdown);
       const prevH = k === 1 ? o.stockThick : Math.max(botH, o.stockThick - (k - 1) * o.stepdown);
       PC(`-- perimeter pass ${k}/${pPass} (Z ${f(MZ(targetH))})${o.rampEntry ? " ramped" : ""} --`);
-      const zAtRun = run => {
-        let h = targetH;
-        if (o.rampEntry && run < o.rampLen && per > 1) h = lerp(prevH, targetH, run / Math.min(o.rampLen, per));
-        if (k === pPass) { const rr = run % per; for (const ta of tabAt) if (Math.abs(rr - ta) < o.tabLen / 2) h = Math.max(h, o.tabHeight); }
-        return MZ(h);
-      };
+      const hAt = run => (o.rampEntry && run < o.rampLen && per > 1) ? lerp(prevH, targetH, run / Math.min(o.rampLen, per)) : targetH;
       g0(verts[0].x, verts[0].y); g0z(MZ(o.stockThick + 1));
       if (o.rampEntry) g0z(MZ(prevH)); else g1z(MZ(targetH));
-      let pr = verts[0].run;
-      for (let i = 1; i < verts.length; i++) { const v = verts[i]; g1(v.x, v.y, zAtRun(v.run)); cutDist += Math.abs(v.run - pr); pr = v.run; }
+      cutLap(verts, per, hAt, k === pPass);
       g0z(safeZ);
     }
   };
@@ -4312,12 +4333,11 @@ function buildCoreCAM(ski, opt) {
       try { const op2 = offsetPolygonOutward(poly0, R); if (op2 && op2.length >= 3) path = op2; } catch (e) {}
       { const dstep = 4, dp = []; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < n; j++) { const t = j / n; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } path = dp; }
       let per = 0; const verts = [{ x: path[0].x, y: path[0].y, run: 0 }]; for (let i = 1; i <= path.length; i++) { const a = path[(i - 1) % path.length], b = path[i % path.length]; per += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: per }); }
-      const tabAt = []; for (let t = 0; t < o.tabN; t++) tabAt.push((t + 0.5) / o.tabN * per);
       PC(`-- slat ${idx + 1}/${o.slatPolys.length} (${poly0._label || ""}) --`);
       for (let k = 1; k <= pPass; k++) {
         const targetH = Math.max(botH, o.stockThick - k * o.stepdown);
         g0(verts[0].x, verts[0].y); g0z(MZ(o.stockThick + 1)); g1z(MZ(targetH));
-        for (let i = 1; i < verts.length; i++) { const v = verts[i]; let h = targetH; if (k === pPass) { const rr = v.run % per; for (const ta of tabAt) if (Math.abs(rr - ta) < o.tabLen / 2) h = Math.max(h, o.tabHeight); } g1(v.x, v.y, MZ(h)); cutDist += Math.abs(v.run - verts[i - 1].run); }
+        cutLap(verts, per, () => targetH, k === pPass);
         g0z(safeZ);
       }
     });
@@ -4552,19 +4572,65 @@ function buildCoreCAM(ski, opt) {
 // moves colored by depth (deep = torch red, shallow = brass), so paths can be checked before cutting.
 // Shared canvas renderer: parses G-code and draws rapids (dim dashed) + cuts colored by depth. When a
 // machine work area is supplied, the bed rectangle and origin are drawn too, so fit is obvious.
-function parseToolpath(gcode) {
-  let x = 0, y = 0, z = 0, have = false; const segs = []; let zMin = 1e9, zMax = -1e9, bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+// Read a G-code program into straight moves, in program order, for the previews and the cutting simulation.
+// Handles N line numbers, G0/G1/G2/G3 written once and carried to later lines, arcs (split into short
+// straight pieces), feed rates (F) and tool numbers. Each move gets a start and end time in minutes: cutting
+// moves use the file's feed rate; each sideways rapid move gets the same flat allowance the run-time
+// estimate uses (0.03 min), and straight-up/down rapids are treated as instant, also like the estimate.
+function parseGcodeMoves(gcode) {
+  const moves = [], toolDia = {};
+  let x = 0, y = 0, z = 0, have = false, mode = null, F = null, tool = null, t = 0;
+  let zMin = 1e9, zMax = -1e9, bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+  const push = (x0, y0, z0, x1, y1, z1, cut) => {
+    const len = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+    const xy = Math.abs(x1 - x0) > 1e-9 || Math.abs(y1 - y0) > 1e-9;
+    const dt = cut ? (F > 0 ? len / F : 0) : (xy ? 0.03 : 0);
+    moves.push({ x0, y0, z0, x1, y1, z1, cut, xy, tool, t0: t, t1: t + dt }); t += dt;
+    if (cut) { zMin = Math.min(zMin, z0, z1); zMax = Math.max(zMax, z0, z1); if (xy) { bx0 = Math.min(bx0, x0, x1); by0 = Math.min(by0, y0, y1); bx1 = Math.max(bx1, x0, x1); by1 = Math.max(by1, y0, y1); } }
+  };
   for (const raw of (gcode || "").split("\n")) {
-    const line = raw.trim(); if (!line || line[0] === ";") continue;
-    const g0 = /^G0\b/.test(line), g1 = /^G1\b/.test(line); if (!g0 && !g1) continue;
-    const mx = line.match(/X(-?[\d.]+)/), my = line.match(/Y(-?[\d.]+)/), mz = line.match(/Z(-?[\d.]+)/);
-    const nx = mx ? parseFloat(mx[1]) : x, ny = my ? parseFloat(my[1]) : y, nz = mz ? parseFloat(mz[1]) : z;
-    if ((mx || my) && have) { segs.push({ x0: x, y0: y, x1: nx, y1: ny, z: nz, cut: g1 }); if (g1) { zMin = Math.min(zMin, nz); zMax = Math.max(zMax, nz); bx0 = Math.min(bx0, x, nx); by0 = Math.min(by0, y, ny); bx1 = Math.max(bx1, x, nx); by1 = Math.max(by1, y, ny); } }
-    x = nx; y = ny; z = nz; have = have || !!(mx || my);
+    const rl = raw.trim(); if (!rl) continue;
+    const td = rl.match(/Tool T(\d+)\s+(-?[\d.]+)\s*\S*\s+dia/); if (td) toolDia[+td[1]] = parseFloat(td[2]);
+    const tc = rl.match(/TOOL CHANGE -> T(\d+)/); if (tc) tool = +tc[1];
+    let line = rl.replace(/^N\d+\s*/, "").replace(/\(.*?\)/g, "").replace(/;.*$/, "").trim();
+    if (!line || line[0] === "%") continue;
+    const tm = line.match(/\bT(\d+)/); if (tm) tool = +tm[1];
+    const gm = line.match(/\bG0?([0-3])(?![0-9.])/); if (gm) mode = +gm[1];
+    const num = a => { const m = line.match(new RegExp(a + "(-?[0-9]*\\.?[0-9]+)")); return m ? parseFloat(m[1]) : null; };
+    const fv = num("F"); if (fv != null) F = fv;
+    const mx = num("X"), my = num("Y"), mz = num("Z");
+    if (mx == null && my == null && mz == null) continue;
+    if (mode == null || /\bG(?:28|53|92)\b/.test(line)) { if (mx != null) x = mx; if (my != null) y = my; if (mz != null) z = mz; continue; }
+    const nx = mx != null ? mx : x, ny = my != null ? my : y, nz = mz != null ? mz : z;
+    if (!have) { x = nx; y = ny; z = nz; have = true; continue; }
+    if (mode === 2 || mode === 3) {
+      const I = num("I") || 0, J = num("J") || 0, cx = x + I, cy = y + J, r = Math.hypot(I, J);
+      let a0 = Math.atan2(y - cy, x - cx), a1 = Math.atan2(ny - cy, nx - cx), d = a1 - a0;
+      if (mode === 3) { if (d <= 1e-9) d += 2 * Math.PI; } else { if (d >= -1e-9) d -= 2 * Math.PI; }
+      const n = Math.max(2, Math.ceil(Math.abs(d) / (Math.PI / 36)));
+      let px = x, py = y, pz = z;
+      for (let k = 1; k <= n; k++) { const a = a0 + d * k / n, qx = k === n ? nx : cx + r * Math.cos(a), qy = k === n ? ny : cy + r * Math.sin(a), qz = z + (nz - z) * k / n; push(px, py, pz, qx, qy, qz, true); px = qx; py = qy; pz = qz; }
+    } else push(x, y, z, nx, ny, nz, mode === 1);
+    x = nx; y = ny; z = nz;
   }
-  return { segs, zMin, zMax, bx0, by0, bx1, by1 };
+  return { moves, total: t, toolDia, zMin, zMax, bx0, by0, bx1, by1 };
 }
-function drawToolpathCanvas(cv, data, machine, view, stock) {
+// Where the bit is at time tm (minutes into the program): the move it is on, how many moves are finished,
+// and its exact position partway along that move.
+function simStateAt(mv, tm) {
+  const ms = mv.moves; if (!ms.length) return null;
+  let lo = 0, hi = ms.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (ms[mid].t1 < tm) lo = mid + 1; else hi = mid; }
+  const m = ms[lo], u = m.t1 > m.t0 ? Math.max(0, Math.min(1, (tm - m.t0) / (m.t1 - m.t0))) : (tm >= m.t1 ? 1 : 0);
+  const done = u >= 1 ? lo + 1 : lo;
+  return { cur: lo, done, u, pos: { x: m.x0 + (m.x1 - m.x0) * u, y: m.y0 + (m.y1 - m.y0) * u, z: m.z0 + (m.z1 - m.z0) * u }, cutting: m.cut, tool: m.tool };
+}
+function parseToolpath(gcode) {
+  const mv = parseGcodeMoves(gcode), segs = [];
+  mv.moves.forEach((m, i) => { if (m.xy) segs.push({ x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1, z: m.z1, cut: m.cut, i }); });
+  return { segs, moves: mv.moves, zMin: mv.zMin, zMax: mv.zMax, bx0: mv.bx0, by0: mv.by0, bx1: mv.bx1, by1: mv.by1 };
+}
+function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
   const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
   const parsed = typeof data === "string" ? parseToolpath(data) : data;
   const { segs, zMin, zMax, bx0, by0, bx1, by1 } = parsed || { segs: [] };
@@ -4627,7 +4693,13 @@ function drawToolpathCanvas(cv, data, machine, view, stock) {
   for (const g of segs) if (!g.cut) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
   ctx.stroke(); ctx.setLineDash([]);
   const zr = (zMax - zMin) || 1, N = 12, buckets = Array.from({ length: N }, () => []);
-  for (const g of segs) if (g.cut) buckets[Math.min(N - 1, Math.max(0, Math.round((g.z - zMin) / zr * (N - 1))))].push(g);
+  if (sim) {
+    // Simulation: the whole path faint, then only what the bit has cut so far in depth colors.
+    ctx.strokeStyle = "rgba(155,147,136,0.22)"; ctx.lineWidth = 1; ctx.beginPath();
+    for (const g of segs) if (g.cut && g.i >= sim.done) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
+    ctx.stroke();
+  }
+  for (const g of segs) if (g.cut && (!sim || g.i < sim.done)) buckets[Math.min(N - 1, Math.max(0, Math.round((g.z - zMin) / zr * (N - 1))))].push(g);
   buckets.forEach((arr, i) => {
     if (!arr.length) return; const t = i / (N - 1);
     ctx.strokeStyle = `rgb(${Math.round(232 - (232 - 200) * t)},${Math.round(85 + (147 - 85) * t)},${Math.round(42 + (90 - 42) * t)})`;
@@ -4635,16 +4707,26 @@ function drawToolpathCanvas(cv, data, machine, view, stock) {
     for (const g of arr) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
     ctx.stroke();
   });
+  if (sim && sim.pos) {
+    const m = parsed.moves && parsed.moves[sim.cur];
+    if (m && m.cut && m.xy && sim.u > 0) { const t = Math.max(0, Math.min(1, (m.z1 - zMin) / zr)); ctx.strokeStyle = `rgb(${Math.round(232 - 32 * t)},${Math.round(85 + 62 * t)},${Math.round(42 + 48 * t)})`; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(MXc(m.x0, m.y0), MYc(m.x0, m.y0)); ctx.lineTo(MXc(sim.pos.x, sim.pos.y), MYc(sim.pos.x, sim.pos.y)); ctx.stroke(); }
+    // The bit, drawn at its real diameter (never smaller than a few pixels so it stays visible).
+    const px = MXc(sim.pos.x, sim.pos.y), py = MYc(sim.pos.x, sim.pos.y), rr = Math.max(4, (sim.toolR || 0) * s);
+    ctx.beginPath(); ctx.arc(px, py, rr, 0, Math.PI * 2);
+    ctx.fillStyle = sim.cutting ? "rgba(91,179,216,0.35)" : "rgba(91,179,216,0.12)"; ctx.fill();
+    ctx.strokeStyle = "#5bb3d8"; ctx.lineWidth = 1.5; ctx.setLineDash(sim.cutting ? [] : [3, 3]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(px - 3, py); ctx.lineTo(px + 3, py); ctx.moveTo(px, py - 3); ctx.lineTo(px, py + 3); ctx.stroke();
+  }
   return { sBase, s, ox, oy, mnx, mny, bw, bh, H };
 }
 
 // Live right-side toolpath view — redraws whenever the G-code or size changes. Zoom (wheel/buttons) + pan (drag).
-function ToolpathView({ gcode, width, height, machine, stock }) {
+function ToolpathView({ gcode, width, height, machine, stock, sim }) {
   const ref = useRef(null), tf = useRef(null), drag = useRef(null), raf = useRef(0);
   const parsed = useMemo(() => parseToolpath(gcode), [gcode]);   // parse ONCE per G-code, not per pan/zoom frame
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock); }, [parsed, width, height, machine, stock, zoom, pan]);
+  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock, sim); }, [parsed, width, height, machine, stock, zoom, pan, sim]);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const ptr = e => { const cv = ref.current, r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height), sc: cv.width / r.width }; };
   const onWheel = e => { e.preventDefault(); const t = tf.current; if (!t) return; const p = ptr(e); const wx = (p.x - t.ox) / t.s, wy = (t.H - p.y - t.oy) / t.s; const nz = Math.max(1, Math.min(24, zoom * (1 - e.deltaY * 0.0015))); const ns = t.sBase * nz; setZoom(nz); setPan({ x: (p.x - wx * ns) - ((ref.current.width - t.bw * ns) / 2 - t.mnx * ns), y: (t.H - p.y - wy * ns) - ((t.H - t.bh * ns) / 2 - t.mny * ns) }); };
@@ -4668,24 +4750,87 @@ function ToolpathView({ gcode, width, height, machine, stock }) {
 }
 
 // GPU 3D toolpath view (Three.js): cut moves colored by depth, rapids dim, orbit/zoom, ground grid.
-function Toolpath3DView({ gcode, machine }) {
+// The CAM preview pane with a cutting simulation: plays the bit along the file, showing what it has cut so far.
+// Its own component so the 60-frames-a-second clock re-renders only this pane, not the whole app.
+function ToolpathSimPane({ gcode, ok, preview3D, machine, stock, toolDias, playReq, C }) {
+  const rootRef = useRef(null);
+  const [on, setOn] = useState(false), [play, setPlay] = useState(false), [t, setT] = useState(0), [speed, setSpeed] = useState(20);
+  const tRef = useRef(0); tRef.current = t;
+  const mv = useMemo(() => (on && ok) ? parseGcodeMoves(gcode) : null, [on, ok, gcode]);
+  useEffect(() => { setT(0); tRef.current = 0; setPlay(false); }, [gcode]);   // a new file starts from the beginning
+  useEffect(() => {
+    if (!playReq) return;
+    setOn(true); if (mv && tRef.current >= mv.total) setT(0); setPlay(true);
+    const el = rootRef.current; if (el && el.scrollIntoView) { try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (e) {} }
+  }, [playReq]);
+  useEffect(() => {
+    if (!play || !mv) return;
+    let raf, last = performance.now();
+    const step = now => {
+      const n = Math.min(mv.total, tRef.current + (now - last) / 60000 * speed); last = now; tRef.current = n; setT(n);
+      if (n >= mv.total) { setPlay(false); return; }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [play, mv, speed]);
+  const sim = useMemo(() => {
+    if (!on || !mv || !mv.moves.length) return null;
+    const st = simStateAt(mv, Math.min(t, mv.total)); if (!st) return null;
+    const firstDia = Object.values(mv.toolDia)[0] || 0;
+    const dia = st.tool != null ? (mv.toolDia[st.tool] != null ? mv.toolDia[st.tool] : (toolDias && toolDias[st.tool] != null ? toolDias[st.tool] : firstDia)) : firstDia;
+    return { ...st, toolR: dia / 2, dia };
+  }, [on, mv, t, toolDias]);
+  const clock = m => { const s = Math.max(0, Math.round(m * 60)), h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60; return (h ? h + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0"); };
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const btn = { background: C.inputBg, border: `1px solid ${C.inputBorder}`, color: C.heading, borderRadius: 4, padding: "6px 10px", fontSize: 11.5, cursor: "pointer", whiteSpace: "nowrap", ...mono };
+  const total = mv ? mv.total : 0;
+  return (
+    <>
+      <div ref={rootRef} style={{ flex: 1, minHeight: 320, background: "#14100d", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {preview3D
+          ? <Toolpath3DView gcode={gcode} machine={machine} sim={sim} />
+          : <ToolpathView gcode={gcode} width={880} height={500} machine={machine} stock={stock} sim={sim} />}
+      </div>
+      {ok && (!on ? (
+        <div data-wn="cam-sim" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => { setOn(true); setT(0); setPlay(true); }} style={btn}>{"▶"} Simulate the cut</button>
+          <span style={{ color: C.labelDim, fontSize: 10.5, ...mono }}>Watch the bit move through this file, one move at a time, with what it has cut so far.</span>
+        </div>
+      ) : (
+        <div data-wn="cam-sim" style={{ display: "flex", flexDirection: "column", gap: 6, border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: "8px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => { if (!play && tRef.current >= total) setT(0); setPlay(p => !p); }} style={{ ...btn, minWidth: 74 }}>{play ? "❚❚ Pause" : "▶ Play"}</button>
+            <button onClick={() => { setT(0); tRef.current = 0; }} style={btn} title="Back to the start of the file">{"⏮"} Start</button>
+            <input type="range" min={0} max={1000} step={1} value={total ? Math.round(t / total * 1000) : 0} onChange={e => { const n = (parseInt(e.target.value) || 0) / 1000 * total; tRef.current = n; setT(n); }} style={{ flex: 1, minWidth: 140 }} aria-label="Position in the file" />
+            <span style={{ color: C.label, fontSize: 11, ...mono, whiteSpace: "nowrap" }}>{clock(t)} / {clock(total)}</span>
+            <select value={speed} onChange={e => setSpeed(parseFloat(e.target.value))} style={{ background: C.inputBg, border: `1px solid ${C.inputBorder}`, color: C.value, borderRadius: 4, padding: "5px 6px", fontSize: 11, ...mono }} aria-label="Playback speed">
+              {[[1, "1× (real time)"], [5, "5×"], [20, "20×"], [50, "50×"], [200, "200×"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <button onClick={() => { setPlay(false); setOn(false); }} style={{ ...btn, color: C.label }} title="Close the simulation and show the whole toolpath again">{"✕"}</button>
+          </div>
+          {sim && <div style={{ color: C.labelDim, fontSize: 10.5, ...mono, lineHeight: 1.5 }}>
+            {sim.tool != null ? "Tool T" + sim.tool + " · " : ""}{sim.dia ? "bit " + (+sim.dia.toFixed(3)) + " across · " : ""}Z {sim.pos.z.toFixed(3)} {"·"} <span style={{ color: sim.cutting ? C.heading : C.labelDim }}>{sim.cutting ? "cutting" : "fast move (not cutting)"}</span>
+            <br />The clock uses the feed rates in the file. Fast moves between cuts are estimated, the same way as the run time, so a real machine will differ a little. Same units as the file.
+          </div>}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Toolpath3DView({ gcode, machine, sim }) {
   const mountRef = useRef(null);
+  const simR = useRef(sim); simR.current = sim;   // read every frame, so moving the bit never rebuilds the scene
   const [status, setStatus] = useState("loading");
   useEffect(() => {
     let renderer, scene, camera, raf, ro, disposed = false; const cleanup = [];
     const mount = mountRef.current; if (!mount) return;
-    let x = 0, y = 0, z = 0, have = false; const cut = [], rap = [];
+    const mv = parseGcodeMoves(gcode), cut = [], rap = [];
     let bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9, bz0 = 1e9, bz1 = -1e9, zmin = 1e9, zmax = -1e9;
-    for (const raw of (gcode || "").split("\n")) {
-      const line = raw.trim(); if (!line || line[0] === ";") continue;
-      const g0 = /^G0\b/.test(line), g1 = /^G1\b/.test(line); if (!g0 && !g1) continue;
-      const mx = line.match(/X(-?[\d.]+)/), my = line.match(/Y(-?[\d.]+)/), mz = line.match(/Z(-?[\d.]+)/);
-      const nx = mx ? parseFloat(mx[1]) : x, ny = my ? parseFloat(my[1]) : y, nz = mz ? parseFloat(mz[1]) : z;
-      if (have && (mx || my || mz)) {
-        (g1 ? cut : rap).push([x, y, z, nx, ny, nz]);
-        if (g1) { for (const [a, b, c] of [[x, y, z], [nx, ny, nz]]) { bx0 = Math.min(bx0, a); bx1 = Math.max(bx1, a); by0 = Math.min(by0, b); by1 = Math.max(by1, b); bz0 = Math.min(bz0, c); bz1 = Math.max(bz1, c); } zmin = Math.min(zmin, z, nz); zmax = Math.max(zmax, z, nz); }
-      }
-      x = nx; y = ny; z = nz; have = have || !!(mx || my || mz);
+    for (const m of mv.moves) {
+      (m.cut ? cut : rap).push([m.x0, m.y0, m.z0, m.x1, m.y1, m.z1]);
+      if (m.cut) { for (const [a, b, cc] of [[m.x0, m.y0, m.z0], [m.x1, m.y1, m.z1]]) { bx0 = Math.min(bx0, a); bx1 = Math.max(bx1, a); by0 = Math.min(by0, b); by1 = Math.max(by1, b); bz0 = Math.min(bz0, cc); bz1 = Math.max(bz1, cc); } zmin = Math.min(zmin, m.z0, m.z1); zmax = Math.max(zmax, m.z0, m.z1); }
     }
     if (!cut.length) { setStatus("empty"); return; }
     const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2, cz = (bz0 + bz1) / 2;
@@ -4703,8 +4848,32 @@ function Toolpath3DView({ gcode, machine }) {
       const cpos = new Float32Array(cut.length * 6), ccol = new Float32Array(cut.length * 6);
       cut.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); cpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); ccol.set([...col(s[2]), ...col(s[5])], i * 6); });
       const cgeo = new THREE.BufferGeometry(); cgeo.setAttribute("position", new THREE.Float32BufferAttribute(cpos, 3)); cgeo.setAttribute("color", new THREE.Float32BufferAttribute(ccol, 3));
-      const cmat = new THREE.LineBasicMaterial({ vertexColors: true }); scene.add(new THREE.LineSegments(cgeo, cmat)); cleanup.push(() => { cgeo.dispose(); cmat.dispose(); });
+      const cmat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 }); scene.add(new THREE.LineSegments(cgeo, cmat)); cleanup.push(() => { cgeo.dispose(); cmat.dispose(); });
       if (rap.length) { const rpos = new Float32Array(rap.length * 6); rap.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); rpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); }); const rgeo = new THREE.BufferGeometry(); rgeo.setAttribute("position", new THREE.Float32BufferAttribute(rpos, 3)); const rmat = new THREE.LineBasicMaterial({ color: 0x5a5148, transparent: true, opacity: 0.35 }); scene.add(new THREE.LineSegments(rgeo, rmat)); cleanup.push(() => { rgeo.dispose(); rmat.dispose(); }); }
+      // Simulation layers: every move in program order (cuts in depth colors, rapids grey), revealed up to the
+      // bit; a short line for the move in progress; and the bit itself at its real diameter.
+      const ms = mv.moves, spos = new Float32Array(ms.length * 6), scol = new Float32Array(ms.length * 6);
+      ms.forEach((m, i) => { const A = P(m.x0, m.y0, m.z0), B = P(m.x1, m.y1, m.z1); spos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); const ca = m.cut ? col(m.z0) : [0.42, 0.39, 0.35], cb = m.cut ? col(m.z1) : [0.42, 0.39, 0.35]; scol.set([...ca, ...cb], i * 6); });
+      const sgeo = new THREE.BufferGeometry(); sgeo.setAttribute("position", new THREE.Float32BufferAttribute(spos, 3)); sgeo.setAttribute("color", new THREE.Float32BufferAttribute(scol, 3)); sgeo.setDrawRange(0, 0);
+      const smat = new THREE.LineBasicMaterial({ vertexColors: true }); const sLines = new THREE.LineSegments(sgeo, smat); sLines.visible = false; scene.add(sLines);
+      const pgeo = new THREE.BufferGeometry(); pgeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+      const pmat = new THREE.LineBasicMaterial({ color: 0x5bb3d8 }); const pLine = new THREE.LineSegments(pgeo, pmat); pLine.visible = false; scene.add(pLine);
+      const bitMat = new THREE.MeshBasicMaterial({ color: 0x5bb3d8, transparent: true, opacity: 0.55 });
+      let bitGeo = null, bitR = -1; const bit = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 24), bitMat); bit.visible = false; scene.add(bit);
+      cleanup.push(() => { sgeo.dispose(); smat.dispose(); pgeo.dispose(); pmat.dispose(); bitMat.dispose(); bit.geometry.dispose(); });
+      const applySim = () => {
+        const sm = simR.current, on = !!(sm && sm.pos);
+        sLines.visible = on; pLine.visible = on; bit.visible = on;
+        cmat.opacity = on ? 0.14 : 1;
+        if (!on) return;
+        sgeo.setDrawRange(0, Math.min(ms.length, sm.done) * 2);
+        const m = ms[sm.cur]; const A = P(m.x0, m.y0, m.z0), B = P(sm.pos.x, sm.pos.y, sm.pos.z);
+        const pa = pgeo.attributes.position; pa.setXYZ(0, A[0], A[1], A[2]); pa.setXYZ(1, B[0], B[1], B[2]); pa.needsUpdate = true;
+        const r = Math.max(sm.toolR || 0, size * 0.002);
+        if (r !== bitR) { bitR = r; bitGeo = new THREE.CylinderGeometry(r, r, Math.max(r * 5, size * 0.025), 24); bit.geometry.dispose(); bit.geometry = bitGeo; }
+        const hgt = bit.geometry.parameters.height; bit.position.set(B[0], B[1] + hgt / 2, B[2]);
+        bitMat.opacity = sm.cutting ? 0.75 : 0.35;
+      };
       const floorY = zmin - cz - 0.5;
       // Machine bed footprint on the floor (short X x long Y), anchored at the toolpath's corner —
       // matches the 2D view. Falls back to a tight grid hugging the part when no bed is set.
@@ -4737,7 +4906,7 @@ function Toolpath3DView({ gcode, machine }) {
       el.addEventListener("wheel", onWheel, { passive: false });
       el.addEventListener("touchstart", onTS, { passive: true }); el.addEventListener("touchmove", onTM, { passive: true }); el.addEventListener("touchend", onUp);
       cleanup.push(() => { el.removeEventListener("pointerdown", onDown); window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); el.removeEventListener("wheel", onWheel); el.removeEventListener("touchstart", onTS); el.removeEventListener("touchmove", onTM); el.removeEventListener("touchend", onUp); });
-      const animate = () => { raf = requestAnimationFrame(animate); if (!spun) { az += 0.0025; updateCam(); } renderer.render(scene, camera); };
+      const animate = () => { raf = requestAnimationFrame(animate); applySim(); if (!spun && !(simR.current && simR.current.pos)) { az += 0.0025; updateCam(); } renderer.render(scene, camera); };
       animate();
       ro = new ResizeObserver(() => { if (!mountRef.current) return; const w = mountRef.current.clientWidth, h = mountRef.current.clientHeight; if (w && h) { camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); } }); ro.observe(mount);
       setStatus("ok");
@@ -4745,33 +4914,6 @@ function Toolpath3DView({ gcode, machine }) {
     return () => { disposed = true; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); cleanup.forEach(fn => { try { fn(); } catch (e) {} }); if (renderer) { try { renderer.dispose(); if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch (e) {} } };
   }, [gcode, machine]);
   return <div ref={mountRef} style={{ width: "100%", height: "100%", cursor: "grab", position: "relative" }}>{status !== "ok" && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? "#e8552a" : "#9b9388", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{status === "error" ? "3D unavailable" : status === "empty" ? "no cuts to show" : "loading 3D\u2026"}</div>}</div>;
-}
-
-function ToolpathPreviewModal({ gcode, stats, onClose }) {
-  const ref = useRef(null);
-  useEffect(() => { const cv = ref.current; if (cv) drawToolpathCanvas(cv, gcode); }, [gcode]);
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 8, padding: 16, width: "min(1040px, 95vw)", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ color: C.heading, fontSize: 12, fontWeight: 700, letterSpacing: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>TOOLPATH PREVIEW · TOP-DOWN</span>
-          <button onClick={onClose} aria-label="Close" style={{ background: "transparent", border: "none", color: C.label, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>{"\u2715"}</button>
-        </div>
-        <canvas ref={ref} width={992} height={420} style={{ width: "100%", height: "auto", borderRadius: 4, border: `1px solid ${C.panelBorder}`, background: "#14100d" }} />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.label }}>
-          <span><span style={{ display: "inline-block", width: 18, height: 0, borderTop: `1px dashed ${C.labelDim}`, verticalAlign: "middle", marginRight: 6 }} />rapid</span>
-          <span><span style={{ display: "inline-block", width: 18, height: 3, background: "#e8552a", verticalAlign: "middle", marginRight: 6 }} />deeper cut</span>
-          <span><span style={{ display: "inline-block", width: 18, height: 3, background: "#c8935a", verticalAlign: "middle", marginRight: 6 }} />shallower cut</span>
-          {stats && <span style={{ marginLeft: "auto", color: C.labelDim }}>Z {stats.minZ}…{stats.maxZ} mm · ~{(stats.cutDistMM / 1000).toFixed(1)} m · {stats.estMin} min</span>}
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: C.labelDim, marginBottom: -4 }}>
-          <span>G-CODE PREVIEW</span>
-          <span>first 30 of {(gcode.split("\n").length).toLocaleString()} lines · download for full program</span>
-        </div>
-        <pre style={{ margin: 0, maxHeight: 150, overflow: "auto", background: "#0f0c0a", border: `1px solid ${C.panelBorder}`, borderRadius: 4, padding: "8px 10px", color: C.labelDim, fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, lineHeight: 1.5, whiteSpace: "pre" }}>{gcode.split("\n").slice(0, 30).join("\n")}</pre>
-      </div>
-    </div>
-  );
 }
 
 // Core + filler overlay for a top-down plan drawing, given a mapper from (lengthMM, lateralMM) → screen.
@@ -9305,7 +9447,7 @@ export default function App() {
   // Build-sheet PREVIEW — render the spec sheet on screen before exporting so you can see the layup
   // cross-section and every spec. Loads the logo dims first (same as export) so the preview matches 1:1.
   const [previewSvg, setPreviewSvg] = useState(null);
-  const [showToolpath, setShowToolpath] = useState(false);
+  const [simReq, setSimReq] = useState(0);   // bumped by the "Simulate the cut" button; the preview pane starts playing
   const [camOpen, setCamOpen] = useState(false);
   const [camWalk, setCamWalk] = useState(null);   // index of the open walk-through page in the CAM steps, or null
   const [camMachineOpen, setCamMachineOpen] = useState(false);   // machine/post panel collapsed by default once set
@@ -9625,6 +9767,14 @@ export default function App() {
     const s = camResult.stats, mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
     return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks) };
   }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, ski.alignMarks, camResult]);
+  // Bit diameters by tool number, for drawing the bit in the simulation when the file itself doesn't say
+  // (the file's header names only its first tool). Same units as the file.
+  const simToolDias = useMemo(() => {
+    const m = {}, add = (n, d) => { if (n != null && d > 0 && m[n] == null) m[n] = d; };
+    for (const k of ["outline", "taper", "bore", "align", "rabbet", "channel", "slat", "mold", "pocket", "rough", "base"]) add(camOpt[k + "ToolNum"], camOpt[k + "ToolDia"]);
+    add(camOpt.slatHoleToolNum, camOpt.slatHoleDia);
+    return m;
+  }, [camOpt]);
   const openSetupSheet = useCallback(() => {
     const s = camResult.stats; if (!s) return;
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
@@ -10246,13 +10396,16 @@ export default function App() {
       if (isCompact) setDrawerOpen(false);
       setCamOpen(true);
       if (camOpt.job !== "core" && camOpt.job !== "coreInserts") setCamMany(camJobPatch("core", camOpt));
+      // Some spots live inside one step (the cut-out, the top-face carve): open that step, on a job that has it.
+      if (it.op) { const job = (camOpt.job === "core" || camOpt.job === "coreInserts") ? camOpt.job : "core"; if (!camJobOps(job, camOpt).includes(it.op)) setCamMany(camJobPatch("core", camOpt)); setCam("op", it.op); }
     }
     setWnStep(i);
   };
   // Find the step's target (it can take a render or two to appear), scroll to it once, then keep the outline on it.
   useEffect(() => {
     if (wnStep == null) return;
-    const it = WHATS_NEW.items[wnStep]; if (!it || !it.target) { setWnLost(true); return; }
+    const it = WHATS_NEW.items[wnStep]; if (!it) return;
+    if (!it.target) { setWnRect(null); setWnLost(false); return; }   // a text-only step: nothing to point at
     let raf = 0, tries = 0, found = null, done = false;
     const sel = `[data-wn="${it.target}"]`;
     const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -12200,9 +12353,22 @@ export default function App() {
                     <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                       {[["conventional", "Conventional"], ["climb", "Climb"]].map(([v, l]) => (<button key={v} onClick={() => setCam("perimDir", v)} style={camSeg(camOpt.perimDir === v)}>{l}</button>))}
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      {[["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab height " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
+                    <div data-wn="cam-tabs" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {[["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
                     </div>
+                    {camOpt.tabN > 0 && (() => {
+                      // The bit is round, so where it climbs onto a tab and drops off again it still cuts full depth
+                      // for half its width past that point. Along the middle of the cut the wood left is the tab
+                      // length minus one bit diameter; at the edge of the part it is the full tab length.
+                      const mid = +(camOpt.tabLen - camOpt.outlineToolDia).toFixed(camOpt.units === "inch" ? 3 : 2);
+                      return (
+                        <div style={{ color: mid > 0 ? C.labelDim : "#e8a33a", fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                          Tabs are small bridges of wood the bit leaves uncut on its last pass so the core can't shift once it's cut free. Tab length is measured along the cut, tab height is how thick the bridge is, measured up from the bottom of the blank.
+                          {" "}Because the bit is round, each bridge is narrowest in the middle of the cut: tab length minus the bit diameter, which is <b style={{ color: mid > 0 ? C.heading : "#e8a33a" }}>{mid} {uu}</b> with your {camOpt.outlineToolDia} {uu} bit.
+                          {mid <= 0 && " That leaves no wood at all in the middle, so the tabs won't hold. Make the tabs longer than the bit is wide."}
+                        </div>
+                      );
+                    })()}
                     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginTop: 6 }}>
                       <input type="checkbox" checked={camOpt.rampEntry} onChange={e => setCam("rampEntry", e.target.checked)} /> Ramp into the cut ({camOpt.rampLen} {uu})
                     </label>
@@ -12233,7 +12399,7 @@ export default function App() {
                       {[["three", "3-section adjustable"], ["whole", "Full length"]].map(([v, l]) => (<button key={v} onClick={() => setCam("slatSections", v)} style={camSeg(camOpt.slatSections === v)}>{l}</button>))}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      {[["Base height " + uu, "slatBase", st]].concat(camOpt.slatSections === "three" ? [["Overlap " + uu, "slatOverlap", st]] : []).concat([["Copies", "slatCopies", 1], ["Sheet width " + uu, "slatSheetW", st], ["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1]]).map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
+                      {[["Base height " + uu, "slatBase", st]].concat(camOpt.slatSections === "three" ? [["Overlap " + uu, "slatOverlap", st]] : []).concat([["Copies", "slatCopies", 1], ["Sheet width " + uu, "slatSheetW", st], ["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]]).map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
                     </div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       Cuts a full rack: {camOpt.slatCopies}× each section, auto-nested into columns within your sheet width. Top edge follows the camber/rocker curve; 3-section adds telescoping tip/tail (overlap) so one set fits many lengths.
@@ -12362,7 +12528,7 @@ export default function App() {
                     {(() => {
                       const tR = (camOpt.taperToolDia || 0) / 2, hasV = !!(ski.vcutTip || ski.vcutTail);
                       return (
-                        <div style={{ border: "1px solid #e8a33a", background: "rgba(232,163,58,0.08)", borderRadius: 4, padding: 8, marginTop: 10 }}>
+                        <div data-wn="cam-endover" style={{ border: "1px solid #e8a33a", background: "rgba(232,163,58,0.08)", borderRadius: 4, padding: 8, marginTop: 10 }}>
                           <div style={{ color: "#e8a33a", fontSize: 11.5, fontWeight: 700, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace" }}>Past the tip and tail ends</div>
                           <div style={{ color: C.label, fontSize: 10.5, lineHeight: 1.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>
                             Every pass already runs past both ends of the core: the bit's center goes half the bit's width ({+tR.toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} with this bit) beyond the furthest point, so the whole bit passes over the ends{hasV ? ", including the very point of your V-cuts" : ""}, as long as the core sits exactly where the file expects it.
@@ -12403,7 +12569,7 @@ export default function App() {
                   <button onClick={downloadCAM} disabled={!camResult || !camResult.stats} title={!camResult || !camResult.stats ? "Fix the problem shown above first" : undefined} style={{ ...primaryBtn, flex: 1, padding: "10px 8px", opacity: (!camResult || !camResult.stats) ? 0.45 : 1, cursor: (!camResult || !camResult.stats) ? "not-allowed" : "pointer" }}>Download file</button>
                   <button onClick={openSetupSheet} title="Printable setup sheet: tool, stock, zeroing, run time" style={{ ...secondaryBtn, color: C.label, padding: "10px 14px", whiteSpace: "nowrap" }}>▤ Setup sheet</button>
                 </div>
-                <button onClick={() => setShowToolpath(true)} style={{ ...secondaryBtn, width: "100%", marginTop: 6 }}>Preview toolpaths</button>
+                <button onClick={() => setSimReq(n => n + 1)} disabled={!camResult || !camResult.stats} style={{ ...secondaryBtn, width: "100%", marginTop: 6, opacity: (!camResult || !camResult.stats) ? 0.45 : 1 }} title="Plays the bit along this file in the preview, showing what it has cut so far">{"\u25B6"} Simulate the cut in the preview</button>
                 <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 8, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
                   Units in the file: {camOpt.units === "inch" ? "inches (G20)" : "millimeters (G21)"}. Tool changes follow the machine profile you picked. Always air-cut above the stock first and check your zero point before cutting.
                 </div>
@@ -12909,11 +13075,7 @@ export default function App() {
                 </label>
               </div>
               )}
-              <div style={{ flex: 1, minHeight: 320, background: "#14100d", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {preview3D
-                  ? <Toolpath3DView gcode={camResult.gcode} machine={camMachine} />
-                  : <ToolpathView gcode={camResult.gcode} width={880} height={500} machine={camMachine} stock={camStock} />}
-              </div>
+              <ToolpathSimPane gcode={camResult.gcode} ok={!!camResult.stats} preview3D={preview3D} machine={camMachine} stock={camStock} toolDias={simToolDias} playReq={simReq} C={C} />
               <div style={{ display: "flex", gap: 16, alignItems: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.labelDim }}>
                 <span>rapids dashed · cuts colored by depth</span>
                 {camResult.stats && <span style={{ marginLeft: "auto" }}>Z {camResult.stats.minZ}…{camResult.stats.maxZ} {camResult.stats.unit} · ~{(camResult.stats.cutDistMM / 1000).toFixed(1)} m · {camResult.stats.estMin} min · {camResult.stats.lines.toLocaleString()} lines</span>}
@@ -12923,7 +13085,6 @@ export default function App() {
         </div>
       )}
       {topsheetOpen && <TopsheetDesigner ski={ski} C={C} layers={tsLayers} setLayers={setTsLayers} onClose={() => setTopsheetOpen(false)} onApply={(src) => setTopsheet(t => ({ ...t, src, name: "Designed topsheet", fit: "cover", scale: 1, offsetX: 0, offsetY: 0, rotation: 0, opacity: 1 }))} />}
-      {showToolpath && <ToolpathPreviewModal gcode={camResult.gcode} stats={camResult.stats} onClose={() => setShowToolpath(false)} />}
 
       {previewSvg && (
         <div onClick={() => setPreviewSvg(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
