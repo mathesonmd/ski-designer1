@@ -590,19 +590,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-14";
+const APP_BUILD = "2026-10-14b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-14",
+  id: "2026-10-14b",
   title: "What's new",
   items: [
     { title: "Simulate the cut", go: "cam", target: "cam-sim",
       body: "Below the toolpath preview in the CAM workspace, Simulate the cut plays the bit along the file, in 2D or 3D, and shows what it has cut so far. Play or pause it, drag the slider to any point in the file, or change the speed. The button under Download file starts it too." },
-    { title: "Tab length", go: "cam", op: "outline", target: "cam-tabs",
-      body: "When the CNC cuts out a core, you can now set how long the holding tabs are, next to Tab height. Tabs also come out exactly that long now: the bit steps straight up onto each tab and straight back down after it, where before it sloped up and down and stretched each tab. The note under the fields shows how much wood is left in the middle of each tab with your bit." },
+    { title: "Holding tabs", go: "cam", op: "outline", target: "cam-tabs",
+      body: "When the CNC cuts out a core, the holding tabs now come in matching pairs, one on each side straight across from the other, spaced evenly along the core's sides. Set how many per side and how long they are, next to Tab height. Each tab now comes out exactly the length you set: the bit steps straight up onto it and straight back down after it. The note under the fields shows how much wood is left in the middle of each tab with your bit." },
     { title: "Cutting past the tip and tail", go: "cam", op: "taper", target: "cam-endover",
       body: "The Shape the top face file now carries the bit past the tip and tail ends of the core by one bit radius, plus any extra you set, so the very ends (including the point of a V-cut) don't keep an uncut sliver." },
     { title: "Mixed-wood cores in the layup view",
@@ -4186,7 +4186,7 @@ function buildCoreCAM(ski, opt) {
       const lanes = []; const yL = -sHalf + 0.4, yR = sHalf - 0.4; lanes.push(yL);
       for (let y = -sHalf + so; y < yR - 1e-6; y += so) lanes.push(y);
       lanes.push(yR);
-      const passes = Math.max(1, Math.ceil((startTop - (minTop + zOff)) / sd));
+      const passes = Math.max(1, Math.ceil((startTop - (minTop + zOff)) / sd - 1e-6));
       // Full-length lanes: run each lane end to end across the whole part length (air-cutting where the core
       // narrows toward the waist) instead of chopping it into tip/tail segments with a lift+plunge across the
       // gap. Fewer plunges, and the two edge lanes become clean continuous sidewall passes with a fixed cut
@@ -4265,7 +4265,7 @@ function buildCoreCAM(ski, opt) {
   // and the bit steps straight up and straight down there, so the tab is exactly as long as asked. (Raising Z
   // only at the existing path points would put a sloped ramp on each side and stretch the tab.)
   const tabSpans = per => { const a = []; if (!(o.tabN > 0) || !(o.tabLen > 0)) return a; for (let t = 0; t < o.tabN; t++) { const ctr = (t + 0.5) / o.tabN * per; a.push([ctr - o.tabLen / 2, ctr + o.tabLen / 2]); } return a; };
-  const inTab = (spans, per, run) => { const rr = ((run % per) + per) % per; return spans.some(([a, b]) => rr > a && rr < b); };
+  const inTab = (spans, per, run) => spans.some(([a, b]) => run > a && run < b);
   const splitAtRuns = (verts, cutsIn) => {
     const cuts = cutsIn.slice().sort((a, b) => a - b), out = [verts[0]]; let ci = 0;
     for (let i = 1; i < verts.length; i++) {
@@ -4276,10 +4276,32 @@ function buildCoreCAM(ski, opt) {
     }
     return out;
   };
-  // Cut one lap of a closed path. hAt(run) gives the cut height (ramp included); tabs apply when withTabs.
-  const cutLap = (verts, per, hAt, withTabs) => {
-    const spans = withTabs ? tabSpans(per) : [];
-    const cuts = []; for (const [a, b] of spans) cuts.push(a, b, a + per, b + per);
+  // Core cut-out tabs: in matching pairs, one on each side of the core straight across from the other, spaced
+  // evenly along the length of the core's sides (where the tip/tail fill isn't). Returns spans of path length.
+  const sideTabSpans = (verts, per) => {
+    const n = Math.max(0, Math.round(o.tabPerSide || 0)); if (!n || !(o.tabLen > 0)) return [];
+    const lim = coreSideLimits(ski); let cMin = 1e9, cMax = -1e9; for (const p of core) { cMin = Math.min(cMin, p.x); cMax = Math.max(cMax, p.x); }
+    const xa = Math.max(lim.xa, cMin), xb = Math.min(lim.xb, cMax), spans = [];
+    for (let k = 0; k < n; k++) {
+      const tx = xa + (k + 0.5) / n * (xb - xa);
+      for (const s of [1, -1]) {
+        let best = null;
+        for (let i = 1; i < verts.length; i++) {
+          const a = verts[i - 1], b = verts[i]; if (a.run >= per - 1e-9) break;
+          if ((a.x - tx) * (b.x - tx) > 0 || a.x === b.x) continue;
+          const t = (tx - a.x) / (b.x - a.x), y = a.y + (b.y - a.y) * t;
+          if (y * s <= 0) continue;
+          if (!best || Math.abs(y) > Math.abs(best.y)) best = { y, run: a.run + (b.run - a.run) * t };
+        }
+        if (best) spans.push([best.run - o.tabLen / 2, best.run + o.tabLen / 2]);
+      }
+    }
+    return spans;
+  };
+  // Cut one lap of a closed path. hAt(run) gives the cut height (ramp included); spans are the tabs (final pass only).
+  const cutLap = (verts, per, hAt, spans0) => {
+    const spans = []; for (const [a, b] of (spans0 || [])) spans.push([a, b], [a + per, b + per], [a - per, b - per]);
+    const cuts = []; for (const [a, b] of spans) cuts.push(a, b);
     const vs = spans.length ? splitAtRuns(verts, cuts) : verts;
     let inPrev = false;
     for (let i = 1; i < vs.length; i++) {
@@ -4312,7 +4334,8 @@ function buildCoreCAM(ski, opt) {
     const verts = [{ x: path[0].x, y: path[0].y, run: 0 }]; let per = 0;
     for (let i = 1; i <= path.length; i++) { const a = path[(i - 1) % path.length], b = path[i % path.length]; per += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: per }); }
     if (o.rampEntry) { let orun = per, i = 1; while (orun - per < o.rampLen && i < path.length) { const a = path[(i - 1) % path.length], b = path[i % path.length]; orun += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: orun }); i++; } }
-    const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown));
+    const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown - 1e-6));
+    const tabsHere = o.tabPerSide != null ? sideTabSpans(verts, per) : tabSpans(per);
     for (let k = 1; k <= pPass; k++) {
       const targetH = Math.max(botH, o.stockThick - k * o.stepdown);
       const prevH = k === 1 ? o.stockThick : Math.max(botH, o.stockThick - (k - 1) * o.stepdown);
@@ -4320,14 +4343,14 @@ function buildCoreCAM(ski, opt) {
       const hAt = run => (o.rampEntry && run < o.rampLen && per > 1) ? lerp(prevH, targetH, run / Math.min(o.rampLen, per)) : targetH;
       g0(verts[0].x, verts[0].y); g0z(MZ(o.stockThick + 1));
       if (o.rampEntry) g0z(MZ(prevH)); else g1z(MZ(targetH));
-      cutLap(verts, per, hAt, k === pPass);
+      cutLap(verts, per, hAt, k === pPass ? tabsHere : null);
       g0z(safeZ);
     }
   };
   if (o.doPerimeter && !o.bottomSide) runPerimeter();
   if (o.slatPolys && o.slatPolys.length) {
     PB(); PC("===== MOLD SLATS (camber/rocker ribs cut through sheet) =====");
-    const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown));
+    const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown - 1e-6));
     o.slatPolys.forEach((poly0, idx) => {
       let path = poly0;
       try { const op2 = offsetPolygonOutward(poly0, R); if (op2 && op2.length >= 3) path = op2; } catch (e) {}
@@ -4337,7 +4360,7 @@ function buildCoreCAM(ski, opt) {
       for (let k = 1; k <= pPass; k++) {
         const targetH = Math.max(botH, o.stockThick - k * o.stepdown);
         g0(verts[0].x, verts[0].y); g0z(MZ(o.stockThick + 1)); g1z(MZ(targetH));
-        cutLap(verts, per, () => targetH, k === pPass);
+        cutLap(verts, per, () => targetH, k === pPass ? tabSpans(per) : null);
         g0z(safeZ);
       }
     });
@@ -4393,8 +4416,8 @@ function buildCoreCAM(ski, opt) {
         // Clear the flange pocket level by level. Flat: full-diameter levels at the stepdown. Cone: stepped
         // terraces, each cleared to the cone's radius at the bottom of that terrace so nothing is overcut.
         const lv = [];
-        if (prof0 === "cone") { const n = Math.max(1, Math.ceil(df / cStep)); for (let k = 1; k <= n; k++) lv.push(Math.min(df, k * cStep)); }
-        else { const n = Math.max(1, Math.ceil(df / Math.max(0.1, o.stepdown))); for (let k = 1; k <= n; k++) lv.push(df * k / n); }
+        if (prof0 === "cone") { const n = Math.max(1, Math.ceil(df / cStep - 1e-6)); for (let k = 1; k <= n; k++) lv.push(Math.min(df, k * cStep)); }
+        else { const n = Math.max(1, Math.ceil(df / Math.max(0.1, o.stepdown) - 1e-6)); for (let k = 1; k <= n; k++) lv.push(df * k / n); }
         g0(ax, lat); g0z(MZ(tZ + 1));
         for (const d of lv) {
           const wallR = prof0 === "cone" ? Rf + (Rcb - Rf) * (d / df) : Rf, rc = wallR - Rt, z = MZ(tZ - d);
@@ -4416,7 +4439,7 @@ function buildCoreCAM(ski, opt) {
         if (orb < 0.05) { g0(ax, lat); g0z(MZ(zS + 1)); let z = zS; while (z > zE + 1e-6) { z = Math.max(zE, z - Math.max(0.1, o.stepdown)); bz(MZ(z)); } }
         else {
           g0(ax + orb, lat); g0z(MZ(zS + 1));
-          const depth = zS - zE, turns = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown))), tot = turns * segs;
+          const depth = zS - zE, turns = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown) - 1e-6)), tot = turns * segs;
           for (let s = 1; s <= tot; s++) { const a = (s / segs) * 2 * Math.PI; g1(ax + orb * Math.cos(a), lat + orb * Math.sin(a), MZ(zS - depth * s / tot), bFeed); }
           circle(ax, lat, orb, MZ(zE));
         }
@@ -4431,7 +4454,7 @@ function buildCoreCAM(ski, opt) {
     const x0p = cxL - o.pocketL / 2 + r, x1p = cxL + o.pocketL / 2 - r;
     const y0p = (o.pocketCenterY || 0) - o.pocketW / 2 + r, y1p = (o.pocketCenterY || 0) + o.pocketW / 2 - r;
     const topZ = o.stockThick, botZ = o.stockThick - o.pocketDepth, so = Math.max(0.5, o.stepover);
-    const passes = Math.max(1, Math.ceil(o.pocketDepth / o.stepdown));
+    const passes = Math.max(1, Math.ceil(o.pocketDepth / o.stepdown - 1e-6));
     if (x1p > x0p && y1p > y0p) {
       for (let pi = 1; pi <= passes; pi++) {
         const z = Math.max(botZ, topZ - pi * (o.pocketDepth / passes));
@@ -4469,7 +4492,7 @@ function buildCoreCAM(ski, opt) {
         if (orbitR <= 0.2) { g0(along, lat); g0z(zTop); P(`G1 Z${f(zBot)} F${f(o.plunge)}`); tk(zBot); cuts++; }
         else {
           g0(along + orbitR, lat); g0z(zTop);
-          const depth = zTop - zBot, revs = Math.max(1, Math.ceil(depth / Math.max(0.5, o.stepdown))), total = revs * segs;
+          const depth = zTop - zBot, revs = Math.max(1, Math.ceil(depth / Math.max(0.5, o.stepdown) - 1e-6)), total = revs * segs;
           for (let i = 1; i <= total; i++) { const a = (i / segs) * 2 * Math.PI, z = zTop - (i / total) * depth; g1(along + orbitR * Math.cos(a), lat + orbitR * Math.sin(a), z, o.feed); }
           for (let i = 1; i <= segs; i++) { const a = (i / segs) * 2 * Math.PI; g1(along + orbitR * Math.cos(a), lat + orbitR * Math.sin(a), zBot, o.feed); }
         }
@@ -4523,7 +4546,7 @@ function buildCoreCAM(ski, opt) {
     // Conventional milling on every pass (climb can pull a glued sidewall off). Wood on the inner side of the
     // pass = like an outside profile; wood on the outer side = like a pocket wall. Same frame rules as the outline.
     const wantCW = (woodInside) => { let w = woodInside; if (!o.spindleCW) w = !w; if (o.bottomSide) w = !w; return w; };
-    const levels = []; { const n = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown))); for (let k = 1; k <= n; k++) levels.push(o.stockThick - depth * k / n); }
+    const levels = []; { const n = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown) - 1e-6)); for (let k = 1; k <= n; k++) levels.push(o.stockThick - depth * k / n); }
     useTool(o.toolNum);
     PB(); PC(isRab
       ? `===== EDGE RABBET (bottom face up on the pins) - ${f(dIn)} ${uu} in from the outside edge, ${f(depth)} ${uu} deep, sides only =====`
@@ -9617,7 +9640,7 @@ export default function App() {
       slatHoles: true, slatHoleDia: 6.6, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
-      perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
+      perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabPerSide: 2, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
       stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional",
       // Sidewalls: "glue" (strips glued on after the cutout) or "pour" (channel cut first, filled with poly). Edge
       // rabbet: "router" (by hand, instructions only; the default) or "cnc" (its own file on the underside). Rabbet sizes have no default: the
@@ -9626,7 +9649,7 @@ export default function App() {
       taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
       chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -9721,7 +9744,7 @@ export default function App() {
       // Rabbet by hand on a router table: no file to make.
       if (camOpt.op === "rabbet" && camOpt.rabbetHow !== "cnc") return { gcode: "", stats: null, byHand: true };
       const pour = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour";
-      const postThick = pour ? (camOpt.pourThick > 0 ? camOpt.pourThick : camOpt.stockThick - (camOpt.chanSkin || 0)) : camOpt.stockThick;
+      const postThick = pour ? (camOpt.pourThick > 0 ? camOpt.pourThick : +(camOpt.stockThick - (camOpt.chanSkin || 0)).toFixed(camOpt.units === "inch" ? 4 : 3)) : camOpt.stockThick;   // rounded so the file header doesn't print float noise
       if ((camOpt.op === "rabbet" || camOpt.op === "channel") && !ski.alignMarks) throw new Error((camOpt.op === "rabbet" ? "The edge rabbet" : "The sidewall channel") + " needs the alignment holes, so the core goes back on the pins in the same place. Turn on Drill alignment holes.");
       const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: (pour && camOpt.op !== "channel") ? postThick : camOpt.stockThick, pouredSidewalls: pour, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks), alignPinDepth: camOpt.alignPinDepth };
       const opt = camOpt.op === "rabbet"
@@ -9729,13 +9752,13 @@ export default function App() {
         : camOpt.op === "channel"
         ? { ...b, bottomSide: false, doProfile: false, doPerimeter: false, bandKind: "channel", chanWidth: camOpt.chanWidth, chanSkin: camOpt.chanSkin, toolNum: camOpt.channelToolNum, toolDia: camOpt.channelToolDia, feed: camOpt.channelFeed, plunge: camOpt.channelPlunge, stepover: camOpt.stepover, drillAlign: !!ski.alignMarks && alignDrillOp === "channel", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "outline"
-        ? { ...b, bottomSide: camOpt.outlineSide === "bottom", doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks && alignDrillOp === "outline", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
+        ? { ...b, bottomSide: camOpt.outlineSide === "bottom", doProfile: false, doPerimeter: true, toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabPerSide: camOpt.tabPerSide, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen, drillAlign: !!ski.alignMarks && alignDrillOp === "outline", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
-        ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
+        ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
         : camOpt.op === "bore"
-        ? { ...b, bottomSide: true, doProfile: false, doPerimeter: !!camOpt.boreWithProfile, borePts, ...(camOpt.boreWithProfile ? { toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen } : { toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge }), insToolNum: camOpt.boreToolNum, insToolDia: camOpt.boreToolDia, insFeed: camOpt.boreFeed, insPlunge: camOpt.borePlunge, insBarrelDia: camOpt.insBarrelDia, insFlangeProfile: camOpt.insFlangeProfile, insFlangeDia: camOpt.insFlangeDia, insFlangeDepth: camOpt.insFlangeDepth, insConeBotDia: camOpt.insConeBotDia, insConeStep: camOpt.insConeStep, insStepover: camOpt.insStepover, insBarrelMode: camOpt.insBarrelMode, insBarrelDepth: camOpt.insBarrelDepth, drillAlign: !!ski.alignMarks && alignDrillOp === "bore", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
+        ? { ...b, bottomSide: true, doProfile: false, doPerimeter: !!camOpt.boreWithProfile, borePts, ...(camOpt.boreWithProfile ? { toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabPerSide: camOpt.tabPerSide, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen } : { toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge }), insToolNum: camOpt.boreToolNum, insToolDia: camOpt.boreToolDia, insFeed: camOpt.boreFeed, insPlunge: camOpt.borePlunge, insBarrelDia: camOpt.insBarrelDia, insFlangeProfile: camOpt.insFlangeProfile, insFlangeDia: camOpt.insFlangeDia, insFlangeDepth: camOpt.insFlangeDepth, insConeBotDia: camOpt.insConeBotDia, insConeStep: camOpt.insConeStep, insStepover: camOpt.insStepover, insBarrelMode: camOpt.insBarrelMode, insBarrelDepth: camOpt.insBarrelDepth, drillAlign: !!ski.alignMarks && alignDrillOp === "bore", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "base"
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
@@ -12354,16 +12377,16 @@ export default function App() {
                       {[["conventional", "Conventional"], ["climb", "Climb"]].map(([v, l]) => (<button key={v} onClick={() => setCam("perimDir", v)} style={camSeg(camOpt.perimDir === v)}>{l}</button>))}
                     </div>
                     <div data-wn="cam-tabs" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      {[["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
+                      {[["Cut into spoilboard " + uu, "cutThrough", st], ["Tabs per side", "tabPerSide", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]].map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} min={key === "tabPerSide" ? 0 : undefined} step={step} onChange={e => setCam(key, key === "tabPerSide" ? Math.max(0, Math.round(parseFloat(e.target.value) || 0)) : (parseFloat(e.target.value) || 0))} style={camInput} /></div>))}
                     </div>
-                    {camOpt.tabN > 0 && (() => {
+                    {camOpt.tabPerSide > 0 && (() => {
                       // The bit is round, so where it climbs onto a tab and drops off again it still cuts full depth
                       // for half its width past that point. Along the middle of the cut the wood left is the tab
                       // length minus one bit diameter; at the edge of the part it is the full tab length.
                       const mid = +(camOpt.tabLen - camOpt.outlineToolDia).toFixed(camOpt.units === "inch" ? 3 : 2);
                       return (
                         <div style={{ color: mid > 0 ? C.labelDim : "#e8a33a", fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
-                          Tabs are small bridges of wood the bit leaves uncut on its last pass so the core can't shift once it's cut free. Tab length is measured along the cut, tab height is how thick the bridge is, measured up from the bottom of the blank.
+                          Tabs are small bridges of wood the bit leaves uncut on its last pass so the core can't shift once it's cut free. They come in pairs, one on each side of the core straight across from the other, spaced evenly along the core's sides. Tab length is measured along the cut, tab height is how thick the bridge is, measured up from the bottom of the blank.
                           {" "}Because the bit is round, each bridge is narrowest in the middle of the cut: tab length minus the bit diameter, which is <b style={{ color: mid > 0 ? C.heading : "#e8a33a" }}>{mid} {uu}</b> with your {camOpt.outlineToolDia} {uu} bit.
                           {mid <= 0 && " That leaves no wood at all in the middle, so the tabs won't hold. Make the tabs longer than the bit is wide."}
                         </div>
