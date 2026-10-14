@@ -4039,7 +4039,7 @@ function buildCoreCAM(ski, opt) {
   // User-entered lengths/feeds are in the SELECTED unit; convert to mm so all geometry math stays metric,
   // then convert back on output. This makes an inch program come out in real inches and inch/min (IPM).
   const disp = {};
-  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth", "insToolDia", "insFeed", "insPlunge", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "rabbetWidth", "rabbetDepth", "chanWidth", "chanSkin", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
+  for (const k of ["toolDia", "stockThick", "stockL", "stockW", "safeZ", "stepover", "stepdown", "cutThrough", "tabHeight", "tabLen", "rampLen", "sidewallThick", "edgeOverlap", "moldMargin", "slatHoleDia", "boreDia", "boreDepth", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth", "insToolDia", "insFeed", "insPlunge", "offsetX", "offsetY", "pocketL", "pocketW", "pocketDepth", "taperEndOver", "rabbetWidth", "rabbetDepth", "chanWidth", "chanSkin", "roughToolDia", "roughStepover", "roughStepdown", "finishAllowance", "bladeOffset", "dragLeadIn", "feed", "plunge"]) { if (o[k] == null) continue; disp[k] = o[k]; o[k] = o[k] * uL; }
   const pst = Object.assign({}, POST_PROFILES[o.postKey] || POST_PROFILES.centroid, o.postOverride || {});
   const f = n => { const v = n / uL; const dp = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); return v.toFixed(dp); };
   const uu = inch ? "in" : "mm", uf = inch ? "in/min" : "mm/min";
@@ -4111,7 +4111,7 @@ function buildCoreCAM(ski, opt) {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(baseEdge || core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
-    else if (o.doProfile && !isBase) { const ext = Math.max(0, wallPerSide + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } }   // taper: stock must cover the glued-on walls the carve reaches over
+    else if (o.doProfile && !isBase) { const ext = Math.max(0, wallPerSide + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } { let cMin = 1e9, cMax = -1e9; for (const p of core) { if (p.x < cMin) cMin = p.x; if (p.x > cMax) cMax = p.x; } const run = R + Math.max(0, o.taperEndOver || 0); fp = fp.concat([{ x: cMin - run, y: 0 }, { x: cMax + run, y: 0 }]); } }   // taper: lanes also run past both ends   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
     // Band cuts reach outside the core (channel past the outline, rabbet past the assembled edge).
@@ -4156,6 +4156,7 @@ function buildCoreCAM(ski, opt) {
   PC(`Z ZERO = ${o.zZero === "bed" ? "BED / TABLE TOP" : "TOP OF STOCK"}   (stock ${disp.stockThick} ${uu})`);
   PC(`Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
   if (o.doProfile) {
+    if (!isBase) PC(`Runs past the tip and tail ends of the core by one bit radius${(o.taperEndOver || 0) > 0 ? " plus " + disp.taperEndOver + " " + uu + " extra" : ""}, so the ends (including the point of a V-cut) are fully cut.`);
     PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (wallPerSide > 0 || o.edgeOverlap > 0 ? ", to assembled edge (from measured width) + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
     if (!isBase) PC(`Sidewall engagement (glued walls): ${o.sidewallEngage === "off" ? "off" : o.sidewallEngage + " (edge lanes)"}`);
   }
@@ -4193,6 +4194,10 @@ function buildCoreCAM(ski, opt) {
       // gap. Fewer plunges, and the two edge lanes become clean continuous sidewall passes with a fixed cut
       // direction. X0..X1 is the full length extent of the surfacing region.
       let X0 = 1e9, X1 = -1e9; for (const p of surfPoly) { if (p.x < X0) X0 = p.x; if (p.x > X1) X1 = p.x; }
+      // Top face: run every lane past the core's furthest tip and tail points by a full bit radius (so the cutter
+      // clears the very point of a V-cut, which an inset path would stop short of), plus the builder's extra
+      // allowance for the core sitting slightly off from where the file expects it.
+      if (!isBase) { let cMin = 1e9, cMax = -1e9; for (const p of core) { if (p.x < cMin) cMin = p.x; if (p.x > cMax) cMax = p.x; } const run = toolR + Math.max(0, o.taperEndOver || 0); X0 = Math.min(X0, cMin - run); X1 = Math.max(X1, cMax + run); }
       if (tnum != null) { P(`G0 Z${f(safeZ)}`); toolChange(tnum); P(`S${o.spindle} M3`); }
       for (let k = 1; k <= passes; k++) {
         const floor = startTop - k * sd;
@@ -8798,7 +8803,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
-  "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
+  "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
@@ -9476,7 +9481,7 @@ export default function App() {
       // rabbet: "router" (by hand, instructions only; the default) or "cnc" (its own file on the underside). Rabbet sizes have no default: the
       // builder enters them. Channel width 10 mm and 1.5 mm of wood left under it follow the builder's stated
       // practice (10 mm wide, 1 to 2 mm shallower than the stock); both are editable.
-      sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
+      taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
       chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
     try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
@@ -9593,7 +9598,7 @@ export default function App() {
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts, alignDrillOp]);
@@ -12354,6 +12359,21 @@ export default function App() {
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       The carve reaches out to your assembled core's edge automatically — it uses the assembled width you measured up top, which already includes the glued-on sidewalls, so you don't re-enter the wall thickness here. Edge overlap just pushes the cutter a hair further past that edge so the walls and corners cut clean all the way through.
                     </div>
+                    {(() => {
+                      const tR = (camOpt.taperToolDia || 0) / 2, hasV = !!(ski.vcutTip || ski.vcutTail);
+                      return (
+                        <div style={{ border: "1px solid #e8a33a", background: "rgba(232,163,58,0.08)", borderRadius: 4, padding: 8, marginTop: 10 }}>
+                          <div style={{ color: "#e8a33a", fontSize: 11.5, fontWeight: 700, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace" }}>Past the tip and tail ends</div>
+                          <div style={{ color: C.label, fontSize: 10.5, lineHeight: 1.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                            Every pass already runs past both ends of the core: the bit's center goes half the bit's width ({+tR.toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} with this bit) beyond the furthest point, so the whole bit passes over the ends{hasV ? ", including the very point of your V-cuts" : ""}, as long as the core sits exactly where the file expects it.
+                            {" "}If your core could sit a little off (it was placed by hand, or the pins have some play), add that much here so nothing is left uncut at the ends.
+                          </div>
+                          <div style={{ maxWidth: 220 }}><div style={camSmall}>Extra past the ends {uu}</div><NumberInput value={camOpt.taperEndOver || 0} step={st} min={0} onCommit={v => setCam("taperEndOver", Math.max(0, v))} style={camInput} /></div>
+                          <div style={{ color: C.labelDim, fontSize: 10, marginTop: 5, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+                            The bit's center goes {+(tR + (camOpt.taperEndOver || 0)).toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} past each end, and its edge another {+tR.toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} beyond that. Leave room on the table for it, and keep clamps and pins clear.
+                          </div>
+                        </div>);
+                    })()}
                   </div>
             );
             const outputBody = (<>
