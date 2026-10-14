@@ -115,6 +115,20 @@ function coreLayerName(L) {
   if (st) { const sp = [...new Set(st.map(s => s.mat))]; return sp.length > 1 ? `Mixed wood core (${st.length} strips)` : ((CORE_MATERIALS[sp[0]] || CORE_MATERIALS.poplar).name + " core"); }
   const ws = coreWoods(L); return ws.length > 1 ? "Mixed wood core" : ((CORE_MATERIALS[ws[0].mat] || CORE_MATERIALS.poplar).name + " core");
 }
+// Species in a strip-built core, in the order they first appear, with how many strips of each.
+function coreStripSpecies(L) {
+  const st = coreStrips(L); if (!st) return null;
+  const out = []; for (const s of st) { const e = out.find(o => o.mat === s.mat); if (e) e.n++; else out.push({ mat: s.mat, n: 1, name: (CORE_MATERIALS[s.mat] || CORE_MATERIALS.poplar).name }); }
+  return out;
+}
+// One-line description of the core's wood for tables and cards: every species, never just the first one.
+function coreWoodText(L) {
+  if (!L) return "";
+  const sp = coreStripSpecies(L), st = coreStrips(L);
+  if (sp) return sp.length > 1 ? `${st.length} strips: ` + sp.map(o => o.n > 1 ? `${o.name} \u00d7${o.n}` : o.name).join(", ") : `${sp[0].name}, ${st.length} strips`;
+  const ws = coreWoods(L);
+  return ws.length > 1 ? ws.map(w => ((CORE_MATERIALS[w.mat] || {}).name || w.mat) + " " + Math.round(w.pct || 0) + "%").join(" + ") : ((CORE_MATERIALS[(ws[0] || {}).mat] || {}).name || "Wood");
+}
 function coreStrips(L) { return (L && L.stripMode && Array.isArray(L.strips) && L.strips.length) ? L.strips : null; }
 function stripSpans(strips) { const T = strips.reduce((a, s) => a + Math.max(0, s.width || 0), 0); let x = -T / 2; return strips.map(s => { const a = x; x += Math.max(0, s.width || 0); return { mat: s.mat, density: s.density, a, b: x }; }); }
 function stripCoreAt(L, hw) {
@@ -3796,7 +3810,7 @@ function layupStack(ski) {
       const L = lu.stack[i];
       if (L.kind === "topsheet") { St.push({ role: "topsheet", name: "Topsheet", thick: 0.5, count: 1 }); }
       else if (L.kind === "base") { St.push({ role: "base", name: "Base + steel edges", thick: (L.thick != null ? L.thick : 1.2), count: 1 }); }
-      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const stq = coreStrips(L); const nm = stq && new Set(stq.map(s => s.mat)).size > 1 ? `Mixed wood core, ${stq.length} strips: ${stq.map(s => (CORE_MATERIALS[s.mat] || {}).name || "Wood").join(" / ")}` : coreLayerName(L); St.push({ role: "core", name: nm, thick: coreThick, count: 1 }); }
+      else if (L.kind === "core") { const cp = coreProps(L); const ws = coreWoods(L); const stq = coreStrips(L); const nm = coreLayerName(L); St.push({ role: "core", name: nm, thick: coreThick, count: 1, strips: stq || null, species: coreStripSpecies(L) }); }
       else if (L.kind === "veneer") { const w = VENEERS[L.mat] || VENEERS.walnut; St.push({ role: "veneer", name: (w.name || "Wood") + " veneer \u00B7 " + (L.thick != null ? L.thick : 0.6) + "mm", thick: (L.thick != null ? L.thick : 0.6), count: 1 }); }
       else if (L.kind === "vds") { St.push({ role: "vds", name: "VDS rubber \u00B7 " + (L.thick != null ? L.thick : 0.2) + "mm", thick: (L.thick != null ? L.thick : 0.2), count: 1 }); }
       else if (L.kind === "metal") { const m = METALS[L.mat] || METALS.titanal; St.push({ role: "metal", name: m.name, thick: L.thick != null ? L.thick : m.thick, count: 1 }); }
@@ -3838,7 +3852,20 @@ function buildLayerStackSVG(ski, opts) {
   const swp = sidewallProps(ski.layup && ski.layup.sidewall);
   const skiW = Math.max(ski.tipWidth || 100, ski.waistWidth || 100, ski.tailWidth || 100);
   const swName = swp ? ((ski.layup.sidewall.mat === "custom") ? "Sidewall" : ((SIDEWALL_MATERIALS[ski.layup.sidewall.mat] || {}).name || "Sidewall")) : "";
-  const hOf = L => L.role === "core" ? Math.max(38, Math.min(62, 16 + L.thick * 4)) : Math.max(20, Math.min(34, 13 + L.thick * 7));
+  // Strip-built core label: wrapped to the core's width so every species name shows, centered over the strips.
+  const swPx0 = (swp && swp.thick > 0) ? Math.max(9, Math.min(w * 0.2, w * swp.thick / Math.max(1, skiW))) : 0;
+  const coreLblFs = 13, coreLblLH = coreLblFs * 1.3;
+  const wrapTo = (text, maxChars, sep) => { const out = []; let cur = ""; for (const wd of text) { const nx = cur ? cur + sep + wd : wd; if (nx.length > maxChars && cur) { out.push(cur + (sep === ", " ? "," : "")); cur = wd; } else cur = nx; } if (cur) out.push(cur); return out; };
+  const coreLines = L => {
+    const maxChars = Math.max(10, Math.floor((w - 2 * swPx0 - 30) / (coreLblFs * 0.62)));
+    const title = wrapTo(`${L.name} \u00b7 ${L.thick.toFixed(1)} mm max`.split(" "), maxChars, " ");
+    const sp = wrapTo((L.species || []).map(o => o.n > 1 ? `${o.name} \u00d7${o.n}` : o.name), maxChars, ", ");
+    return { title, sp, all: [...title, ...sp, "strips as cut at the waist"] };
+  };
+  // A strip-built core gets a taller row: the label in the middle, with the strips showing above and below it.
+  const hOf = L => L.role === "core" ? (L.strips ? Math.max(84, coreLines(L).all.length * coreLblLH + 8 + 44) : Math.max(38, Math.min(62, 16 + L.thick * 4))) : Math.max(20, Math.min(34, 13 + L.thick * 7));
+  // Core half-width at the waist (narrowest point between the contacts), so strips are drawn as they are there.
+  const waistCoreHalf = (() => { const L0 = ski.length, a = ski.tailLength, b = L0 - ski.tipLength; let w = 1e9; for (let i = 0; i <= 120; i++) { try { w = Math.min(w, getWidthAtPos(ski, (a + (b - a) * i / 120) / L0)); } catch (e) {} } return Math.max(1, w / 2 - (ski.coreInset || 0)); })();
   let totalH = S.reduce((a, L) => a + hOf(L) + gap, 0) - gap;
   const scale = (o.maxH && totalH > o.maxH) ? o.maxH / totalH : 1;
   let cy = y, bars = "";
@@ -3852,8 +3879,28 @@ function buildLayerStackSVG(ski, opts) {
       for (const sx of [bx, bx + bw - swPx]) bars += `<rect x="${sx.toFixed(1)}" y="${cy.toFixed(1)}" width="${swPx.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${COL.sidewall.fill}" stroke="${border}" stroke-width="0.8"/>`;
       if (swPx > 24 && h >= 22) { const lx = bx + swPx / 2, ly = cy + h / 2; bars += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="10" fill="${COL.sidewall.txt}" font-family="monospace" text-anchor="middle" transform="rotate(-90 ${lx.toFixed(1)} ${ly.toFixed(1)})">${esc(swName)}</text>`; }
     }
+    // Strip-built core: the strips across the core at the waist, in proportion, colored by wood (strip 1 on the left,
+    // looking down on the top with the tip away), the same as the core top view.
+    let stripLabel = false;
+    if (L.role === "core" && L.strips) {
+      const swPx = (swp && swp.thick > 0) ? Math.max(9, Math.min(bw * 0.2, bw * swp.thick / Math.max(1, skiW))) : 0;
+      const cx0 = bx + swPx, cw = bw - 2 * swPx, hw = waistCoreHalf;
+      for (const q of stripSpans(L.strips)) {
+        const a = Math.max(q.a, -hw), b2 = Math.min(q.b, hw); if (b2 <= a) continue;
+        const sx = cx0 + (a + hw) / (2 * hw) * cw, sw2 = (b2 - a) / (2 * hw) * cw;
+        bars += `<rect x="${sx.toFixed(1)}" y="${cy.toFixed(1)}" width="${sw2.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}" fill="${coreWoodColor(q.mat)}" stroke="rgba(0,0,0,0.45)" stroke-width="0.8"/>`;
+      }
+      // Centered, wrapped label with a dark backing so it reads over any wood color.
+      const cl = coreLines(L), lines = cl.all, nTitle = cl.title.length;
+      const fs = coreLblFs * Math.min(1, scale + 0.15), lh = fs * 1.3;
+      const boxW = Math.min(cw - 12, Math.max(...lines.map(t => t.length)) * fs * 0.62 + 18), boxH = lines.length * lh + 8;
+      const midX = cx0 + cw / 2, top = cy + (h - boxH) / 2;
+      bars += `<rect x="${(midX - boxW / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${boxW.toFixed(1)}" height="${boxH.toFixed(1)}" rx="4" fill="rgba(20,18,16,0.82)"/>`;
+      lines.forEach((t, k) => { const last = k === lines.length - 1, isT = k < nTitle; bars += `<text x="${midX.toFixed(1)}" y="${(top + 4 + lh * (k + 0.78)).toFixed(1)}" font-size="${(last ? fs * 0.82 : fs).toFixed(1)}" fill="${isT ? "#ede6d8" : last ? "#9b9388" : "#e8dcc8"}" font-family="monospace" font-weight="${isT ? "bold" : "normal"}" text-anchor="middle">${esc(t)}</text>`; });
+      stripLabel = true;
+    }
     if (L.count > 1) for (let k = 1; k < L.count; k++) { const ly = cy + h * k / L.count; bars += `<line x1="${bx.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${(bx + bw).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${c.txt}" stroke-opacity="0.35" stroke-width="0.6"/>`; }
-    if (h >= 13) {
+    if (h >= 13 && !stripLabel) {
       const fs = Math.min(17, Math.max(12, h * 0.6)).toFixed(0);
       const lblX = (L.role === "core" && swp && swp.thick > 0) ? (bx + Math.max(9, Math.min(bw * 0.2, bw * swp.thick / Math.max(1, skiW))) + 8) : (bx + 10);
       bars += `<text x="${lblX.toFixed(1)}" y="${(cy + h / 2 + 5).toFixed(1)}" font-size="${fs}" fill="${c.txt}" font-family="monospace" font-weight="bold">${esc(L.count > 1 ? `${L.name}  \u00D7${L.count}` : L.name)}</text>`;
@@ -4841,7 +4888,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand, opts) {
 
   const _stack = (ski.layup && ski.layup.stack) || [];
   const _coreL = _stack.find(l => l.kind === "core");
-  const _coreName = _coreL ? ((() => { const ws = coreWoods(_coreL); return ws.length > 1 ? ws.map(w => ((CORE_MATERIALS[w.mat] || {}).name || w.mat) + " " + Math.round(w.pct || 0) + "%").join(" + ") : ((CORE_MATERIALS[(ws[0] || {}).mat] || {}).name || "Wood"); })()) : (ski.layup.wood || "--");
+  const _coreName = _coreL ? coreWoodText(_coreL) : (ski.layup.wood || "--");
   const _fabs = _stack.filter(l => l.kind === "fabric").map(l => { const f = FIBERS[l.mat] || {}; const eff = fabricEff(l); return (f.name || l.mat) + " " + (eff ? eff.gsm : (l.gsm || f.gsm)) + "g"; });
   const _unis = _stack.filter(l => l.kind === "uni").map(l => (FIBERS[l.mat] || {}).name || l.mat);
   const _metals = _stack.filter(l => l.kind === "metal").map(l => (METALS[l.mat] || {}).name || l.mat);
@@ -8789,7 +8836,7 @@ function computeVariantMetrics(snap) {
     coreTip: cAt(runE), coreWaist: cAt((runS + runE) / 2), coreTail: cAt(runS),
     k3pt: fp.k3pt, peakEI: fp.peakEI, underfootK: fp.underfootK, weight: bomV.totalMassKg || 0, rating,
     underfootGJ: fp.underfootGJ || 0, torsion,
-    core: coreL ? (coreWoods(coreL).map(cw => (CORE_MATERIALS[cw.mat] || {}).name || cw.mat).filter(Boolean).join(" + ") || "wood") : "",
+    core: coreL ? (coreWoodText(coreL) || "wood") : "",
     sidewall: swName, inserts: insMats,
     layup: lay,
     stations: fp.stations.filter((_, i) => i % 5 === 0).map(s => ({ x: s.xmm, k: s.kCant })),
