@@ -590,15 +590,17 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-15";
+const APP_BUILD = "2026-10-15b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-15",
+  id: "2026-10-15b",
   title: "What's new",
   items: [
+    { title: "Top face carved in loops, outside in", go: "cam", op: "taper", target: "cam-endover",
+      body: "Shape the top face now carves in loops from the outside in: down one side the full length, across past the end, back up the other side, then one step in. The core always stays on the bit's right, so the glued-on sidewalls are cut the same way along their whole length and aren't pulled off. Before, the lanes went back and forth, and half of the lanes that crossed the sidewalls ran the wrong way for them. Zigzag and One-way are still there under Path." },
     { title: "Every file zeroed on the tail alignment hole", go: "cam", target: "cam-walk",
       body: "Core without inserts (glued sidewalls) now works like the other core jobs: every file is laid out from the center of the tail-side alignment hole, so the top face lines up by the pins instead of by eyeballing a corner. The first file has you pick that point on the blank and drills the holes there. Walk me through it shows each step. You can still turn this off under Alignment holes." },
     { title: "Simulate the cut", go: "cam", target: "cam-sim",
@@ -4158,7 +4160,7 @@ function buildCoreCAM(ski, opt) {
   if (o.doProfile) {
     if (!isBase) PC(`Runs past the tip and tail ends of the core by one bit radius${(o.taperEndOver || 0) > 0 ? " plus " + disp.taperEndOver + " " + uu + " extra" : ""}, so the ends (including the point of a V-cut) are fully cut.`);
     PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (wallPerSide > 0 || o.edgeOverlap > 0 ? ", to assembled edge (from measured width) + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
-    if (!isBase) PC(`Sidewall engagement (glued walls): ${o.sidewallEngage === "off" ? "off" : o.sidewallEngage + " (edge lanes)"}`);
+    if (!isBase) PC(o.profPattern === "loops" ? "Loops from the outside in: every run keeps the core on the bit's right (seen from above, clockwise spindle), turning around past the tip and tail" : `Sidewall engagement (glued walls): ${o.sidewallEngage === "off" ? "off" : o.sidewallEngage + " (edge lanes only)"}`);
   }
   if (o.doPerimeter) PC(`Outline: ${o.perimDir} milling, ${o.rampEntry ? "ramp entry " + disp.rampLen + " " + uu : "straight plunge"}`);
   PC(`Part orientation: length along ${o.partAxis === "x" ? "X" : "Y"} axis`);
@@ -4199,6 +4201,35 @@ function buildCoreCAM(ski, opt) {
       // allowance for the core sitting slightly off from where the file expects it.
       if (!isBase) { let cMin = 1e9, cMax = -1e9; for (const p of core) { if (p.x < cMin) cMin = p.x; if (p.x > cMax) cMax = p.x; } const run = toolR + Math.max(0, o.taperEndOver || 0); X0 = Math.min(X0, cMin - run); X1 = Math.max(X1, cMax + run); }
       if (tnum != null) { P(`G0 Z${f(safeZ)}`); toolChange(tnum); P(`S${o.spindle} M3`); }
+      // Loops (top face): one continuous path per depth, from the outside in. Each loop runs the full length on
+      // one side, crosses over past the end, runs back the full length on the other side, and steps inward past
+      // the other end, so the uncut core is always on the same side of the bit and every sidewall is cut the same
+      // way along its whole length. On the machine the core stays on the bit's right (seen from above, clockwise
+      // spindle). The output mirrors this internal frame, so here that is the bit's left. All turnarounds happen
+      // past the tip and tail, off the part.
+      if (o.profPattern === "loops" && !isBase) {
+        const m = Math.max(1, Math.ceil(yR / so)), sp = yR / m;
+        let coreLeft = true; if (!o.spindleCW) coreLeft = !coreLeft;
+        const runs = [];
+        for (let i = 0; i < m; i++) { const y = yR - i * sp, yA = coreLeft ? -y : y; runs.push([yA, true], [-yA, false]); }
+        runs.push([0, true]);   // center line last
+        for (let k = 1; k <= passes; k++) {
+          const floor = startTop - k * sd;
+          PC(`-- ${label} pass ${k}/${passes} (loops, outside in) --`);
+          const zAt = x => MZ(Math.max(topH(x) + zOff, floor));
+          let curX = null;
+          runs.forEach(([y, plus], ri) => {
+            const xStart = plus ? X0 : X1, xEnd = plus ? X1 : X0, step = (plus ? 1 : -1) * 3;
+            if (ri === 0) { g0(xStart, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(xStart)); }
+            else { if (Math.abs(curX - xStart) > 1e-6) g1(xStart, y, zAt(xStart)); else { g1(xStart, y, zAt(xStart)); cutDist += 0; } }   // cross over past the end
+            let px = xStart;
+            for (let x = xStart; plus ? x <= xEnd : x >= xEnd; x += step) { g1(x, y, zAt(x)); cutDist += Math.abs(x - px); px = x; }
+            g1(xEnd, y, zAt(xEnd)); curX = xEnd;
+          });
+          g0z(safeZ);
+        }
+        return;
+      }
       for (let k = 1; k <= passes; k++) {
         const floor = startTop - k * sd;
         PC(`-- ${label} pass ${k}/${passes} --`);
@@ -9643,7 +9674,7 @@ export default function App() {
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabPerSide: 2, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
-      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional",
+      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional", taperPattern: "loops",
       // Sidewalls: "glue" (strips glued on after the cutout) or "pour" (channel cut first, filled with poly). Edge
       // rabbet: "router" (by hand, instructions only; the default) or "cnc" (its own file on the underside). Rabbet sizes have no default: the
       // builder enters them. Channel width 10 mm and 1.5 mm of wood left under it follow the builder's stated
@@ -9651,7 +9682,7 @@ export default function App() {
       taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
       chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops";   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -9765,7 +9796,7 @@ export default function App() {
         ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts, alignDrillOp]);
@@ -12540,19 +12571,27 @@ export default function App() {
                 ) : (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>Shape the top face (thickness taper)</div>
+                    <div style={camSmall}>Path</div>
                     <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                      {[["zigzag", "Zigzag"], ["oneway", "One-way"]].map(([v, l]) => (<button key={v} onClick={() => setCam("profPattern", v)} style={camSeg(camOpt.profPattern === v)}>{l}</button>))}
+                      {[["loops", "Loops, outside in"], ["zigzag", "Zigzag"], ["oneway", "One-way"]].map(([v, l]) => (<button key={v} onClick={() => setCam("taperPattern", v)} style={camSeg((camOpt.taperPattern || "loops") === v)}>{l}</button>))}
                     </div>
-                    {camOpt.profPattern === "oneway" && (<div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                    {(camOpt.taperPattern || "loops") === "loops" ? (
+                      <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                        The bit works from the outside in, in loops: down one side the full length, across past the end, back up the other side, then one step in, and so on to the center line. The core is always on the bit's right as it moves (seen from above), so every pass along a glued-on sidewall cuts it the same way, with the bit pressing the wall toward the core instead of pulling it off. Recommended whenever the core has glued-on sidewalls.
+                        {!camOpt.spindleCW && " Your spindle is set to turn counterclockwise, so the loops run the other way round to cut the walls the same way."}
+                      </div>
+                    ) : (<>
+                    {camOpt.taperPattern === "oneway" && (<div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                       {[["+", "Tail → Tip"], ["-", "Tip → Tail"]].map(([v, l]) => (<button key={v} onClick={() => setCam("profDir", v)} style={camSeg(camOpt.profDir === v)}>{l}</button>))}
                     </div>)}
-                    <div style={camSmall}>Cutting direction along the glued-on sidewalls</div>
+                    <div style={{ color: "#e8a33a", fontSize: 10, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                      Straight lanes back and forth: only the two outermost lanes are set to a fixed direction. Wherever the core is narrower than its widest point (the waist, and toward the tip and tail), the glued-on sidewall is cut by the inner lanes, and half of them run the wrong way for it, which can tear the wall off. Use Loops for a core with glued-on sidewalls.
+                    </div>
+                    <div style={camSmall}>Direction of the two outermost lanes</div>
                     <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                      {[["conventional", "Conventional"], ["climb", "Climb"], ["off", "Off"]].map(([v, l]) => (<button key={v} onClick={() => setCam("sidewallEngage", v)} style={camSeg(camOpt.sidewallEngage === v)}>{l}</button>))}
+                      {[["conventional", "Core on the bit's right"], ["climb", "Core on the bit's left"], ["off", "No set direction"]].map(([v, l]) => (<button key={v} onClick={() => setCam("sidewallEngage", v)} style={camSeg(camOpt.sidewallEngage === v)}>{l}</button>))}
                     </div>
-                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      Conventional presses each glued wall into the core (won’t peel it); the two edges auto-run opposite ways. Climb can tear it off.
-                    </div>
+                    </>)}
                     <div><div style={camSmall}>Edge overlap {uu}</div><NumberInput value={camOpt.edgeOverlap} step={st} min={0} onCommit={v => setCam("edgeOverlap", v)} style={camInput} /></div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       The carve reaches out to your assembled core's edge automatically — it uses the assembled width you measured up top, which already includes the glued-on sidewalls, so you don't re-enter the wall thickness here. Edge overlap just pushes the cutter a hair further past that edge so the walls and corners cut clean all the way through.
