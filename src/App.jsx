@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 // ══════════════ BLACK CHAPEL THEME ══════════════
-const C = {
+const DARK_THEME = {
   // Palette matched to the Black Chapel fretboard designer (warm forge-black).
   bg:           "#141210",  // forge — main background
   bgDeep:       "#0e0c0a",  // deeper than forge for insets
@@ -47,7 +47,82 @@ const C = {
   eiFill:       "rgba(237,230,216,0.06)",
   exportBtn:    "#c8935a",  // brass
   zoomFrame:    "rgba(200,147,90,0.7)",
+  // RGB triples for colors drawn at several opacities (canvas lines, overlays): rgba(${C.dimRGB},0.3) etc.
+  dimRGB:       "155,147,136",           // bone-dim (grid lines, rapids, faint guides)
+  boneRGB:      "237,230,216",           // bone (ghost outlines, light guides)
+  forgeRGB:     "20,18,16",              // forge (label backings, floating buttons)
+  canvasBg:     "#14100d",               // toolpath / layup / 3D viewport background
+  grid3dMajor:  0x2f2a24, grid3dMinor: 0x241f1a, rapid3d: 0x5a5148,
+  blue:         "#5bb3d8", blueRGB: "91,179,216",     // alignment holes, pins, X0 Y0, the simulated bit
+  amber:        "#e8a33a", amberRGB: "232,163,58",    // cautions
+  ok:           "#8ab98a", okRGB: "120,180,120",      // fits / passes
+  logoFilter:   "none",                  // the Black Chapel logo is bone-colored, made for dark backgrounds
 };
+
+// Light mode: the same layout and accents on warm paper. Brass and torch are deepened so small text keeps
+// enough contrast on a light background; everything that was bone (light) on forge (dark) becomes dark on light.
+const LIGHT_THEME = {
+  bg:           "#f4f0e8",  // paper
+  bgDeep:       "#ebe5da",
+  bgLight:      "#e3dccf",
+  panel:        "#fbf8f2",
+  panelLight:   "#ece6db",
+  panelBorder:  "#d3cabb",
+  gridLine:     "#e4ddd1",
+  gridMajor:    "#d3cabb",
+  center:       "rgba(143,95,44,0.28)",
+  snow:         "rgba(34,29,24,0.28)",
+  contactLine:  "rgba(200,64,20,0.60)",
+  contactLabel: "#b83c14",
+  waistLine:    "rgba(34,29,24,0.60)",
+  waistLabel:   "#221d18",
+  skiFill:      "rgba(34,29,24,0.06)",
+  skiStroke:    "#221d18",
+  skiGlow:      "rgba(34,29,24,0.14)",
+  control:      "#d4481f",
+  torch:        "#c8401a",
+  controlHover: "#e8552a",
+  controlActive:"#b07a12",
+  handle:       "#9a6a35",
+  handleLine:   "rgba(154,106,53,0.60)",
+  label:        "#5f574c",
+  labelDim:     "#6e665a",
+  value:        "#221d18",
+  heading:      "#8a5a28",
+  dim:          "rgba(34,29,24,0.35)",
+  dimText:      "rgba(34,29,24,0.75)",
+  inputBg:      "#ffffff",
+  inputBorder:  "#cfc6b6",
+  inputFocus:   "#8a5a28",
+  profileFill:  "rgba(34,29,24,0.05)",
+  coreFill:     "rgba(154,106,53,0.12)",
+  coreStroke:   "#9a6a35",
+  coreGlow:     "rgba(154,106,53,0.30)",
+  coreNode:     "#9a6a35",
+  flexStroke:   "#d4481f",
+  flexFill:     "rgba(212,72,31,0.10)",
+  flexGlow:     "rgba(212,72,31,0.30)",
+  eiStroke:     "#221d18",
+  eiFill:       "rgba(34,29,24,0.05)",
+  exportBtn:    "#8a5a28",
+  zoomFrame:    "rgba(138,90,40,0.70)",
+  dimRGB:       "95,87,76",
+  boneRGB:      "34,29,24",
+  forgeRGB:     "251,248,242",
+  canvasBg:     "#f7f4ee",
+  grid3dMajor:  0xc9bfae, grid3dMinor: 0xdcd4c6, rapid3d: 0xa39a8c,
+  blue:         "#2479a3", blueRGB: "36,121,163",
+  amber:        "#9a5c06", amberRGB: "176,110,10",
+  ok:           "#2f7a3a", okRGB: "47,122,58",
+  logoFilter:   "brightness(0.1)",       // bone logo turned forge-black for a light background
+};
+// The live palette. Everything reads C.* at draw time, so switching themes copies the other palette in and
+// re-renders. Dark is the default; the choice is remembered on this device.
+const THEMES = { dark: DARK_THEME, light: LIGHT_THEME };
+let _THEME = (() => { try { return localStorage.getItem("bcs-theme") === "light" ? "light" : "dark"; } catch (e) { return "dark"; } })();
+const C = { ...THEMES[_THEME] };
+// The Black Chapel logo file is bone-colored for dark backgrounds; on a white page (printouts) it needs darkening.
+const LOGO_ON_WHITE = "brightness(0.1)";
 
 // ══════════════ MATERIALS ══════════════
 const WOODS = {
@@ -590,15 +665,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-15b";
+const APP_BUILD = "2026-10-16b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-15b",
+  id: "2026-10-16b",
   title: "What's new",
   items: [
+    { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
+      body: "Make the waist wider than the tip and the tail for a reverse sidecut: the radius now shows as a reverse radius, and Single radius draws one arc on each side. Under Side Profile, camber can go below zero (reverse camber), and with the rocker unlinked the two rockers can each run up to half the length, so they meet in the middle for one continuous curve. The new Reverse/Reverse template sets all of this up. The old Spatula template is now called Wide Shovel, since it has a normal sidecut." },
+    { title: "Light mode", go: "plan", target: "theme",
+      body: "The sun button at the top switches the whole app to a light theme, and the moon button switches it back. Dark is still the default, and your choice is remembered on this device. The build card file keeps its dark design either way." },
     { title: "Top face carved in loops, outside in", go: "cam", op: "taper", target: "cam-endover",
       body: "Shape the top face now carves in loops from the outside in: down one side the full length, across past the end, back up the other side, then one step in. The core always stays on the bit's right, so the glued-on sidewalls are cut the same way along their whole length and aren't pulled off. Before, the lanes went back and forth, and half of the lanes that crossed the sidewalls ran the wrong way for them. Zigzag and One-way are still there under Path." },
     { title: "Every file zeroed on the tail alignment hole", go: "cam", target: "cam-walk",
@@ -1281,7 +1360,10 @@ function sidecutSolve(ski) {
       const lo = tailCY + 1, hi = tipCY - 1;
       const g = a => arcRunWithBlend(ww2, tipW2, tipCY - a, blendReq).R - arcRunWithBlend(ww2, tailW2, a - tailCY, blendReq).R;
       const gLo = g(lo), gHi = g(hi);
-      if (tipW2 - ww2 > 0.01 && tailW2 - ww2 > 0.01 && isFinite(gLo) && isFinite(gHi) && gLo > 0 && gHi < 0) {
+      // A normal sidecut (waist narrower than both ends) or a reverse sidecut (waist wider than both ends) can take
+      // one arc on each side with the same radius; a waist between the two end widths can't.
+      const normal = tipW2 - ww2 > 0.01 && tailW2 - ww2 > 0.01, reverse = ww2 - tipW2 > 0.01 && ww2 - tailW2 > 0.01;
+      if ((normal || reverse) && isFinite(gLo) && isFinite(gHi) && gLo > 0 && gHi < 0) {
         let a0 = lo, a1 = hi;
         for (let i = 0; i < 100; i++) { const m = (a0 + a1) / 2; if (g(m) > 0) a0 = m; else a1 = m; }
         waistY = (a0 + a1) / 2;
@@ -1407,12 +1489,16 @@ function computeOutline(ski) {
   };
 }
 
+// Sidecut radius for display. Negative radii (reverse sidecut: waist wider than tip and tail) read as "reverse".
+function fmtR(r, none = "--") { if (!isFinite(r) || Math.abs(r) >= 999) return none; return r < 0 ? `${(-r).toFixed(1)} m reverse` : `${r.toFixed(1)} m`; }
 function computeDerived(ski){
   const ee=ski.length-ski.tipLength-ski.tailLength,avg=(ski.tipWidth+ski.tailWidth)/2;
   const depth=(avg-ski.waistWidth)/2;
   // Standard formula R = EE² / (8 × depth), depth from the entered widths. Used as the headline for "blended"
   // (which is not an arc) and "dual" (which has two radii). "single" reports the arc's own radius below.
-  let radius=depth>0.5?(ee*ee)/(8*depth)/1000:Infinity;
+  // A reverse sidecut (waist wider than tip and tail) gives a negative depth and so a negative radius: the edge bows
+  // out instead of in. Radii are negative for reverse sidecut everywhere below; fmtR() shows them as "reverse".
+  let radius=Math.abs(depth)>0.5?(ee*ee)/(8*depth)/1000:Infinity;
   const shape=sidecutShapeOf(ski);
   // Per-side sidecut radii. The waist is the apex (edge tangent to centerline); each side is an arc
   // from a contact to the waist. Over a side run Ls the edge moves in by d=(endW−waist)/2, giving
@@ -1427,13 +1513,13 @@ function computeDerived(ski){
   const backRun = waistY - tailC, frontRun = tipC - waistY;
   const sideR = (runLen, endW) => {
     const d = (endW - ski.waistWidth) / 2;
-    return d > 0.01 ? runLen * runLen / (2 * d) / 1000 : Infinity;
+    return Math.abs(d) > 0.01 ? runLen * runLen / (2 * d) / 1000 : Infinity;
   };
   let backRadius = sideR(backRun, ski.tailWidth);
   let frontRadius = sideR(frontRun, ski.tipWidth);
   // Arc modes: the radii ARE the drawn arcs (exact circle through the solved contact point, tangent at the waist).
   const sc = sidecutSolve(ski);
-  const rOf = a => (a && a.sgn > 0 && isFinite(a.R)) ? a.R / 1000 : Infinity;
+  const rOf = a => (a && a.sgn !== 0 && isFinite(a.R)) ? a.sgn * a.R / 1000 : Infinity;
   if (shape !== "blended") {
     frontRadius = rOf(sc.sides.in.arcTip); backRadius = rOf(sc.sides.in.arcTail);
     if (shape === "single" && sc.apexOK) radius = frontRadius;
@@ -1445,11 +1531,11 @@ function computeDerived(ski){
   const eeOut = ski.length - oc.tipL - oc.tailL, eeIn = ski.length - ic.tipL - ic.tailL;
   const wOut = asymOn && ski.waistOutside != null ? ski.waistOutside : ski.waistWidth;
   const wIn = asymOn && ski.waistInside != null ? ski.waistInside : ski.waistWidth;
-  const edgeR = (ee_, w) => { const d = (avg - w) / 2; return d > 0.5 ? (ee_ * ee_) / (8 * d) / 1000 : Infinity; };
+  const edgeR = (ee_, w) => { const d = (avg - w) / 2; return Math.abs(d) > 0.5 ? (ee_ * ee_) / (8 * d) / 1000 : Infinity; };
   let radiusOutside = edgeR(eeOut, wOut), radiusInside = edgeR(eeIn, wIn);
   if (shape === "single" && sc.apexOK) { radiusInside = rOf(sc.sides.in.arcTip); radiusOutside = rOf(sc.sides.out.arcTip); }
-  const finiteBoth = isFinite(backRadius) && isFinite(frontRadius);
-  const ratio = finiteBoth ? Math.max(backRadius, frontRadius) / Math.min(backRadius, frontRadius) : 1;
+  const finiteBoth = isFinite(backRadius) && isFinite(frontRadius) && Math.sign(backRadius) === Math.sign(frontRadius);
+  const ratio = finiteBoth ? Math.max(Math.abs(backRadius), Math.abs(frontRadius)) / Math.min(Math.abs(backRadius), Math.abs(frontRadius)) : 1;
   // ">15% apart" decides when blended shows per-side radii; "dual" always has two radii, so it always shows them.
   const asymmetric = (shape === "dual" && finiteBoth) || (finiteBoth && ratio > 1.15);
   return { effectiveEdge: ee, sidecutRadius: radius, backRadius, frontRadius, asymmetric, sidecutShape: shape,
@@ -1507,13 +1593,23 @@ function computeInserts(ski){
 //   depth = ee² / (8·R·1000),  waist = avg − 2·depth.
 // Solve a parameter by bisection so the headline radius (computeDerived, whatever the sidecut shape) equals
 // the target. f(v) must rise with v. Returns null when the target is outside what [lo, hi] can reach.
-function bisectRadius(radiusM, lo, hi, f) {
+function bisectRadius(radiusM, lo, hi, f0) {
+  // Works for either direction: if the radius falls as the variable rises, flip both so it rises.
+  const flip = f0(hi) < f0(lo), f = flip ? (v => -f0(v)) : f0; if (flip) radiusM = -radiusM;
   const rLo = f(lo), rHi = f(hi);
   if (!isFinite(rLo) || !isFinite(rHi) || radiusM < Math.min(rLo, rHi) || radiusM > Math.max(rLo, rHi)) return null;
   for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (f(m) < radiusM) lo = m; else hi = m; }
   return (lo + hi) / 2;
 }
 function waistWidthForRadius(ski, radiusM){
+  if (sidecutShapeOf(ski) === "single" && radiusM < 0) {
+    // Reverse sidecut (negative radius): the waist sits wider than both ends; search above the wider end.
+    const lo = Math.max(ski.tipWidth, ski.tailWidth) + 0.2, hi = lo + 150;
+    const w = bisectRadius(radiusM, lo, hi, v => computeDerived({ ...ski, waistWidth: v }).sidecutRadius);
+    if (w != null) return w;
+    const rLo = computeDerived({ ...ski, waistWidth: lo }).sidecutRadius;
+    return radiusM < rLo ? lo : hi;
+  }
   if (sidecutShapeOf(ski) === "single" && radiusM > 0) {
     // Exact arc: wider waist → shallower sidecut → larger radius, so R rises with the waist width.
     const hi = Math.min(ski.tipWidth, ski.tailWidth) - 0.2, lo = Math.max(10, hi - 150);
@@ -1524,8 +1620,8 @@ function waistWidthForRadius(ski, radiusM){
   }
   const ee = ski.length - ski.tipLength - ski.tailLength;
   const avg = (ski.tipWidth + ski.tailWidth) / 2;
-  if (!(radiusM > 0)) return avg;              // non-positive / blank → straight (no sidecut)
-  const depth = (ee * ee) / (8 * radiusM * 1000);
+  if (!radiusM || !isFinite(radiusM)) return avg;   // blank → straight (no sidecut)
+  const depth = (ee * ee) / (8 * radiusM * 1000);   // negative for a reverse sidecut, which puts the waist wider
   return avg - 2 * depth;
 }
 // Alternative inversion: given a target radius, return the tip/tail LENGTHS (a partial patch) that
@@ -1542,8 +1638,8 @@ function tipTailForRadius(ski, radiusM){
   }
   const avg = (ski.tipWidth + ski.tailWidth) / 2;
   const depth = (avg - ski.waistWidth) / 2;
-  if (!(radiusM > 0) || depth <= 0) return null;   // no sidecut / invalid
-  const span = Math.sqrt(radiusM * 8 * depth * 1000);   // contact-to-contact distance (mm)
+  if (!radiusM || !isFinite(radiusM) || Math.abs(depth) < 1e-9 || Math.sign(radiusM) !== Math.sign(depth)) return null;   // no sidecut, or the radius asks for the other kind of sidecut
+  const span = Math.sqrt(radiusM * 8 * depth * 1000);   // contact-to-contact distance (mm); both negative for reverse
   const totalEnds = ski.length - span;
   if (totalEnds < 80) return null;                  // radius too large to fit (contacts past the ends)
   const curTip = ski.tipLength, curTail = ski.tailLength;
@@ -1643,6 +1739,9 @@ function sideProfileHeightAt(ski, xmm) {
   const span = tipTakeoff - tailTakeoff;
   const tt = span > 0 ? (xmm - tailTakeoff) / span : 0.5;
   const zones = Math.max(1, Math.round(ski.camberZones || 1));
+  // Reverse camber (negative camber): the middle sags below the rocker start points, shaped so it meets each
+  // rocker curve level (no crease), and the ski rests on its middle.
+  if (ski.camberHeight < 0) { const sv = Math.sin(Math.PI * tt); return ski.camberHeight * sv * sv; }
   if (zones <= 1) return ski.camberHeight * 4 * tt * (1 - tt);
   // Multi-zone camber (triple camber and beyond): N rounded humps across the running length. A raised
   // cosine keeps the valleys between humps smooth instead of pinching to a sharp point, and the smoothness
@@ -1663,7 +1762,7 @@ function makePreset(name,dims,tipR,tipL,tailR,tailL,tipSym,tailSym,profile,core,
   return base;
 }
 const rT=makeRoundedTip(),rTa=makeRoundedTail();
-// Spatula: extra-long forward tangent → curve stays wide for most of tip length, tightens fast at end
+// Wide Shovel: extra-long forward tangent → curve stays wide for most of tip length, tightens fast at end
 const spatulaTip = [
   { x: 1.0, y: 0.0, tx: 0,    ty: 0.85 },
   { x: 0.0, y: 1.0, tx: 0.55, ty: 0    },
@@ -1671,7 +1770,11 @@ const spatulaTip = [
 const PRESETS=[
   makePreset("All-Mtn",{length:1780,tipWidth:131,waistWidth:98,tailWidth:119,tipLength:230,tailLength:160},rT,null,rTa,null,true,true,{tipHeight:42,tailHeight:28,camberHeight:3}),
   makePreset("Powder",{length:1860,tipWidth:142,waistWidth:112,tailWidth:128,tipLength:310,tailLength:200},rT,null,rTa,null,true,true,{tipHeight:55,tailHeight:35,camberHeight:2}),
-  makePreset("Spatula",{length:1800,tipWidth:138,waistWidth:100,tailWidth:118,tipLength:280,tailLength:160},spatulaTip,null,rTa,null,true,true,{tipHeight:50,tailHeight:28,camberHeight:3}),
+  makePreset("Wide Shovel",{length:1800,tipWidth:138,waistWidth:100,tailWidth:118,tipLength:280,tailLength:160},spatulaTip,null,rTa,null,true,true,{tipHeight:50,tailHeight:28,camberHeight:3}),
+  // Reverse / reverse (reverse sidecut + full rocker, the style the Volant Spatula started). Length and widths are the
+  // Spatula prototype's published figures (186 cm; 125 / 130 / 120). The two rockers meet in the middle for one continuous
+  // curve. Tip and tail rise and the contact lengths are the Powder template's, not Spatula figures.
+  makePreset("Reverse/Reverse",{length:1860,tipWidth:125,waistWidth:130,tailWidth:120,tipLength:310,tailLength:200},rT,null,rTa,null,true,true,{tipHeight:55,tailHeight:35,camberHeight:0,rockerLinked:false,tipRockerLen:930,tailRockerLen:930,waistPosition:0.5}),
   makePreset("Swallow",{length:1760,tipWidth:126,waistWidth:100,tailWidth:130,tipLength:240,tailLength:260},
     rT,null,makeSwallowTailR(),makeSwallowTailL(),true,false,{tipHeight:45,tailHeight:25,camberHeight:3}),
   makePreset("Twin Tip",{length:1720,tipWidth:118,waistWidth:90,tailWidth:118,tipLength:220,tailLength:220},rT,null,rTa,null,true,true,{tipHeight:40,tailHeight:40,camberHeight:3,waistPosition:0.50}),
@@ -2448,7 +2551,7 @@ function measurementRows(ski, extra = {}) {
     const rp = rockerProfilePercents(ski);
     rows.push(["Rocker takeoff (T/C/T %)", `${rp.tip.toFixed(0)} / ${rp.camber.toFixed(0)} / ${rp.tail.toFixed(0)} (unlinked)`]);
   }
-  rows.push(["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? derived.sidecutRadius.toFixed(1) : "flat"}`]);
+  rows.push(["Sidecut radius (m)", `${isFinite(derived.sidecutRadius) ? (derived.sidecutRadius < 0 ? (-derived.sidecutRadius).toFixed(1) + " (reverse)" : derived.sidecutRadius.toFixed(1)) : "flat"}`]);
   rows.push(["Tip height (rocker)", `${ski.tipHeight}`]);
   rows.push(["Tail height (rocker)", `${ski.tailHeight}`]);
   rows.push(["Camber height", `${ski.camberHeight}`]);
@@ -2456,7 +2559,7 @@ function measurementRows(ski, extra = {}) {
     const wY = resolveWaistY(ski), tC = ski.tailLength, pC = ski.length - ski.tipLength;
     const wp0 = ski.waistFullLength ? wY / ski.length : (wY - tC) / (pC - tC);
     rows.push(["Waist position", `${((ski.waistFromTip ? 1 - wp0 : wp0) * 100).toFixed(0)}% from ${ski.waistFromTip ? "tip" : "tail"}${ski.waistFullLength ? "" : " contact"}`]); }
-  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? `single radius (circular arc), ${sidecutBlendOf(ski)} mm transition at each contact` : sh === "dual" ? `two radii, front ${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "flat"} / back ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "flat"} m, ${sidecutBlendOf(ski)} mm transition at each contact` : "blended (smooth curve, not an arc; radius estimated from the widths and running edge)"]); }
+  { const sh = sidecutShapeOf(ski); rows.push(["Sidecut shape", sh === "single" ? `single radius (circular arc), ${sidecutBlendOf(ski)} mm transition at each contact` : sh === "dual" ? `two radii, front ${fmtR(derived.frontRadius, "flat")} / back ${fmtR(derived.backRadius, "flat")}, ${sidecutBlendOf(ski)} mm transition at each contact` : "blended (smooth curve, not an arc; radius estimated from the widths and running edge)"]); }
   rows.push(["Edge inset", `${ski.edgeInset}`]);
   rows.push(["Edge wrap", edgeWrap === "contact" ? "contact-to-contact" : "full wrap"]);
   if (edgeWrap === "contact") rows.push(["Edge ext (tip / tail)", `${ski.edgeExtTip || 0} / ${ski.edgeExtTail || 0}`]);
@@ -4690,7 +4793,7 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
   const ctx = cv.getContext("2d"); const W = cv.width, H = cv.height;
   const parsed = typeof data === "string" ? parseToolpath(data) : data;
   const { segs, zMin, zMax, bx0, by0, bx1, by1 } = parsed || { segs: [] };
-  ctx.fillStyle = "#14100d"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.canvasBg; ctx.fillRect(0, 0, W, H);
   if (!segs || !segs.length) return null;
   // Draw the ACTUAL emitted G-code (X horizontal, Y vertical) so the preview always matches the machine.
   // The bed is machine X (short) wide x machine Y (long) tall, anchored at the toolpath's corner.
@@ -4715,11 +4818,11 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
   const MXc = (gx, gy) => ox + gx * s;
   const MYc = (gx, gy) => H - (oy + gy * s);
   if (hasBed) {
-    ctx.strokeStyle = machine.fits ? "rgba(120,180,120,0.55)" : "rgba(232,85,42,0.85)";
+    ctx.strokeStyle = machine.fits ? `rgba(${C.okRGB},0.55)` : "rgba(232,85,42,0.85)";
     ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]);
     ctx.strokeRect(MXc(bedOX, 0), MYc(0, bedOY + bedY1), machine.short * s, machine.long * s);
     ctx.setLineDash([]);
-    ctx.fillStyle = machine.fits ? "rgba(120,180,120,0.7)" : "rgba(232,85,42,0.9)";
+    ctx.fillStyle = machine.fits ? `rgba(${C.okRGB},0.8)` : "rgba(232,85,42,0.9)";
     ctx.font = "9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
     ctx.fillText(machine.fits ? "MACHINE BED" : "EXCEEDS BED", MXc(bedOX, 0) + 3, MYc(0, bedOY + bedY1) + 11);
   }
@@ -4739,19 +4842,19 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
   if (pinZero) {
     // X0 Y0 marker: the center of the tail alignment hole, where these files are zeroed.
     const zx = MXc(0, 0), zy = MYc(0, 0);
-    ctx.strokeStyle = "#5bb3d8"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.strokeStyle = C.blue; ctx.lineWidth = 1.5; ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(zx - 9, zy); ctx.lineTo(zx + 9, zy); ctx.moveTo(zx, zy - 9); ctx.lineTo(zx, zy + 9); ctx.stroke();
     ctx.beginPath(); ctx.arc(zx, zy, 5, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = "#5bb3d8"; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = C.blue; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
     ctx.fillText("X0 Y0 = tail alignment hole", zx + 10, zy + 12);
   }
-  ctx.strokeStyle = "rgba(155,147,136,0.28)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath();
+  ctx.strokeStyle = `rgba(${C.dimRGB},0.28)`; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath();
   for (const g of segs) if (!g.cut) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
   ctx.stroke(); ctx.setLineDash([]);
   const zr = (zMax - zMin) || 1, N = 12, buckets = Array.from({ length: N }, () => []);
   if (sim) {
     // Simulation: the whole path faint, then only what the bit has cut so far in depth colors.
-    ctx.strokeStyle = "rgba(155,147,136,0.22)"; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.strokeStyle = `rgba(${C.dimRGB},0.22)`; ctx.lineWidth = 1; ctx.beginPath();
     for (const g of segs) if (g.cut && g.i >= sim.done) { ctx.moveTo(MXc(g.x0, g.y0), MYc(g.x0, g.y0)); ctx.lineTo(MXc(g.x1, g.y1), MYc(g.x1, g.y1)); }
     ctx.stroke();
   }
@@ -4769,8 +4872,8 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
     // The bit, drawn at its real diameter (never smaller than a few pixels so it stays visible).
     const px = MXc(sim.pos.x, sim.pos.y), py = MYc(sim.pos.x, sim.pos.y), rr = Math.max(4, (sim.toolR || 0) * s);
     ctx.beginPath(); ctx.arc(px, py, rr, 0, Math.PI * 2);
-    ctx.fillStyle = sim.cutting ? "rgba(91,179,216,0.35)" : "rgba(91,179,216,0.12)"; ctx.fill();
-    ctx.strokeStyle = "#5bb3d8"; ctx.lineWidth = 1.5; ctx.setLineDash(sim.cutting ? [] : [3, 3]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = sim.cutting ? `rgba(${C.blueRGB},0.35)` : `rgba(${C.blueRGB},0.12)`; ctx.fill();
+    ctx.strokeStyle = C.blue; ctx.lineWidth = 1.5; ctx.setLineDash(sim.cutting ? [] : [3, 3]); ctx.stroke(); ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(px - 3, py); ctx.lineTo(px + 3, py); ctx.moveTo(px, py - 3); ctx.lineTo(px, py + 3); ctx.stroke();
   }
   return { sBase, s, ox, oy, mnx, mny, bw, bh, H };
@@ -4782,7 +4885,7 @@ function ToolpathView({ gcode, width, height, machine, stock, sim }) {
   const parsed = useMemo(() => parseToolpath(gcode), [gcode]);   // parse ONCE per G-code, not per pan/zoom frame
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock, sim); }, [parsed, width, height, machine, stock, zoom, pan, sim]);
+  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock, sim); }, [parsed, width, height, machine, stock, zoom, pan, sim, C.canvasBg]);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const ptr = e => { const cv = ref.current, r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height), sc: cv.width / r.width }; };
   const onWheel = e => { e.preventDefault(); const t = tf.current; if (!t) return; const p = ptr(e); const wx = (p.x - t.ox) / t.s, wy = (t.H - p.y - t.oy) / t.s; const nz = Math.max(1, Math.min(24, zoom * (1 - e.deltaY * 0.0015))); const ns = t.sBase * nz; setZoom(nz); setPan({ x: (p.x - wx * ns) - ((ref.current.width - t.bw * ns) / 2 - t.mnx * ns), y: (t.H - p.y - wy * ns) - ((t.H - t.bh * ns) / 2 - t.mny * ns) }); };
@@ -4790,17 +4893,17 @@ function ToolpathView({ gcode, width, height, machine, stock, sim }) {
   const onMove = e => { if (!drag.current) return; const d = drag.current, cx = e.clientX, cy = e.clientY; if (raf.current) return; raf.current = requestAnimationFrame(() => { raf.current = 0; setPan({ x: d.px + (cx - d.x) * d.sc, y: d.py - (cy - d.y) * d.sc }); }); };
   const onUp = () => { drag.current = null; };
   const reset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
-  const btn = { minWidth: 26, height: 24, background: "rgba(20,16,13,0.88)", border: "1px solid rgba(155,147,136,0.32)", color: "#c8935a", borderRadius: 3, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1, padding: "0 7px" };
+  const btn = { minWidth: 26, height: 24, background: `rgba(${C.forgeRGB},0.88)`, border: `1px solid rgba(${C.dimRGB},0.32)`, color: C.heading, borderRadius: 3, cursor: "pointer", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1, padding: "0 7px" };
   return (
     <div style={{ position: "relative", width, height, overflow: "hidden" }}>
       <canvas ref={ref} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onDoubleClick={reset} style={{ width, height, display: "block", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }} />
       <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
         <button onClick={() => setZoom(z => Math.max(1, z / 1.4))} style={btn}>−</button>
-        <span style={{ ...btn, cursor: "default", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#9b9388" }}>{Math.round(zoom * 100)}%</span>
+        <span style={{ ...btn, cursor: "default", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: C.label }}>{Math.round(zoom * 100)}%</span>
         <button onClick={() => setZoom(z => Math.min(24, z * 1.4))} style={btn}>+</button>
         <button onClick={reset} style={{ ...btn, fontWeight: 700 }}>Reset view</button>
       </div>
-      <div style={{ position: "absolute", bottom: 6, left: 10, fontSize: 9.5, color: "rgba(155,147,136,0.6)", fontFamily: "'JetBrains Mono', monospace", pointerEvents: "none" }}>scroll to zoom · drag to pan · double-click to reset</div>
+      <div style={{ position: "absolute", bottom: 6, left: 10, fontSize: 9.5, color: `rgba(${C.dimRGB},0.6)`, fontFamily: "'JetBrains Mono', monospace", pointerEvents: "none" }}>scroll to zoom · drag to pan · double-click to reset</div>
     </div>
   );
 }
@@ -4843,7 +4946,7 @@ function ToolpathSimPane({ gcode, ok, preview3D, machine, stock, toolDias, playR
   const total = mv ? mv.total : 0;
   return (
     <>
-      <div ref={rootRef} style={{ flex: 1, minHeight: 320, background: "#14100d", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div ref={rootRef} style={{ flex: 1, minHeight: 320, background: C.canvasBg, borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {preview3D
           ? <Toolpath3DView gcode={gcode} machine={machine} sim={sim} />
           : <ToolpathView gcode={gcode} width={880} height={500} machine={machine} stock={stock} sim={sim} />}
@@ -4894,7 +4997,7 @@ function Toolpath3DView({ gcode, machine, sim }) {
     loadThree().then(THREE => {
       if (disposed) return;
       const W = mount.clientWidth || 700, H = mount.clientHeight || 460;
-      scene = new THREE.Scene(); scene.background = new THREE.Color("#14100d");
+      scene = new THREE.Scene(); scene.background = new THREE.Color(C.canvasBg);
       camera = new THREE.PerspectiveCamera(45, W / H, size * 0.01, size * 30);
       renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(W, H); renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); mount.appendChild(renderer.domElement);
       // machine (X length, Y width, Z up) -> three (x right, y up, z toward viewer)
@@ -4905,7 +5008,7 @@ function Toolpath3DView({ gcode, machine, sim }) {
       cut.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); cpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); ccol.set([...col(s[2]), ...col(s[5])], i * 6); });
       const cgeo = new THREE.BufferGeometry(); cgeo.setAttribute("position", new THREE.Float32BufferAttribute(cpos, 3)); cgeo.setAttribute("color", new THREE.Float32BufferAttribute(ccol, 3));
       const cmat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 }); scene.add(new THREE.LineSegments(cgeo, cmat)); cleanup.push(() => { cgeo.dispose(); cmat.dispose(); });
-      if (rap.length) { const rpos = new Float32Array(rap.length * 6); rap.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); rpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); }); const rgeo = new THREE.BufferGeometry(); rgeo.setAttribute("position", new THREE.Float32BufferAttribute(rpos, 3)); const rmat = new THREE.LineBasicMaterial({ color: 0x5a5148, transparent: true, opacity: 0.35 }); scene.add(new THREE.LineSegments(rgeo, rmat)); cleanup.push(() => { rgeo.dispose(); rmat.dispose(); }); }
+      if (rap.length) { const rpos = new Float32Array(rap.length * 6); rap.forEach((s, i) => { const A = P(s[0], s[1], s[2]), B = P(s[3], s[4], s[5]); rpos.set([A[0], A[1], A[2], B[0], B[1], B[2]], i * 6); }); const rgeo = new THREE.BufferGeometry(); rgeo.setAttribute("position", new THREE.Float32BufferAttribute(rpos, 3)); const rmat = new THREE.LineBasicMaterial({ color: C.rapid3d, transparent: true, opacity: 0.35 }); scene.add(new THREE.LineSegments(rgeo, rmat)); cleanup.push(() => { rgeo.dispose(); rmat.dispose(); }); }
       // Simulation layers: every move in program order (cuts in depth colors, rapids grey), revealed up to the
       // bit; a short line for the move in progress; and the bit itself at its real diameter.
       const ms = mv.moves, spos = new Float32Array(ms.length * 6), scol = new Float32Array(ms.length * 6);
@@ -4942,10 +5045,10 @@ function Toolpath3DView({ gcode, machine, sim }) {
         const bgeo = new THREE.BufferGeometry().setFromPoints(pts);
         const bmat = new THREE.LineBasicMaterial({ color: machine.fits ? 0x6f9d6f : 0xe8552a });
         scene.add(new THREE.Line(bgeo, bmat)); cleanup.push(() => { bgeo.dispose(); bmat.dispose(); });
-        const grid = new THREE.GridHelper(Math.max(bX, bY), 20, 0x2f2a24, 0x241f1a); grid.position.set((bx + bX / 2) - cx, floorY, -((by + bY / 2) - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
+        const grid = new THREE.GridHelper(Math.max(bX, bY), 20, C.grid3dMajor, C.grid3dMinor); grid.position.set((bx + bX / 2) - cx, floorY, -((by + bY / 2) - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
       } else {
         const g = Math.max(bx1 - bx0, by1 - by0) * 1.1;
-        const grid = new THREE.GridHelper(g, 16, 0x3a332c, 0x241f1a); grid.position.set((bx0 + bx1) / 2 - cx, floorY, -((by0 + by1) / 2 - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
+        const grid = new THREE.GridHelper(g, 16, C.grid3dMajor, C.grid3dMinor); grid.position.set((bx0 + bx1) / 2 - cx, floorY, -((by0 + by1) / 2 - cy)); scene.add(grid); cleanup.push(() => grid.geometry.dispose());
       }
       let az = 0.9, pol = 1.0, rad = size * 1.7;
       const el = renderer.domElement;
@@ -4968,8 +5071,8 @@ function Toolpath3DView({ gcode, machine, sim }) {
       setStatus("ok");
     }).catch(() => { if (!disposed) setStatus("error"); });
     return () => { disposed = true; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); cleanup.forEach(fn => { try { fn(); } catch (e) {} }); if (renderer) { try { renderer.dispose(); if (renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); } catch (e) {} } };
-  }, [gcode, machine]);
-  return <div ref={mountRef} style={{ width: "100%", height: "100%", cursor: "grab", position: "relative" }}>{status !== "ok" && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? "#e8552a" : "#9b9388", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{status === "error" ? "3D unavailable" : status === "empty" ? "no cuts to show" : "loading 3D\u2026"}</div>}</div>;
+  }, [gcode, machine, C.canvasBg]);
+  return <div ref={mountRef} style={{ width: "100%", height: "100%", cursor: "grab", position: "relative" }}>{status !== "ok" && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? C.torch : C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{status === "error" ? "3D unavailable" : status === "empty" ? "no cuts to show" : "loading 3D\u2026"}</div>}</div>;
 }
 
 // Core + filler overlay for a top-down plan drawing, given a mapper from (lengthMM, lateralMM) → screen.
@@ -5100,7 +5203,7 @@ function buildSpecSheetSVG(ski, derived, flex, bom, brand, opts) {
   const rows = [
     ["Length", `${ski.length} mm`],
     ["Dimensions", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth} mm`],
-    ["Sidecut radius", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--"],
+    ["Sidecut radius", fmtR(derived.sidecutRadius)],
     ["Effective edge", `${Math.round(derived.effectiveEdge)} mm`],
     ["Tip / tail length", `${ski.tipLength} / ${ski.tailLength} mm`],
     ["Tip / tail rise", `${ski.tipHeight} / ${ski.tailHeight} mm`],
@@ -5476,11 +5579,11 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       ctx.font = "8px 'JetBrains Mono', monospace";
       const line = (a, b, v, lateral) => {
         const mj = isMajor(v);
-        ctx.strokeStyle = mj ? "rgba(155,147,136,0.30)" : "rgba(155,147,136,0.11)";
+        ctx.strokeStyle = mj ? `rgba(${C.dimRGB},0.30)` : `rgba(${C.dimRGB},0.11)`;
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
         if (withLabels && mj) {
-          ctx.fillStyle = "rgba(155,147,136,0.85)";
+          ctx.fillStyle = `rgba(${C.dimRGB},0.85)`;
           const screenVertical = Math.abs(a.x - b.x) < 1;
           if (screenVertical) {
             if (a.x < rect.x + 2 || a.x > rect.x + rect.w - 2) return;
@@ -5562,7 +5665,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       if (!ghostOutline) return;
       ctx.save();
       ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = "rgba(237,230,216,0.55)";
+      ctx.strokeStyle = `rgba(${C.boneRGB},0.55)`;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       ghostOutline.right.forEach((p, i) => { const s = mapFn(p.x, p.y); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
@@ -6138,7 +6241,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
       if (!holes.length) return;
       const dia = ski.alignDowelDia || 12.7;
       ctx.save();
-      const col = "#5bb3d8";
+      const col = C.blue;
       holes.forEach(h => {
         const cs = toMain(h.x, h.y), edge = toMain(h.x + dia / 2, h.y);
         const rpx = Math.max(3, Math.abs(edge.x - cs.x));
@@ -6173,7 +6276,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         ctx.font = "bold 11px 'JetBrains Mono', monospace";
         const tw = ctx.measureText(label).width;
         const bx = s.x + 12, by = s.y - 22;
-        ctx.fillStyle = "rgba(20,18,16,0.9)";
+        ctx.fillStyle = `rgba(${C.forgeRGB},0.9)`;
         ctx.fillRect(bx - 4, by - 12, tw + 8, 18);
         ctx.strokeStyle = handleAngle.snapped ? (C.contactLabel || "#f0895c") : C.panelBorder;
         ctx.lineWidth = 1; ctx.strokeRect(bx - 4, by - 12, tw + 8, 18);
@@ -6201,7 +6304,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         const w0 = computeOutline(s0).waistY;
         if (Math.abs(waistY - w0) >= 0.5) lines.push(`Waist moved ${fmt(Math.abs(waistY - w0))} mm toward the ${waistY > w0 ? "tip" : "tail"}`);
         const r0 = computeDerived(s0).sidecutRadius, r1 = computeDerived(ski).sidecutRadius;
-        if (isFinite(r0) && isFinite(r1) && Math.abs(r1 - r0) >= 0.05) lines.push(`Sidecut radius: ${r0.toFixed(1)} \u2192 ${r1.toFixed(1)} m`);
+        if (isFinite(r0) && isFinite(r1) && Math.abs(r1 - r0) >= 0.05) lines.push(`Sidecut radius: ${fmtR(r0)} \u2192 ${fmtR(r1)}`);
       } catch (e) {}
       if (!lines.length && dragStart.cp) {
         const cp = cps.find(c => c.id === dragging);
@@ -6218,7 +6321,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         let bx = dragPtr.x + 16, by = dragPtr.y + 16;
         if (bx + bw > width - 4) bx = Math.max(4, dragPtr.x - 16 - bw);
         if (by + bh > height - 4) by = Math.max(4, dragPtr.y - 16 - bh);
-        ctx.fillStyle = "rgba(20,18,16,0.92)"; ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = `rgba(${C.forgeRGB},0.92)`; ctx.fillRect(bx, by, bw, bh);
         ctx.strokeStyle = C.panelBorder; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
         ctx.fillStyle = C.value; ctx.textAlign = "left"; ctx.textBaseline = "top";
         lines.forEach((t, i) => ctx.fillText(t, bx + 6, by + 5 + i * 14));
@@ -6711,7 +6814,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         style={{
           // Phone layout: bottom-right of the zoom column so it never covers the tip node in the narrow main column.
           position: "absolute", zIndex: 5, ...(isVertical ? { bottom: 8, right: 8 } : { top: 4, left: 64 }),   // left: 64 clears the "PLAN" view label chip
-          background: showGrid ? C.heading : "rgba(28,25,22,0.92)", color: showGrid ? "#141210" : C.heading,
+          background: showGrid ? C.heading : `rgba(${C.forgeRGB},0.92)`, color: showGrid ? C.bgDeep : C.heading,
           border: `1px solid ${C.heading}`, borderRadius: 5,
           padding: "4px 10px", fontSize: 10, fontWeight: 700,
           fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
@@ -6723,7 +6826,7 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
           onClick={() => { setMainZoom(1); setMainPan({ x: 0, y: 0 }); }}
           style={{
             position: "absolute", top: 8, right: 8, zIndex: 5,
-            background: "rgba(28,25,22,0.92)", color: C.heading,
+            background: `rgba(${C.forgeRGB},0.92)`, color: C.heading,
             border: `1px solid ${C.heading}`, borderRadius: 5,
             padding: "6px 12px", fontSize: 11, fontWeight: 700,
             fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5,
@@ -6820,12 +6923,13 @@ function ProfileView({ ski, setSki, width, height }) {
     const handleDefs = [
       { key: "tailHeight", xmm: 0, ymm: TAH, min: 5, max: 60, step: 1, align: "left" },
       { key: "tipHeight",  xmm: L, ymm: TH,  min: 5, max: 80, step: 1, align: "right" },
-      { key: "camberHeight", xmm: camberMidX, ymm: CH, min: 0, max: 10, step: 0.5, align: "center" },
+      // No camber handle when the two rockers meet: there's no camber zone left for it to shape.
+      ...((L - tk.tip) - tk.tail > 1 ? [{ key: "camberHeight", xmm: camberMidX, ymm: CH, min: -10, max: 10, step: 0.5, align: "center" }] : []),
     ];
     if (ski.rockerLinked === false) {
       handleDefs.push(
-        { key: "tailRockerLen", xmm: tk.tail, ymm: 0, axis: "x", param: "tailRockerLen", min: 20, max: Math.round(L * 0.45), step: 1, takeoff: true },
-        { key: "tipRockerLen",  xmm: L - tk.tip, ymm: 0, axis: "x", param: "tipRockerLen", min: 20, max: Math.round(L * 0.45), step: 1, takeoff: true },
+        { key: "tailRockerLen", xmm: tk.tail, ymm: 0, axis: "x", param: "tailRockerLen", min: 20, max: Math.round(Math.min(L * 0.5, L - tk.tip)), step: 1, takeoff: true },
+        { key: "tipRockerLen",  xmm: L - tk.tip, ymm: 0, axis: "x", param: "tipRockerLen", min: 20, max: Math.round(Math.min(L * 0.5, L - tk.tail)), step: 1, takeoff: true },
       );
     }
     const handles = handleDefs.map(h => { const s = toC(h.xmm, h.ymm); return { ...h, x: s.x, y: s.y, yScale, baseY, yExagg, xScale, padX }; });
@@ -6867,13 +6971,16 @@ function ProfileView({ ski, setSki, width, height }) {
     // ── Early rise (rocker unlinked): draggable dots where the base leaves the snow (the contact/takeoff),
     // separate from the wide points. Drawn on the snow line; drag horizontally to set the rise length. ──
     if (ski.rockerLinked === false) {
+      const close = Math.abs(toC(L - tk.tip, 0).x - toC(tk.tail, 0).x) < 60;   // takeoffs close together: push the labels apart
       [["tailRockerLen", tk.tail, Math.round(tk.tail)], ["tipRockerLen", L - tk.tip, Math.round(tk.tip)]].forEach(([key, xmm, mm]) => {
         const s = toC(xmm, 0), active = dragging === key || hovered === key;
         ctx.beginPath(); ctx.arc(s.x, baseY, active ? 7.5 : 6, 0, Math.PI * 2);
         ctx.fillStyle = active ? C.controlHover : (C.contactLine || "#e8552a"); ctx.fill();
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = "bold 8px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
-        ctx.fillText(`${mm}mm`, s.x, baseY - 10);
+        ctx.fillStyle = C.contactLine || "#e8552a"; ctx.font = "bold 8px 'JetBrains Mono', monospace";
+        const isTail = key === "tailRockerLen";
+        ctx.textAlign = close ? (isTail ? "right" : "left") : "center";
+        ctx.fillText(`${mm}mm`, close ? s.x + (isTail ? -9 : 9) : s.x, baseY - 10);
       });
     }
 
@@ -7734,12 +7841,14 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   const target = ski.radiusTarget || "waist";
   const [text, setText] = useState("");
   const [editing, setEditing] = useState(false);
-  const shown = editing ? text : (liveR != null ? liveR.toFixed(1) : "flat");
+  const isRev = liveR != null && liveR < 0;   // reverse sidecut: the box shows the size of the radius, labeled reverse
+  const shown = editing ? text : (liveR != null ? Math.abs(liveR).toFixed(1) : "flat");
 
   const commit = (raw) => {
-    const r = parseFloat(raw);
+    let r = parseFloat(raw);
     setEditing(false);
-    if (!isFinite(r) || r <= 0) return;
+    if (!isFinite(r) || r === 0) return;
+    if (isRev && r > 0) r = -r;   // keep a reverse sidecut reverse; a negative number also asks for reverse
     setSki(s => {
       if ((s.radiusTarget || "waist") === "tiptail") {
         const patch = tipTailForRadius(s, r);
@@ -7772,7 +7881,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
   return (
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m){shape === "dual" ? " · shortcut formula" : ""}</span>
+        <span style={{ color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Sidecut R (m){isRev ? " · reverse" : ""}{shape === "dual" ? " · shortcut formula" : ""}</span>
         <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
           <span style={{ color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace" }}>adjusts</span>
           {segBtn("waist", "Waist")}
@@ -7783,7 +7892,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         type="number" min={4} max={60} step={0.5}
         value={shown === "flat" ? "" : shown}
         placeholder={shown === "flat" ? "flat" : undefined}
-        onFocus={e => { setEditing(true); setText(liveR != null ? liveR.toFixed(1) : ""); e.target.style.borderColor = C.inputFocus; }}
+        onFocus={e => { setEditing(true); setText(liveR != null ? Math.abs(liveR).toFixed(1) : ""); e.target.style.borderColor = C.inputFocus; }}
         onChange={e => setText(e.target.value)}
         onBlur={e => { commit(e.target.value); e.target.style.borderColor = C.inputBorder; }}
         onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
@@ -7795,7 +7904,7 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
             front / back R
           </span>
           <span style={{ color: C.contactLabel || "#f0895c", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
-            {isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / {isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m
+            {fmtR(derived.frontRadius)} / {fmtR(derived.backRadius)}
           </span>
         </div>
       )}
@@ -7805,8 +7914,9 @@ function SidecutRadiusField({ ski, setSki, C, WAIST_MIN, WAIST_MAX }) {
         </div>
       )}
       {shape === "dual" && <div style={note}>Front and back are the actual radii of the two arcs. The number in the box is the usual shortcut formula (from the tip, waist and tail widths and the running edge), and typing a radius there adjusts the design to match that formula.</div>}
-      {shape === "single" && !derived.apexOK && <div style={{ ...note, color: "#e8a33a" }}>A single arc can't fit: the waist has to be narrower than both the tip and the tail. Showing an arc on each side of your waist position instead. The radius box shows the usual shortcut formula (from the tip, waist and tail widths and the running edge).</div>}
-      {derived.widestMismatch && <div style={{ ...note, color: "#e8a33a" }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact), so the ski's widest point is wider than that number. The outline shows the real shape.</div>}
+      {isRev && <div style={note}>Reverse sidecut: the waist is wider than the tip and the tail, so the edges bow out and the ski is widest underfoot. The radius is the size of that outward curve. Type a radius to adjust it; it stays a reverse sidecut.</div>}
+      {shape === "single" && !derived.apexOK && <div style={{ ...note, color: C.amber }}>One arc can't fit: the waist has to be narrower than both the tip and the tail (a normal sidecut) or wider than both (a reverse sidecut). Yours is in between, so the app draws a separate arc on each side of your waist position. The radius box shows the usual shortcut formula (from the tip, waist and tail widths and the running edge).</div>}
+      {derived.widestMismatch && <div style={{ ...note, color: C.amber }}>The tip or tail curve reaches wider than the width you entered (a point on the curve sits outside the contact), so the ski's widest point is wider than that number. The outline shows the real shape.</div>}
     </div>
   );
 }
@@ -7885,7 +7995,9 @@ function RockerProfileField({ ski, setSki, C }) {
       const isLinked = s.rockerLinked !== false;
       if (!isLinked) {
         // Early rise: set the rocker takeoff length directly, in mm.
-        const mm = Math.round(Math.max(20, Math.min(s.length * 0.45, v)));
+        // Up to half the length each, and never overlapping, so the two rockers can meet in the middle (full rocker).
+        const other = which === 'tip' ? (s.tailRockerLen != null ? s.tailRockerLen : s.tailLength) : (s.tipRockerLen != null ? s.tipRockerLen : s.tipLength);
+        const mm = Math.round(Math.max(20, Math.min(s.length * 0.5, s.length - other, v)));
         return which === 'tip' ? { ...s, tipRockerLen: mm } : { ...s, tailRockerLen: mm };
       }
       const cur = rockerPercents(s);
@@ -8051,7 +8163,7 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
       const mount = mountRef.current;
       const W = mount.clientWidth, H = mount.clientHeight;
       scene = new THREE.Scene();
-      scene.background = makeGradientTex(THREE, "#26221c", "#0b0a08");
+      scene.background = _THEME === "light" ? makeGradientTex(THREE, "#f7f3ec", "#d6cdbf") : makeGradientTex(THREE, "#26221c", "#0b0a08");
       camera = new THREE.PerspectiveCamera(42, W / H, 0.05, 1000);
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -8178,24 +8290,24 @@ function Ski3DModal({ ski, topsheet, pairView, onClose }) {
   }, [ski, topsheet, pairView]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.86)", zIndex: 1000, display: "flex", flexDirection: "column" }}
+    <div style={{ position: "fixed", inset: 0, background: _THEME === "light" ? "rgba(244,240,232,0.97)" : "rgba(0,0,0,0.86)", zIndex: 1000, display: "flex", flexDirection: "column" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #37322c" }}>
-        <div style={{ color: "#c8935a", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${C.panelBorder}` }}>
+        <div style={{ color: C.heading, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>
           3D PREVIEW · {(ski.designName || "Untitled")}{topsheet && topsheet.src ? " · topsheet mapped" : ""}
         </div>
-        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #37322c", color: "#ede6d8", padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close ✕</button>
+        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${C.panelBorder}`, color: C.value, padding: "6px 14px", borderRadius: 4, cursor: "pointer", fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>Close ✕</button>
       </div>
       <div ref={mountRef} style={{ flex: 1, position: "relative", cursor: "grab", minHeight: 0 }}>
         {status !== "ok" && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? "#e8552a" : "#9b9388", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", textAlign: "center", padding: 20 }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: status === "error" ? C.torch : C.label, fontSize: 13, fontFamily: "'JetBrains Mono', monospace", textAlign: "center", padding: 20 }}>
             {status === "error"
               ? "Couldn't load the 3D preview (the 3D library may be blocked on your network). Everything else works normally."
               : "Loading 3D preview\u2026"}
           </div>
         )}
       </div>
-      <div style={{ padding: "8px 16px", borderTop: "1px solid #37322c", color: "#6f685f", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
+      <div style={{ padding: "8px 16px", borderTop: `1px solid ${C.panelBorder}`, color: C.labelDim, fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", textAlign: "center" }}>
         Drag to rotate · scroll to zoom · topsheet is mapped onto the top surface with rocker &amp; camber
       </div>
     </div>
@@ -8450,7 +8562,7 @@ function BrandBar({ title, subtitle, onClose, C }) {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 18px", borderBottom: `1px solid ${C.panelBorder}`, background: C.panel, flexShrink: 0, boxShadow: "0 1px 0 rgba(0,0,0,0.25)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
         <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", lineHeight: 0, flexShrink: 0 }}>
-          <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: 34, width: "auto", display: "block" }} />
+          <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: 34, width: "auto", display: "block", filter: C.logoFilter }} />
         </a>
         <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
@@ -8630,7 +8742,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
   };
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return; cv.width = box.w; cv.height = box.h;
-    const ctx = cv.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#0d0b09"; ctx.fillRect(0, 0, box.w, box.h);
+    const ctx = cv.getContext("2d"); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = C.bgDeep; ctx.fillRect(0, 0, box.w, box.h);
     ctx.setTransform(eff, 0, 0, eff, ox, oy); paint(ctx, guides, crop);
     // draw preview
     if (draw) { ctx.strokeStyle = C.heading; ctx.lineWidth = 1.5 / eff; ctx.setLineDash([5 / eff, 4 / eff]); let x1 = draw.x1, y1 = draw.y1; if (draw.sq && mode !== "line") { const q = Math.max(Math.abs(x1 - draw.x0), Math.abs(y1 - draw.y0)); x1 = draw.x0 + (x1 < draw.x0 ? -1 : 1) * q; y1 = draw.y0 + (y1 < draw.y0 ? -1 : 1) * q; } const x = Math.min(draw.x0, x1), y = Math.min(draw.y0, y1), w = Math.abs(x1 - draw.x0), h = Math.abs(y1 - draw.y0); if (mode === "line") { ctx.beginPath(); ctx.moveTo(draw.x0, draw.y0); ctx.lineTo(draw.x1, draw.y1); ctx.stroke(); } else if (mode === "ellipse") { ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.stroke(); } else { ctx.strokeRect(x, y, w, h); } ctx.setLineDash([]); }
@@ -8850,7 +8962,7 @@ function TopsheetDesigner({ ski, C, onClose, onApply, layers, setLayers }) {
               <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} style={btn(false)}>Fit</button>
             </div>
           </div>
-          <div ref={wrapRef} style={{ flex: 1, minHeight: 260, background: "#0d0b09", borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden" }}>
+          <div ref={wrapRef} style={{ flex: 1, minHeight: 260, background: C.bgDeep, borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden" }}>
             <canvas ref={cvRef} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp} onWheel={onWheel} onDoubleClick={() => mode === "pen" && finishPen(true)} style={{ display: "block", cursor: drawing ? "crosshair" : (mode !== "select" ? "crosshair" : cur), touchAction: "none" }} />
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -8935,7 +9047,7 @@ function CoreStripTopView({ ski, width, height }) {
   const coreAt = xx => { let pos = -1e9, neg = 1e9; for (let i = 0; i < core.length; i++) { const a = core[i], b = core[(i + 1) % core.length]; if ((a.x - xx) * (b.x - xx) <= 0 && a.x !== b.x) { const t = (xx - a.x) / (b.x - a.x), y = a.y + t * (b.y - a.y); pos = Math.max(pos, y); neg = Math.min(neg, y); } } return pos > -1e8 ? [neg, pos] : [-bw / 2, bw / 2]; };
   const [cNeg, cPos] = coreAt(xc), [eNeg, ePos] = coreAt(x1 - 0.01);
   const sw = sidewallProps(ski.layup && ski.layup.sidewall);
-  const txt = "#e8dcc8", dim = "#8a7f70", brass = "#c8935a", edgeCol = "#a9b0b7", swCol = "#3d3b44";
+  const txt = C.value, dim = C.labelDim, brass = C.heading, edgeCol = "#a9b0b7", swCol = "#3d3b44";
   const id = "cstv" + Math.round(xc);
   // strip labels on the right, pushed apart so they never overlap
   const vis = bands.map(q => ({ ...q, ya: Math.max(q.a, eNeg), yb: Math.min(q.b, ePos), atWaist: Math.max(0, Math.min(q.b, cPos) - Math.max(q.a, cNeg)) })).filter(q => q.yb > q.ya);
@@ -8943,7 +9055,7 @@ function CoreStripTopView({ ski, width, height }) {
   const nm = k => (CORE_MATERIALS[k] || CORE_MATERIALS.poplar).name;
   const f = v => (Math.round(v * 10) / 10).toString();
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: "block", background: "#141210", borderRadius: 4 }} role="img" aria-label="Top view of a section of the core">
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: "block", background: C.canvasBg, borderRadius: 4 }} role="img" aria-label="Top view of a section of the core">
       <defs>
         <clipPath id={id + "s"}><rect x={X(x0)} y={0} width={S * sc} height={height} /></clipPath>
         <clipPath id={id + "o"}><polygon points={oPts} /></clipPath>
@@ -9087,7 +9199,7 @@ function studyTableHTML(variants) {
   const rowsDef = [
     [t("tbl.length", "Length"), v => num(v.length, 0, " mm")],
     [t("tbl.dims", "Tip / Waist / Tail"), v => `${num(v.tip, 0)} / ${num(v.waist, 0)} / ${num(v.tail, 0)} mm`],
-    [t("tbl.radius", "Sidecut radius"), v => v.radius ? num(v.radius, 1, " m") : "&mdash;"],
+    [t("tbl.radius", "Sidecut radius"), v => v.radius ? (v.radius < 0 ? num(-v.radius, 1, " m reverse") : num(v.radius, 1, " m")) : "&mdash;"],
     [t("tbl.coreThick", "Core tip / waist / tail"), (v, i) => `${num(v.coreTip, 1)} / ${num(v.coreWaist, 1)} / ${num(v.coreTail, 1)} mm` + (i ? dlt(v.coreWaist, first.coreWaist, 1, 0.05) : "")],
     [t("tbl.core", "Core"), v => v.core || "&mdash;"],
     [t("tbl.sidewall", "Sidewall"), v => v.sidewall || "&mdash;"],
@@ -9250,6 +9362,17 @@ export default function App() {
   const [constV, setConstV] = useState(0);   // bumps when a material constant is edited, to recompute flex
   const [constResetKey, setConstResetKey] = useState(0);   // re-mounts the constant inputs after a reset
   const [langV, setLangV] = useState(0);   // bumps on language change to re-render translated strings
+  // Light / dark mode. C is the live palette: copy the chosen theme into it, remember the choice, re-render.
+  const [themeName, setThemeName] = useState(_THEME);
+  const toggleTheme = useCallback(() => {
+    const next = _THEME === "light" ? "dark" : "light";
+    _THEME = next; Object.assign(C, THEMES[next]);
+    try { localStorage.setItem("bcs-theme", next); } catch (e) {}
+    setThemeName(next);
+  }, []);
+  useEffect(() => {
+    try { document.body.style.background = C.bg; document.documentElement.style.colorScheme = themeName; } catch (e) {}
+  }, [themeName]);
   const flex = useMemo(() => computeFlexProfile(ski), [ski, constV]);
   // Design Study: capture up to four full designs side by side to compare flex, weight and core, then export
   // one report — the trade-study workflow (titanal vs carbon, etc.) instead of one build card per design.
@@ -9276,7 +9399,7 @@ export default function App() {
     const notesHtml = (studyNotes || "").trim() ? `<div style="margin-top:18px"><div style="font-weight:700;font-size:12px;color:#333;margin-bottom:5px">${t("study.notes", "NOTES")}</div><div style="font-size:12px;color:#222;white-space:pre-wrap;line-height:1.55">${esc(studyNotes)}</div></div>` : "";
     const bName = (builderBrand.name || "").trim() || "Black Chapel Studios";
     const logoSrc = builderBrand.logoSrc || ((typeof window !== "undefined" ? window.location.origin : "") + "/blackchapel-logo.png");
-    const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block"/>`;
+    const logoImg = `<img src="${logoSrc}" style="height:46px;width:auto;display:block${builderBrand.logoSrc ? "" : ";filter:" + LOGO_ON_WHITE}"/>`;
     const cap = ``;
     const win = window.open("", "_blank"); if (!win) return;
     win.document.write(`<!doctype html><html><head><title>Design Study</title><style>@page{margin:14mm}body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;padding:22px 22px 44px}</style></head><body><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:14px">${logoImg}<div style="display:flex;align-items:center;gap:12px"><div style="font-size:18px;font-weight:700;letter-spacing:1px">${esc(bName)} ${t("study.title", "Design Study")}</div>${(studyTitle || "").trim() ? `<div style="width:1px;height:22px;background:#ccc"></div><div style="font-size:15px;color:#333">${esc(studyTitle.trim())}</div>` : ""}</div></div><div style="font-size:11px;color:#666">${new Date().toISOString().slice(0, 10)}</div></div><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;border:1px solid #eee">${chart}</svg><div style="margin-top:16px">${table}</div>${studyDesignHTML(studyVariants, { artwork: studyArtwork, topsheet })}${notesHtml}${reportCardHTML()}<div style="position:fixed;bottom:5mm;left:0;right:0;text-align:center;font-size:8px;color:#bbb">Made with the Black Chapel Studios ski designer &middot; <a href="https://blackchapelstudios.com" style="color:#bbb;text-decoration:none">blackchapelstudios.com</a></div></body></html>`);
@@ -9512,8 +9635,8 @@ export default function App() {
   const setAllCamSec = v => setCamSec({ setup: v, materials: v, operation: v, tools: v, output: v });
   const [topsheetOpen, setTopsheetOpen] = useState(false);
   useEffect(() => {
-    if (document.getElementById("bcs-polish")) return;
-    const st = document.createElement("style"); st.id = "bcs-polish";
+    let st = document.getElementById("bcs-polish");
+    if (!st) { st = document.createElement("style"); st.id = "bcs-polish"; document.head.appendChild(st); }
     st.textContent = `
       button { transition: filter .13s ease, transform .05s ease, box-shadow .15s ease; }
       button:hover:not(:disabled) { filter: brightness(1.1); }
@@ -9529,8 +9652,7 @@ export default function App() {
       *::-webkit-scrollbar-thumb { background: ${C.panelBorder}; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
       *::-webkit-scrollbar-thumb:hover { background: ${C.heading}99; background-clip: padding-box; }
     `;
-    document.head.appendChild(st);
-  }, []);
+  }, [themeName]);
   const [preview3D, setPreview3D] = useState(false);
   const [asymOpen, setAsymOpen] = useState(false);
   const openSpecPreview = useCallback(() => {
@@ -9571,7 +9693,7 @@ export default function App() {
     try { tr = torsionRating(flex.torsK); } catch (e) {}
     const cp = ski.coreProfile || [], cAt = f => { try { return getCoreThickAt(cp, f).toFixed(1); } catch (e) { return "\u2014"; } };
     const runS = ski.tailLength / ski.length, runE = (ski.length - ski.tipLength) / ski.length;
-    const radius = (derived.sidecutRadius < 999) ? derived.sidecutRadius.toFixed(1) + " m" : "\u2014";
+    const radius = fmtR(derived.sidecutRadius, "\u2014");
     const weight = bom.totalMassKg ? (bom.totalMassKg * 1000).toFixed(0) + " g each" : "\u2014";
     const row = (k, v) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`;
     const numbers = [
@@ -10383,7 +10505,7 @@ export default function App() {
     </div>
   );
 
-  const btnGrad = "linear-gradient(180deg, #d6a46d 0%, #bd854c 100%)";   // brass, top-lit for depth
+  const btnGrad = themeName === "light" ? "linear-gradient(180deg, #9c6a34 0%, #7f5224 100%)" : "linear-gradient(180deg, #d6a46d 0%, #bd854c 100%)";   // brass, top-lit for depth (deeper in light mode so the light label reads)
   const btnShadow = "0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22)";
   const expBtn = {
     background: btnGrad, border: "none", borderRadius: 5, padding: "8px 0",
@@ -10411,7 +10533,7 @@ export default function App() {
     letterSpacing: "0.02em", fontFamily: "'Inter', 'Segoe UI', sans-serif",
   };
   const headerBtnPrimary = {
-    background: C.heading, color: "#1a1611", border: `1px solid ${C.heading}`,
+    background: C.heading, color: C.bgDeep, border: `1px solid ${C.heading}`,
     padding: "7px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700,
     letterSpacing: "0.02em", fontFamily: "'Inter', 'Segoe UI', sans-serif",
   };
@@ -10421,7 +10543,7 @@ export default function App() {
     <div style={{
       position: "absolute", top: 6, left: 8,
       color: C.heading, fontSize: 8, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
-      background: "rgba(31,31,29,0.85)", padding: "2px 8px", borderRadius: 2,
+      background: `rgba(${C.forgeRGB},0.85)`, padding: "2px 8px", borderRadius: 2,
       border: `1px solid ${C.panelBorder}`, textTransform: "uppercase", letterSpacing: 1, pointerEvents: "none",
     }}>{text}</div>
   );
@@ -10429,7 +10551,7 @@ export default function App() {
   // ── What's new: once per release, for people who have used the app before (first-time visitors skip it). ──
   // Decide during the first render, before any effect writes its own keys (which would make everyone look like a
   // returning user).
-  const [wnReturning] = useState(() => { try { return ["bcs_sections_open", "bcs_cam", "bcs_autosave", "bcs_autosave_ski", "bcs_autosave_board", "bcs_last_mode", "bcs-lang", "bcs_study"].some(k => localStorage.getItem(k) != null); } catch (e) { return false; } });
+  const [wnReturning] = useState(() => { try { return ["bcs_sections_open", "bcs_cam", "bcs_autosave", "bcs_autosave_ski", "bcs_autosave_board", "bcs_last_mode", "bcs-lang", "bcs-theme", "bcs_study"].some(k => localStorage.getItem(k) != null); } catch (e) { return false; } });
   const [wnOpen, setWnOpen] = useState(false);
   const [wnStep, setWnStep] = useState(null);      // index into WHATS_NEW.items while the guided tour runs
   const [wnRect, setWnRect] = useState(null);      // live screen rect of the highlighted element (null = not found)
@@ -10488,6 +10610,14 @@ export default function App() {
     return () => { done = true; cancelAnimationFrame(raf); window.removeEventListener("keydown", onKey); };
   }, [wnStep]);
 
+  const themeBtn = (
+    <button data-wn="theme" onClick={toggleTheme} aria-label={themeName === "light" ? "Switch to dark mode" : "Switch to light mode"} title={themeName === "light" ? "Switch to dark mode" : "Switch to light mode"}
+      style={{ flexShrink: 0, width: isCompact ? 36 : 32, height: isCompact ? 36 : 30, display: "flex", alignItems: "center", justifyContent: "center", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, color: C.heading, cursor: "pointer", padding: 0 }}>
+      {themeName === "light"
+        ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor" /></svg>
+        : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor" stroke="none" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" /></svg>}
+    </button>
+  );
   return (
     <div ref={containerRef} style={{
       display: "flex",
@@ -10499,7 +10629,7 @@ export default function App() {
       {/* Persistent top header (all screen sizes) — matches Black Chapel fretboard designer */}
       <div style={{
         height: isCompact ? mobileHeaderH : 56, minHeight: isCompact ? mobileHeaderH : 56,
-        background: "linear-gradient(180deg, #1c1916, #141210)",
+        background: `linear-gradient(180deg, ${C.panel}, ${C.bg})`,
         borderBottom: `1px solid ${C.panelBorder}`,
         display: "flex", alignItems: "center", padding: isCompact ? "0 12px" : "0 18px",
         gap: isCompact ? 10 : 16, flexShrink: 0,
@@ -10526,7 +10656,7 @@ export default function App() {
             (CAM + Topsheet) exactly, so only the type to the right of the logo changes between screens. */}
         <div style={{ display: "flex", alignItems: "center", gap: isCompact ? 10 : 14, flex: 1, overflow: "hidden" }}>
           <a href="https://blackchapelstudios.com" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", lineHeight: 0, flexShrink: 0 }}>
-            <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: isCompact ? 30 : 34, width: "auto", display: "block" }} />
+            <img src="/blackchapel-logo.png" alt="Black Chapel Studios" style={{ height: isCompact ? 30 : 34, width: "auto", display: "block", filter: C.logoFilter }} />
           </a>
           {!isCompact && <div style={{ width: 1, height: 24, background: C.panelBorder, flexShrink: 0 }} />}
           <div style={{ minWidth: 0, overflow: "hidden" }}>
@@ -10549,6 +10679,7 @@ export default function App() {
               {LANGS.map(([code, lbl]) => <option key={code} value={code}>{lbl}</option>)}
             </select>
           )}
+          {!isCompact && themeBtn}
         </div>
 
         {/* Forum call-to-action — sits in the open space between the brand and the action buttons */}
@@ -10560,7 +10691,7 @@ export default function App() {
         )}
 
         {/* Right-side actions */}
-        {isCompact ? (
+        {isCompact ? (<div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>{themeBtn}
           <button
             onClick={handleSave}
             style={{
@@ -10570,7 +10701,7 @@ export default function App() {
               fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
               textTransform: "uppercase", flexShrink: 0,
             }}
-          >Save</button>
+          >Save</button></div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 2, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: 2, marginRight: 2 }}>
@@ -11072,7 +11203,7 @@ export default function App() {
                             : { ...s, asymSidecut: true, waistOutside: s.waistWidth, waistInside: s.waistWidth }))}
                           <span style={{ color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>{t("dim.diffRadii", "Different sidecut radii")}</span>
                         </div>
-                        {ski.asymSidecut && [["waistOutside", t("dim.waistOut", "Waist \u25B2 OUTSIDE"), derived.radiusOutside], ["waistInside", t("dim.waistIn", "Waist \u25BC INSIDE"), derived.radiusInside]].map(([p, l, r]) => numRow(p, l, "R " + (isFinite(r) ? r.toFixed(1) + " m" : "flat")))}
+                        {ski.asymSidecut && [["waistOutside", t("dim.waistOut", "Waist \u25B2 OUTSIDE"), derived.radiusOutside], ["waistInside", t("dim.waistIn", "Waist \u25BC INSIDE"), derived.radiusInside]].map(([p, l, r]) => numRow(p, l, "R " + fmtR(r, "flat")))}
                         {/* Different effective edges (contact lengths) */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 6px" }}>
                           {swBtn(ski.asymContact, () => setSki(s => s.asymContact
@@ -11187,7 +11318,10 @@ export default function App() {
           <RockerProfileField ski={ski} setSki={setSki} C={C} />
           {inputField("Tip Rise", "tipHeight", 5, 80)}
           {inputField("Tail Rise", "tailHeight", 5, 60)}
-          {inputField("Camber", "camberHeight", 0, 10, 0.5)}
+          {inputField("Camber", "camberHeight", -10, 10, 0.5)}
+          {ski.camberHeight < 0 && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
+            Reverse camber: the middle of the ski sits {Math.abs(ski.camberHeight)} mm below the rocker start points, so the ski rests on its middle and those points sit off the snow. For one continuous curve from tip to tail with no flat spot, unlink the rocker and set both rocker lengths to half the ski's length so they meet in the middle.
+          </div>}
           {inputField("Camber zones", "camberZones", 1, 5, 1)}
           {ski.camberZones > 1 && (<>
             {inputField("Zone smoothness", "camberSmooth", 0, 1, 0.05)}
@@ -11790,9 +11924,9 @@ export default function App() {
           {stat("Torsion GJ", `${(flex.underfootGJ / 1e6).toFixed(0)} N\u00B7m\u00B2 (rel)`, C.eiStroke)}
           {stat("Dims", `${ski.tipWidth}-${ski.waistWidth}-${ski.tailWidth}`)}
           {stat("Eff Edge", `${Math.round(derived.effectiveEdge)} mm`)}
-          {stat("Sidecut R", derived.sidecutRadius < 999 ? `${derived.sidecutRadius.toFixed(1)} m` : "--")}
+          {stat("Sidecut R", fmtR(derived.sidecutRadius))}
           {derived.asymmetric && stat("R front / back",
-            `${isFinite(derived.frontRadius) ? derived.frontRadius.toFixed(1) : "--"} / ${isFinite(derived.backRadius) ? derived.backRadius.toFixed(1) : "--"} m`,
+            `${fmtR(derived.frontRadius)} / ${fmtR(derived.backRadius)}`,
             C.contactLabel)}
           {flex.cal && Math.abs(flex.cal - 1) > 0.001 && stat("Calibration", `\u00D7${flex.cal.toFixed(2)} to test bend`, C.heading)}
           <div style={{ marginTop: 9, paddingTop: 9, borderTop: `1px solid ${C.inputBorder}` }}>
@@ -12203,30 +12337,30 @@ export default function App() {
         )}
         {planH > 0 && (
           <div style={{ height: planH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <PlanView ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} refGhost={refGhost} />
+            <PlanView key={themeName} ski={ski} setSki={setSki} width={canvasW} height={planH} orientation={isCompact ? "vertical" : "horizontal"} topsheet={topsheet} pairView={pairView && ski.mode !== "snowboard"} refGhost={refGhost} />
             {viewLabelChip("Plan")}
           </div>
         )}
         {profH > 0 && (
           <div style={{ height: profH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <ProfileView ski={ski} setSki={setSki} width={canvasW} height={profH} />
+            <ProfileView key={themeName} ski={ski} setSki={setSki} width={canvasW} height={profH} />
             {viewLabelChip("Side Profile")}
           </div>
         )}
         {coreH > 0 && (
           <div style={{ height: coreH, position: "relative", borderBottom: `1px solid ${C.panelBorder}` }}>
-            <CoreView ski={ski} setSki={setSki} width={canvasW} height={coreH} />
+            <CoreView key={themeName} ski={ski} setSki={setSki} width={canvasW} height={coreH} />
             {viewLabelChip("Core")}
           </div>
         )}
         {flexH > 0 && (
           <div style={{ height: flexH, position: "relative" }}>
-            <FlexView ski={ski} flex={flex} width={canvasW} height={flexH} />
+            <FlexView key={themeName} ski={ski} flex={flex} width={canvasW} height={flexH} />
             {viewLabelChip("Flex")}
           </div>
         )}
         {layersH > 0 && (
-          <div style={{ height: layersH, position: "relative", overflow: "auto", background: "#141210" }}>
+          <div style={{ height: layersH, position: "relative", overflow: "auto", background: C.canvasBg }}>
             {(() => {
               const w = Math.min(560, Math.max(280, canvasW - 40));
               // The core top view only appears for a mixed-wood core (strips of more than one wood).
@@ -12237,7 +12371,7 @@ export default function App() {
               const topW = sideBySide ? canvasW - w - 40 : Math.max(280, canvasW - 24), topH = sideBySide ? Math.max(280, Math.min(layersH - 24, 480)) : 320;
               const r = buildLayerStackSVG(ski, { x: 20, y: 44, w: w - 40, maxH: layersH - 64 });
               const h = r.height + 64;
-              const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#141210"/><text x="20" y="28" font-size="13" fill="#c8935a" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>${r.svg}</svg>`;
+              const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="${C.canvasBg}"/><text x="20" y="28" font-size="13" fill="${C.heading}" font-family="monospace" letter-spacing="2">LAYUP \u00B7 TOP \u2192 BASE</text>${r.svg}</svg>`;
               return (
                 <div style={{ display: "flex", flexDirection: sideBySide ? "row" : "column", justifyContent: "center", alignItems: sideBySide ? "flex-start" : "center", gap: 12, padding: "8px 0" }}>
                   <img src={"data:image/svg+xml;utf8," + encodeURIComponent(svg)} alt="Layup cross-section" style={{ maxWidth: "100%", height: "auto" }} />
@@ -12249,8 +12383,8 @@ export default function App() {
           </div>
         )}
         {camH > 0 && (
-          <div style={{ height: camH, position: "relative", background: "#14100d" }}>
-            <ToolpathView gcode={camResult.gcode} width={canvasW} height={camH} />
+          <div style={{ height: camH, position: "relative", background: C.canvasBg }}>
+            <ToolpathView key={themeName} gcode={camResult.gcode} width={canvasW} height={camH} />
             <div style={{ position: "absolute", left: 12, top: 10, color: C.heading, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1.5 }}>
               TOOLPATH · {(CAM_STEP_NAMES[camOpt.op] || camOpt.op).toUpperCase()}
             </div>
@@ -12276,7 +12410,7 @@ export default function App() {
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", color: "#111", borderRadius: 8, width: "min(880px, 96vw)", maxHeight: "92vh", overflow: "auto", padding: 24, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #333", paddingBottom: 10, marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
-                <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block", flexShrink: 0 }} />
+                <img src={builderBrand.logoSrc || "/blackchapel-logo.png"} alt="" style={{ height: 44, width: "auto", display: "block", flexShrink: 0, filter: builderBrand.logoSrc ? "none" : LOGO_ON_WHITE }} />
                 <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 1, whiteSpace: "nowrap", flexShrink: 0 }}>{(builderBrand.name || "").trim() || "Black Chapel Studios"} {t("study.title", "Design Study")}</div>
                   <div style={{ width: 1, height: 22, background: "#ccc", flexShrink: 0 }} />
@@ -12425,9 +12559,9 @@ export default function App() {
                       // length minus one bit diameter; at the edge of the part it is the full tab length.
                       const mid = +(camOpt.tabLen - camOpt.outlineToolDia).toFixed(camOpt.units === "inch" ? 3 : 2);
                       return (
-                        <div style={{ color: mid > 0 ? C.labelDim : "#e8a33a", fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                        <div style={{ color: mid > 0 ? C.labelDim : C.amber, fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
                           Tabs are small bridges of wood the bit leaves uncut on its last pass so the core can't shift once it's cut free. They come in pairs, one on each side of the core straight across from the other, spaced evenly along the core's sides. Tab length is measured along the cut, tab height is how thick the bridge is, measured up from the bottom of the blank.
-                          {" "}Because the bit is round, each bridge is narrowest in the middle of the cut: tab length minus the bit diameter, which is <b style={{ color: mid > 0 ? C.heading : "#e8a33a" }}>{mid} {uu}</b> with your {camOpt.outlineToolDia} {uu} bit.
+                          {" "}Because the bit is round, each bridge is narrowest in the middle of the cut: tab length minus the bit diameter, which is <b style={{ color: mid > 0 ? C.heading : C.amber }}>{mid} {uu}</b> with your {camOpt.outlineToolDia} {uu} bit.
                           {mid <= 0 && " That leaves no wood at all in the middle, so the tabs won't hold. Make the tabs longer than the bit is wide."}
                         </div>
                       );
@@ -12584,7 +12718,7 @@ export default function App() {
                     {camOpt.taperPattern === "oneway" && (<div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
                       {[["+", "Tail → Tip"], ["-", "Tip → Tail"]].map(([v, l]) => (<button key={v} onClick={() => setCam("profDir", v)} style={camSeg(camOpt.profDir === v)}>{l}</button>))}
                     </div>)}
-                    <div style={{ color: "#e8a33a", fontSize: 10, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                    <div style={{ color: C.amber, fontSize: 10, marginBottom: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
                       Straight lanes back and forth: only the two outermost lanes are set to a fixed direction. Wherever the core is narrower than its widest point (the waist, and toward the tip and tail), the glued-on sidewall is cut by the inner lanes, and half of them run the wrong way for it, which can tear the wall off. Use Loops for a core with glued-on sidewalls.
                     </div>
                     <div style={camSmall}>Direction of the two outermost lanes</div>
@@ -12599,8 +12733,8 @@ export default function App() {
                     {(() => {
                       const tR = (camOpt.taperToolDia || 0) / 2, hasV = !!(ski.vcutTip || ski.vcutTail);
                       return (
-                        <div data-wn="cam-endover" style={{ border: "1px solid #e8a33a", background: "rgba(232,163,58,0.08)", borderRadius: 4, padding: 8, marginTop: 10 }}>
-                          <div style={{ color: "#e8a33a", fontSize: 11.5, fontWeight: 700, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace" }}>Past the tip and tail ends</div>
+                        <div data-wn="cam-endover" style={{ border: `1px solid ${C.amber}`, background: `rgba(${C.amberRGB},0.08)`, borderRadius: 4, padding: 8, marginTop: 10 }}>
+                          <div style={{ color: C.amber, fontSize: 11.5, fontWeight: 700, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace" }}>Past the tip and tail ends</div>
                           <div style={{ color: C.label, fontSize: 10.5, lineHeight: 1.5, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>
                             Every pass already runs past both ends of the core: the bit's center goes half the bit's width ({+tR.toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} with this bit) beyond the furthest point, so the whole bit passes over the ends{hasV ? ", including the very point of your V-cuts" : ""}, as long as the core sits exactly where the file expects it.
                             {" "}If your core could sit a little off (it was placed by hand, or the pins have some play), add that much here so nothing is left uncut at the ends.
@@ -12634,7 +12768,7 @@ export default function App() {
                 {camResult && !camResult.stats && (() => {
                   // Say exactly why there's no file, right above the greyed-out button.
                   const msg = String(camResult.gcode || "").startsWith("; error") ? String(camResult.gcode).split("\n").slice(1).join(" ").replace(/^\s*Error:\s*/, "").trim() : "";
-                  return msg ? <div style={{ background: "rgba(232,163,58,0.10)", border: "1px solid #e8a33a", color: "#e8a33a", borderRadius: 4, padding: "8px 10px", marginBottom: 8, fontSize: 11, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Can't make this file yet: {msg}</div> : null;
+                  return msg ? <div style={{ background: `rgba(${C.amberRGB},0.10)`, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 4, padding: "8px 10px", marginBottom: 8, fontSize: 11, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>Can't make this file yet: {msg}</div> : null;
                 })()}
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={downloadCAM} disabled={!camResult || !camResult.stats} title={!camResult || !camResult.stats ? "Fix the problem shown above first" : undefined} style={{ ...primaryBtn, flex: 1, padding: "10px 8px", opacity: (!camResult || !camResult.stats) ? 0.45 : 1, cursor: (!camResult || !camResult.stats) ? "not-allowed" : "pointer" }}>Download file</button>
@@ -12693,7 +12827,7 @@ export default function App() {
                     <div style={{ marginTop: 8, padding: 7, border: `1px solid ${C.heading}`, borderRadius: 4, color: C.value, fontSize: 10.5, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
                       <b style={{ color: C.heading }}>On the machine:</b> the core has sidecut, so it isn't a rectangle. Line it up down the <b>centerline of the bed</b>, then zero X / Y / Z at the <b>bottom-left corner of its rectangular envelope</b> (the bounding box around the widest points — not the tapered edge itself). Do <b>not</b> set a work offset. This cut never centers — it's zeroed right at the corner.
                     </div>
-                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your measured core" : `✗ toolpath exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your measured core" : `✗ toolpath exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : isOutline ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR RAW CORE BLANK</div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>The blank you cut the profile FROM ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
@@ -12706,7 +12840,7 @@ export default function App() {
                       <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
                     </label>
                     <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>Only the outline cut centers — zero at the blank's bottom-left corner.</div>
-                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : isBaseOp ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR BASE MATERIAL (P-tex sheet)</div>
                     <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
@@ -12718,7 +12852,7 @@ export default function App() {
                       ))}
                     </div>
                     <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, fontFamily: "'JetBrains Mono', monospace" }}>Zero at the bottom-left corner of the base sheet. Tape or vacuum it down flat.</div>
-                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your base sheet" : `✗ exceeds sheet by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your base sheet" : `✗ exceeds sheet by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS</div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
@@ -12728,7 +12862,7 @@ export default function App() {
                       ))}
                     </div>
                     {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><NumberInput value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} min={0} onCommit={v => setCam("slatSheetW", v)} style={camInput} /></div>}
-                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? "#8ab98a" : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>)}
                 </div>
                 </AccordionSection>
@@ -12887,9 +13021,9 @@ export default function App() {
                       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
                         <rect x="8" y="150" width={W - 16} height="10" fill="rgba(200,147,90,0.35)" />
                         <rect x="22" y="160" width="8" height="70" fill="rgba(200,147,90,0.25)" /><rect x={W - 30} y="160" width="8" height="70" fill="rgba(200,147,90,0.25)" />
-                        <rect x="30" y="138" width={W - 60} height="12" rx="3" fill="rgba(237,230,216,0.25)" stroke="rgba(237,230,216,0.6)" />
-                        <text x={W / 2} y="110" textAnchor="middle" fill="#c8935a" fontSize="12" fontWeight="700" fontFamily="JetBrains Mono, monospace">{sc.label || "Off the machine"}</text>
-                        <text x={W / 2} y="128" textAnchor="middle" fill="#9b9388" fontSize="9.5" fontFamily="JetBrains Mono, monospace">off the machine</text>
+                        <rect x="30" y="138" width={W - 60} height="12" rx="3" fill={`rgba(${C.boneRGB},0.25)`} stroke={`rgba(${C.boneRGB},0.6)`} />
+                        <text x={W / 2} y="110" textAnchor="middle" fill={C.heading} fontSize="12" fontWeight="700" fontFamily="JetBrains Mono, monospace">{sc.label || "Off the machine"}</text>
+                        <text x={W / 2} y="128" textAnchor="middle" fill={C.label} fontSize="9.5" fontFamily="JetBrains Mono, monospace">off the machine</text>
                       </svg>);
                     const bx = 14, by = 26, bw = W - 28, bh = H - 52;            // the table
                     const px = W / 2, pw = 34, py0 = by + 20, py1 = by + bh - 20;  // the part, tail at the bottom
@@ -12898,25 +13032,25 @@ export default function App() {
                     const holes = ahS.length ? ahS.map(h => hy(h.y / L)) : [hy(0.25), hy(0.75)];
                     const tailY = Math.max(...holes);
                     const coreShape = `M ${px - 13} ${py1} L ${px - 15} ${hy(0.12)} Q ${px - 10} ${hy(0.5)} ${px - 16} ${hy(0.86)} L ${px - 14} ${py0} L ${px + 14} ${py0} L ${px + 16} ${hy(0.86)} Q ${px + 10} ${hy(0.5)} ${px + 15} ${hy(0.12)} L ${px + 13} ${py1} Z`;
-                    const faceCol = sc.face === "bottom" ? "#5bb3d8" : "#c8935a";
+                    const faceCol = sc.face === "bottom" ? C.blue : C.heading;
                     return (
                       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
-                        <rect x={bx} y={by} width={bw} height={bh} fill="rgba(155,147,136,0.06)" stroke="rgba(155,147,136,0.45)" strokeDasharray="3 3" />
-                        <text x={bx + 4} y={by - 6} fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">MACHINE TABLE</text>
+                        <rect x={bx} y={by} width={bw} height={bh} fill={`rgba(${C.dimRGB},0.06)`} stroke={`rgba(${C.dimRGB},0.45)`} strokeDasharray="3 3" />
+                        <text x={bx + 4} y={by - 6} fill={C.label} fontSize="8.5" fontFamily="JetBrains Mono, monospace">MACHINE TABLE</text>
                         {sc.part === "blank"
-                          ? <rect x={px - pw / 2} y={py0 - 8} width={pw} height={py1 - py0 + 16} fill={sc.face === "bottom" ? "rgba(91,179,216,0.16)" : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />
-                          : <path d={coreShape} fill={sc.face === "bottom" ? "rgba(91,179,216,0.16)" : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />}
+                          ? <rect x={px - pw / 2} y={py0 - 8} width={pw} height={py1 - py0 + 16} fill={sc.face === "bottom" ? `rgba(${C.blueRGB},0.16)` : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />
+                          : <path d={coreShape} fill={sc.face === "bottom" ? `rgba(${C.blueRGB},0.16)` : "rgba(200,147,90,0.18)"} stroke={faceCol} strokeWidth="1.4" />}
                         {sc.channel && [-1, 1].map(sg => <line key={sg} x1={px + sg * 11} y1={hy(0.1)} x2={px + sg * 11} y2={hy(0.88)} stroke="#e8552a" strokeWidth="3" opacity="0.8" />)}
                         {sc.channel && <text x={px + pw / 2 + 6} y={hy(0.82)} fill="#e8552a" fontSize="8" fontFamily="JetBrains Mono, monospace">channel</text>}
-                        <line x1={px} y1={py0 - 8} x2={px} y2={py1 + 8} stroke="rgba(237,230,216,0.3)" strokeDasharray="4 3" />
-                        <text x={px} y={py1 + 20} textAnchor="middle" fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">TAIL</text>
-                        <text x={px} y={py0 - 12} textAnchor="middle" fill="#9b9388" fontSize="8.5" fontFamily="JetBrains Mono, monospace">TIP</text>
+                        <line x1={px} y1={py0 - 8} x2={px} y2={py1 + 8} stroke={`rgba(${C.boneRGB},0.3)`} strokeDasharray="4 3" />
+                        <text x={px} y={py1 + 20} textAnchor="middle" fill={C.label} fontSize="8.5" fontFamily="JetBrains Mono, monospace">TAIL</text>
+                        <text x={px} y={py0 - 12} textAnchor="middle" fill={C.label} fontSize="8.5" fontFamily="JetBrains Mono, monospace">TIP</text>
                         <text x={px + pw / 2 + 6} y={hy(0.55)} fill={faceCol} fontSize="8.5" fontWeight="700" fontFamily="JetBrains Mono, monospace">{(sc.face || "top").toUpperCase()}</text>
                         <text x={px + pw / 2 + 6} y={hy(0.55) + 10} fill={faceCol} fontSize="8.5" fontWeight="700" fontFamily="JetBrains Mono, monospace">FACE UP</text>
-                        {(sc.pins || sc.drill) && holes.map((y, i) => <circle key={i} cx={px} cy={y} r="3.6" fill={sc.pins ? "#5bb3d8" : "none"} stroke="#5bb3d8" strokeWidth="1.3" />)}
-                        {sc.drill && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill="#5bb3d8" fontSize="8" fontFamily="JetBrains Mono, monospace">holes</text>}
-                        {sc.pins && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill="#5bb3d8" fontSize="8" fontFamily="JetBrains Mono, monospace">pins</text>}
-                        {(sc.zero === "set" || sc.zero === "keep" || sc.zero === "pin") && (() => { const zc = sc.zero === "keep" ? "#9b9388" : "#e8552a"; return (<g>
+                        {(sc.pins || sc.drill) && holes.map((y, i) => <circle key={i} cx={px} cy={y} r="3.6" fill={sc.pins ? C.blue : "none"} stroke={C.blue} strokeWidth="1.3" />)}
+                        {sc.drill && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill={C.blue} fontSize="8" fontFamily="JetBrains Mono, monospace">holes</text>}
+                        {sc.pins && <text x={px - pw / 2 - 4} y={holes[0] + 3} textAnchor="end" fill={C.blue} fontSize="8" fontFamily="JetBrains Mono, monospace">pins</text>}
+                        {(sc.zero === "set" || sc.zero === "keep" || sc.zero === "pin") && (() => { const zc = sc.zero === "keep" ? C.label : C.torch; return (<g>
                           <line x1={px - 11} y1={tailY} x2={px + 11} y2={tailY} stroke={zc} strokeWidth="1.5" /><line x1={px} y1={tailY - 11} x2={px} y2={tailY + 11} stroke={zc} strokeWidth="1.5" />
                           <text x={px - pw / 2 - 4} y={tailY + 14} textAnchor="end" fill={zc} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono, monospace">{sc.zero === "keep" ? "same X0 Y0" : "X0 Y0 here"}</text>
                         </g>); })()}
@@ -12925,10 +13059,10 @@ export default function App() {
                           <text x={px - pw / 2 - 3} y={py1 + 28} textAnchor="end" fill="#e8552a" fontSize="8" fontWeight="700" fontFamily="JetBrains Mono, monospace">X0 Y0</text>
                         </g>)}
                         {sc.flip && (<g>
-                          <path d={`M ${px + pw / 2 + 10} ${hy(0.22)} a 14 9 0 1 1 16 -10`} fill="none" stroke="#e8a33a" strokeWidth="1.5" />
-                          <path d={`M ${px + pw / 2 + 26} ${hy(0.22) - 10} l -1 -6 l 5 3 z`} fill="#e8a33a" />
-                          <text x={px + pw / 2 + 6} y={hy(0.22) + 18} fill="#e8a33a" fontSize="8" fontFamily="JetBrains Mono, monospace">turned over</text>
-                          <text x={px + pw / 2 + 6} y={hy(0.22) + 28} fill="#e8a33a" fontSize="8" fontFamily="JetBrains Mono, monospace">sideways</text>
+                          <path d={`M ${px + pw / 2 + 10} ${hy(0.22)} a 14 9 0 1 1 16 -10`} fill="none" stroke={C.amber} strokeWidth="1.5" />
+                          <path d={`M ${px + pw / 2 + 26} ${hy(0.22) - 10} l -1 -6 l 5 3 z`} fill={C.amber} />
+                          <text x={px + pw / 2 + 6} y={hy(0.22) + 18} fill={C.amber} fontSize="8" fontFamily="JetBrains Mono, monospace">turned over</text>
+                          <text x={px + pw / 2 + 6} y={hy(0.22) + 28} fill={C.amber} fontSize="8" fontFamily="JetBrains Mono, monospace">sideways</text>
                         </g>)}
                       </svg>);
                   };
@@ -12948,7 +13082,7 @@ export default function App() {
                       <div style={{ ...camLabel, color: C.heading }}>Edge rabbet</div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>{numIn("rabbetDepth", "Thickness (depth)", true)}{numIn("rabbetWidth", "Inset from finished edge", true)}{numIn("edgeOverlap", "Edge overlap")}</div>
                       <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>Inset is measured from the finished outer edge (the outside of the sidewall) inward. The cut runs from there out past the edge so no lip is left: {isPour ? "poured walls were cut on the outline," : "glued sidewalls can stick out past the outline (by however much the assembled core you measured for Shape the top face, under Width at the tip, is wider than the design),"} plus the edge overlap. It's cut on the underside, with the core on the alignment pins, and every pass is conventional milling so a glued sidewall isn't pulled off.</div>
-                      {!(camOpt.rabbetWidth > 0 && camOpt.rabbetDepth > 0) && <div style={{ color: "#e8a33a", fontSize: 10.5, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Enter the thickness and inset for your edges.</div>}
+                      {!(camOpt.rabbetWidth > 0 && camOpt.rabbetDepth > 0) && <div style={{ color: C.amber, fontSize: 10.5, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Enter the thickness and inset for your edges.</div>}
                     </div>) : null;
                   const rabbetHowRow = (
                     <div style={{ marginTop: 8 }}>
@@ -12966,7 +13100,7 @@ export default function App() {
                     </div>
                   </>) : isBand ? (<>
                     {camOpt.op === "rabbet" && rabbetHowRow}
-                    {camOpt.op === "rabbet" && !ski.alignMarks && <><div style={{ color: "#e8a33a", fontSize: 10.5, margin: "4px 0 6px", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>The CNC rabbet needs the alignment holes, drilled in the first file (through the blank into the spoilboard), so the core can go back on pins in the same place.</div>{alignBox}</>}
+                    {camOpt.op === "rabbet" && !ski.alignMarks && <><div style={{ color: C.amber, fontSize: 10.5, margin: "4px 0 6px", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>The CNC rabbet needs the alignment holes, drilled in the first file (through the blank into the spoilboard), so the core can go back on pins in the same place.</div>{alignBox}</>}
                     {partHead("This file")}{commonRow}{toolRow(camOpt.op)}{feedsHelper}
                     {camOpt.op === "channel" && <>{partHead("Alignment holes")}{alignBox}</>}
                     {bandPanel}
@@ -13039,7 +13173,7 @@ export default function App() {
                           <span style={{ color: s.op ? C.heading : C.labelDim, fontSize: 10, whiteSpace: "nowrap", fontFamily: "'JetBrains Mono', monospace" }}>{!s.op ? "No file" : active ? (s.noFile ? "By hand" : "1 file") : "Open \u2192"}</span>
                         </div>
                         <div style={{ color: C.labelDim, fontSize: 10.5, marginTop: 4, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>{s.sub}</div>
-                        {s.parts && <div style={{ marginTop: 6 }}>{s.parts.map(([nm, ok, msg], pi) => (<div key={pi} style={{ fontSize: 11, color: C.label, margin: "3px 0", fontFamily: "'JetBrains Mono', monospace" }}><span style={{ color: ok ? "#6fbf73" : "#e8a33a", marginRight: 6 }}>{ok ? "\u2713" : "!"}</span>{pi + 1}. {nm}{msg ? <span style={{ color: ok ? C.labelDim : "#e8a33a" }}>{" \u00b7 " + msg}</span> : null}</div>))}</div>}
+                        {s.parts && <div style={{ marginTop: 6 }}>{s.parts.map(([nm, ok, msg], pi) => (<div key={pi} style={{ fontSize: 11, color: C.label, margin: "3px 0", fontFamily: "'JetBrains Mono', monospace" }}><span style={{ color: ok ? "#6fbf73" : C.amber, marginRight: 6 }}>{ok ? "\u2713" : "!"}</span>{pi + 1}. {nm}{msg ? <span style={{ color: ok ? C.labelDim : C.amber }}>{" \u00b7 " + msg}</span> : null}</div>))}</div>}
                         {active && body}
                       </div>); })}
                   </>);
@@ -13061,7 +13195,7 @@ export default function App() {
                   <input type="checkbox" checked={camOpt.showMachine} onChange={e => setCam("showMachine", e.target.checked)} /> Show bed
                 </label>
                 {camResult.stats && camMachine && (
-                  <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? "#8ab98a" : "#e8552a" }}>
+                  <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? C.ok : "#e8552a" }}>
                     {camMachine.fits ? "✓ fits the bed" : "✗ exceeds the bed"} · part {camResult.stats.stockX}×{camResult.stats.stockY} {camResult.stats.unit}
                   </span>
                 )}
@@ -13077,7 +13211,7 @@ export default function App() {
                   </div>
                   );
                 })}
-                {camStock && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: camStock.fits ? "#8ab98a" : "#e8552a", alignSelf: "center" }}>{camStock.fits ? "✓ fits stock" : `✗ over by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</span>}
+                {camStock && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 700, color: camStock.fits ? C.ok : "#e8552a", alignSelf: "center" }}>{camStock.fits ? "✓ fits stock" : `✗ over by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</span>}
                 <div style={{ marginLeft: 4 }}>
                   <div style={{ color: C.label, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" }}>Work offset ({camOpt.units === "inch" ? "in" : "mm"}) - clamp clearance</div>
                   <div style={{ display: "flex", gap: 4 }}>
@@ -13151,7 +13285,7 @@ export default function App() {
                 </label>
               </div>
               )}
-              <ToolpathSimPane gcode={camResult.gcode} ok={!!camResult.stats} preview3D={preview3D} machine={camMachine} stock={camStock} toolDias={simToolDias} playReq={simReq} C={C} />
+              <ToolpathSimPane key={themeName} gcode={camResult.gcode} ok={!!camResult.stats} preview3D={preview3D} machine={camMachine} stock={camStock} toolDias={simToolDias} playReq={simReq} C={C} />
               <div style={{ display: "flex", gap: 16, alignItems: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.labelDim }}>
                 <span>rapids dashed · cuts colored by depth</span>
                 {camResult.stats && <span style={{ marginLeft: "auto" }}>Z {camResult.stats.minZ}…{camResult.stats.maxZ} {camResult.stats.unit} · ~{(camResult.stats.cutDistMM / 1000).toFixed(1)} m · {camResult.stats.estMin} min · {camResult.stats.lines.toLocaleString()} lines</span>}
@@ -13222,7 +13356,7 @@ export default function App() {
               <div style={{ color: C.labelDim, fontSize: 10.5, whiteSpace: "nowrap" }}>{wnStep + 1} of {n}</div>
             </div>
             <div style={{ color: C.label, fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>{it.body}</div>
-            {wnLost && <div style={{ color: "#e8a33a", fontSize: 10.5, marginTop: 6 }}>Couldn't bring this spot on screen here. You can still go on to the next one.</div>}
+            {wnLost && <div style={{ color: C.amber, fontSize: 10.5, marginTop: 6 }}>Couldn't bring this spot on screen here. You can still go on to the next one.</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }}>
               {navBtn("End tour", endTour, false, false)}
               <span style={{ flex: 1 }} />
