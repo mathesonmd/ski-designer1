@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-16b";
+const APP_BUILD = "2026-10-17";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -10122,7 +10122,12 @@ export default function App() {
 
   const handleNewDesign = useCallback(() => {
     if (window.confirm("Start a new design? Any unsaved changes will be lost (autosave will keep a copy).")) {
-      setSki({ ...DEFAULT_SKI, designName: "Untitled Design" });
+      // Start over in the mode you're in: a fresh board in the snowboard designer, a fresh ski in the ski designer.
+      // (Before, New always loaded the default ski, which switched a board user to skis; going back to Board then
+      // brought back the old board design.)
+      setSki(s => s.mode === "snowboard"
+        ? { ...SNOWBOARD_PRESETS[0], designName: "Untitled Board", tipSymmetric: true, tailSymmetric: true }
+        : { ...DEFAULT_SKI, designName: "Untitled Design" });
       setTopsheet(t => ({ ...t, src: null, name: null }));
       setTsLayers(DEFAULT_TS_LAYERS());
     }
