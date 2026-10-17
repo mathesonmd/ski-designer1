@@ -675,7 +675,7 @@ const WHATS_NEW = {
   title: "What's new",
   items: [
     { title: "Cut 2 or 4 cores at once", go: "cam", target: "cam-batch",
-      body: "In the CAM workspace, Cores at once lays 2 or 4 cores side by side on the bed, and every machine step then covers all of them. Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You set the gap between cores (it starts at two bit diameters), and you can mirror every other core to get left and right skis." },
+      body: "In the CAM workspace, Cores at once cuts 2 or 4 cores from separate blanks laid side by side on the bed, each core centered in its own blank, and every machine step then covers all of them. Enter the width of one blank and the gap between blanks (it starts at 1 inch). Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You can mirror every other core to get left and right skis." },
     { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
       body: "Make the waist wider than the tip and the tail for a reverse sidecut: the radius now shows as a reverse radius, and Single radius draws one arc on each side. Under Side Profile, camber can go below zero (reverse camber), and with the rocker unlinked the two rockers can each run up to half the length, so they meet in the middle for one continuous curve. The new Reverse/Reverse template sets all of this up. The old Spatula template is now called Wide Shovel, since it has a normal sidecut." },
     { title: "Light mode", go: "plan", target: "theme",
@@ -4734,15 +4734,17 @@ function buildCoreCAM(ski, opt) {
   return { gcode: _gc, stats: { lines: _lines, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : o.baseOp ? "base" : "blank", setThick: disp.stockThick } };
 }
 
-// Batch: the same core (or alternating mirror images) cut 2 or 4 at a time, side by side across the bed. Each core is
-// built as its own program, offset sideways by the pitch (widest point of the ski plus the gap), then merged: one
+// Batch: the same core (or alternating mirror images) cut 2 or 4 at a time from separate blanks laid side by side across
+// the bed, each core centered in its own blank. Each core is built as its own program, offset sideways by the pitch
+// (blank width plus the gap between blanks, so corner to corner and center to center are the same), then merged: one
 // header, and for each tool, core 1's tool change followed by every core's moves for that tool, one core at a time.
 // Every file is zeroed on core 1's tail hole, so each core's holes, and so its pins, sit at the same place in every file.
 function buildBatchCAM(ski, opt, bt) {
-  const N = bt.n, inch = opt.units === "inch", uL = inch ? 25.4 : 1;
-  let wMin = 1e9, wMax = -1e9; for (const p of getFullOutlinePoints(ski)) { wMin = Math.min(wMin, p.x); wMax = Math.max(wMax, p.x); }
-  const gapU = bt.gap, pitchU = (wMax - wMin) / uL + gapU;   // user units
-  if (!(gapU >= 0)) throw new Error("Enter the gap between cores.");
+  const N = bt.n, inch = opt.units === "inch", uU = inch ? "in" : "mm";
+  const blankU = bt.blankW, gapU = bt.gap;   // user units
+  if (!(blankU > 0)) throw new Error("Enter the width of one core blank in the Cores at once box, so the app knows how far apart the blanks sit.");
+  if (!(gapU >= 0)) throw new Error("Enter the gap between blanks.");
+  const pitchU = blankU + gapU;
   const lateralKey = opt.partAxis === "x" ? "offsetY" : "offsetX";
   const runs = [];
   for (let j = 0; j < N; j++) {
@@ -4751,9 +4753,11 @@ function buildBatchCAM(ski, opt, bt) {
     if (!r.stats) return r;
     runs.push({ ...r, mirror, phys });
   }
-  // Neighboring cuts must not overlap: one core's cut width (bit center extents plus the bit) has to fit in the pitch.
+  // A core's cut (bit center extents plus the bit) must stay off the next blank: half of it has to fit within half a blank
+  // plus the gap on each side.
   const s0 = runs[0].stats, cutW = (opt.partAxis === "x" ? s0.machY : s0.machX) + (opt.toolDia || 0);
-  if (cutW > pitchU + 1e-6) throw new Error(`The cuts for neighboring cores would overlap by ${+(cutW - pitchU).toFixed(inch ? 3 : 1)} ${inch ? "in" : "mm"}. Make the gap between cores bigger.`);
+  const over = cutW / 2 - (blankU / 2 + gapU);
+  if (over > 1e-6) throw new Error(`This cut reaches ${+over.toFixed(inch ? 3 : 1)} ${uU} into the next blank. Make the gap between blanks bigger, or check the blank width.`);
   const split = txt => {
     const L = txt.split("\n"), pre = [], segs = [], foot = []; let cur = null, inTc = false, done = false;
     for (const l of L) {
@@ -4771,13 +4775,13 @@ function buildBatchCAM(ski, opt, bt) {
   const out = [];
   for (const l of parts[0].pre) {
     const m = l.match(/^(.*NEEDED: )([\d.]+) x ([\d.]+)(.*)$/);
-    if (m) { out.push(`${m[1]}${m[2]} x ${fmt(+m[3] + (N - 1) * pitchU)}${m[4]}`); continue; }
+    if (m) { out.push(`${m[1]}${m[2]} x ${m[3]}${m[4]} (cut from each of the ${N} blanks)`); continue; }
     if (/Origin: X0 Y0 = center of the TAIL dowel hole/.test(l)) { out.push(l.replace("TAIL dowel hole", "TAIL dowel hole of core 1")); continue; }
     out.push(l);
   }
   const cm = (t) => (opt.postOverride && opt.postOverride.comment === "()") || /^\(/.test(parts[0].pre.find(l => /^[;(]/.test(l)) || "") ? "(" + t.replace(/[()]/g, "") + ")" : "; " + t;
   // Insert the batch summary after the first header comment line.
-  out.splice(1, 0, cm(`BATCH: ${N} cores side by side, ${fmt(pitchU)} ${inch ? "in" : "mm"} apart center to center (${fmt(gapU)} gap between the widest points), core 1 nearest X0${bt.mirrorAlt ? ", cores 2 and 4 mirrored (the other foot)" : ""}`));
+  out.splice(1, 0, cm(`BATCH: ${N} blanks side by side, ${fmt(blankU)} ${uU} wide with ${fmt(gapU)} ${uU} between them, so ${fmt(pitchU)} ${uU} corner to corner (and center to center). Each core is centered in its own blank. Core 1 is at X0${bt.mirrorAlt ? "; cores 2 and 4 mirrored (the other foot)" : ""}`));
   for (let si = 0; si < parts[0].segs.length; si++) {
     out.push(...parts[0].segs[si].tc);
     const safe = (parts[0].segs[si].body.find(l => /^(N\d+ )?G0 Z-?[\d.]+\s*$/.test(l)) || "").replace(/^N\d+ /, "");
@@ -4796,7 +4800,7 @@ function buildBatchCAM(ski, opt, bt) {
   const lat = opt.partAxis === "x" ? "machY" : "machX";
   const stats = { ...s0, lines: g.length, cuts: sum("cuts"), rapids: sum("rapids"), cutDistMM: sum("cutDistMM"), estMin: +sum("estMin").toFixed(1),
     minZ: Math.min(...st.map(s => s.minZ)), maxZ: Math.max(...st.map(s => s.maxZ)),
-    [lat]: +(s0[lat] + (N - 1) * pitchU).toFixed(inch ? 2 : 0), stockY: +(s0.stockY + (N - 1) * pitchU).toFixed(inch ? 3 : 1), batch: { n: N, pitch: +pitchU.toFixed(inch ? 3 : 1), mirrorAlt: !!bt.mirrorAlt } };
+    [lat]: +(s0[lat] + (N - 1) * pitchU).toFixed(inch ? 2 : 0), stockY: +(s0.stockY + (N - 1) * pitchU).toFixed(inch ? 3 : 1), batch: { n: N, pitch: +pitchU.toFixed(inch ? 3 : 1), blankW: blankU, gap: gapU, mirrorAlt: !!bt.mirrorAlt } };
   return { gcode, stats };
 }
 // Top-down toolpath preview: parses the generated G-code and draws rapids (dim/dashed) and cutting
@@ -9184,7 +9188,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // must scale when switching mm<->inch. Used BOTH by the unit toggle and by the load-time defensive pass, so
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
-  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap",
+  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap", "batchBlankW",
   "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
@@ -9868,7 +9872,7 @@ export default function App() {
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabPerSide: 2, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
-      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional", taperPattern: "loops", batchN: 1, batchGap: null, batchMirror: false,
+      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional", taperPattern: "loops", batchN: 1, batchGap: null, batchBlankW: null, batchMirror: false,
       // Sidewalls: "glue" (strips glued on after the cutout) or "pour" (channel cut first, filled with poly). Edge
       // rabbet: "router" (by hand, instructions only; the default) or "cnc" (its own file on the underside). Rabbet sizes have no default: the
       // builder enters them. Channel width 10 mm and 1.5 mm of wood left under it follow the builder's stated
@@ -9997,7 +10001,8 @@ export default function App() {
         // Poured sidewalls with inserts: the whole planed blank is turned over onto the pins, which swaps the cores
         // end for end across the bed (core 1 lands where the last core was). Only matters when alternate cores are mirrored.
         const reversed = camOpt.job === "coreInserts" && pour && camOpt.op !== "channel";
-        return buildBatchCAM(ski, opt, { n: bn, gap: camOpt.batchGap != null ? camOpt.batchGap : 2 * (camOpt.outlineToolDia || 0), mirrorAlt: !!camOpt.batchMirror, reversed });
+        const inchB = camOpt.units === "inch";
+        return buildBatchCAM(ski, opt, { n: bn, blankW: camOpt.batchBlankW > 0 ? camOpt.batchBlankW : (camOpt.stockW > 0 ? camOpt.stockW : 0), gap: camOpt.batchGap != null ? camOpt.batchGap : (inchB ? 1 : 25.4), mirrorAlt: !!camOpt.batchMirror, reversed });
       }
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
@@ -10049,7 +10054,7 @@ export default function App() {
     const pinOn = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks);
     const pourS = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
     const firstZeroed = !(camOpt.op === "rabbet" && camOpt.job === "core" && !camOpt.pinOrigin);   // core job, glued walls: the first file was zeroed on the stock corner
-    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" || (camOpt.op === "outline" && camOpt.job === "core" && !pourS) ? `Before anything else: jog to where you want the TAIL-side alignment hole${(camOpt.batchN || 1) > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") ? " of core 1 (the cores line up across the blank toward +" + (camOpt.partAxis === "x" ? "Y" : "X") + ", so leave room for core 1's half-width on the other side)" : ", on the lengthwise centerline of the blank"}, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" || (camOpt.op === "outline" && camOpt.job === "core" && !pourS) ? `Before anything else: jog to where you want the TAIL-side alignment hole${(camOpt.batchN || 1) > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") ? " of core 1, on the lengthwise centerline of core 1's blank (the one at the " + (camOpt.partAxis === "x" ? "front" : "left") + " end of the row)" : ", on the lengthwise centerline of the blank"}, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
     const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
     const ahS = ski.alignMarks ? alignHoles(ski) : [];
@@ -10109,8 +10114,8 @@ export default function App() {
     if (s.batch) {
       // Batch: say where every core sits and that each goes back on its own pins.
       const bp = s.batch.pitch;
-      rows.push(["Cores in this file", `${s.batch.n}, side by side, ${bp} ${uu} apart center to center${s.batch.mirrorAlt ? " (cores 2 and 4 mirrored)" : ""}`]);
-      steps.splice(1, 0, `This file cuts ${s.batch.n} cores side by side. Core 1 sits on the alignment holes at X0 Y0; core 2 is ${bp} ${uu} over in +${camOpt.partAxis === "x" ? "Y" : "X"}${s.batch.n > 2 ? `, core 3 ${+(2 * bp).toFixed(3)} and core 4 ${+(3 * bp).toFixed(3)} ${uu}` : ""}. Each core has its own pair of alignment holes and goes back on its own pins, in the same place it was cut.`);
+      rows.push(["Cores in this file", `${s.batch.n} blanks, ${s.batch.blankW} ${uu} wide with ${s.batch.gap} ${uu} between them (${bp} ${uu} corner to corner)${s.batch.mirrorAlt ? ", cores 2 and 4 mirrored" : ""}`]);
+      steps.splice(1, 0, `This file cuts ${s.batch.n} cores, one in each of ${s.batch.n} blanks laid side by side ${s.batch.gap} ${uu} apart, each core centered in its own blank. Core 1's blank is at X0 Y0; each next blank is ${bp} ${uu} further over in +${camOpt.partAxis === "x" ? "Y" : "X"}, corner to corner. Each core has its own pair of alignment holes on its blank's centerline and goes back on its own pins, in the same place it was cut.`);
     }
     const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(CAM_STEP_NAMES[camOpt.op] || camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">${t("study.print", "Print / Save PDF")}</button></body></html>`;
@@ -13027,7 +13032,7 @@ export default function App() {
                     const setZero = (face) => [
                       "Lay the flat blank on the table, " + face + " face up, with its length running along the machine's long axis. Hold it down clear of the cut.",
                       ((camOpt.batchN || 1) > 1
-                        ? (() => { let a = 1e9, b = -1e9; try { for (const q of getFullOutlinePoints(ski)) { a = Math.min(a, q.x); b = Math.max(b, q.x); } } catch (e) {} return "Jog to where core 1's tail alignment hole should go. The cores line up across the blank toward +" + (camOpt.partAxis === "x" ? "Y" : "X") + ", so core 1's centerline needs to be at least half the ski's widest point (" + cvL((b - a) / 2) + ") in from the blank's edge on the other side, plus whatever margin you want"; })()
+                        ? "Jog to where core 1's tail alignment hole should go: on the lengthwise centerline of core 1's blank, the one at the " + (camOpt.partAxis === "x" ? "front" : "left") + " end of the row"
                         : "Jog to where the tail alignment hole should go: on the blank's lengthwise centerline") + (tailHole ? ", with room for the ski behind it (the hole is " + cvL(tailHole.y) + " in from the ski's tail end)" : "") + ".",
                       "Set X0 Y0 there. " + zText,
                       "Write down the machine coordinates of that point (your controller shows them as machine position). Every later file starts from this exact point.",
@@ -13110,7 +13115,7 @@ export default function App() {
                     if (bnW > 1) {
                       let firstSet = true;
                       for (const pg of pages) {
-                        if (pg.scene && pg.scene.zero === "set" && firstSet) { firstSet = false; pg.points.splice(1, 0, `You're cutting ${bnW} cores side by side, so the blank has to be wide enough for all of them. Core 1 is the one at X0 Y0; the others line up to its +${camOpt.partAxis === "x" ? "Y" : "X"} side.`); }
+                        if (pg.scene && pg.scene.zero === "set" && firstSet) { firstSet = false; const bw = camOpt.batchBlankW > 0 ? camOpt.batchBlankW : camOpt.stockW, gp = camOpt.batchGap != null ? camOpt.batchGap : (camOpt.units === "inch" ? 1 : 25.4); pg.points[0] = `Lay the ${bnW} flat blanks on the table, top face up, side by side with their length along the machine's long axis${bw > 0 ? `, ${gp} ${uu} apart (${+(bw + gp).toFixed(3)} ${uu} corner to corner)` : ""}. Mark the centerline on both ends of each blank and line them up square with the machine. Hold them down clear of the cut.`; pg.points.splice(1, 0, `Core 1's blank is the one at the ${camOpt.partAxis === "x" ? "front" : "left"} end of the row; each core is cut centered in its own blank.`); }
                         else if (pg.scene && pg.scene.pins) pg.points.splice(Math.min(2, pg.points.length), 0, "Every core goes on its own pair of pins, in the same place it was cut: core 1 on the holes at X0 Y0, the others in order beside it.");
                       }
                     }
@@ -13241,31 +13246,32 @@ export default function App() {
                       </div>
                     )}
                     {(job === "coreInserts" || job === "core") && (() => {
-                      const bn = camOpt.batchN || 1, bt = camOpt.outlineToolDia || 0;
-                      const gap = camOpt.batchGap != null ? camOpt.batchGap : 2 * bt;
-                      let wMin = 1e9, wMax = -1e9; try { for (const p of getFullOutlinePoints(ski)) { wMin = Math.min(wMin, p.x); wMax = Math.max(wMax, p.x); } } catch (e) {}
-                      const inchB = camOpt.units === "inch", wU = (wMax - wMin) / (inchB ? 25.4 : 1), pitch = wU + gap, fmtB = v => +(+v).toFixed(inchB ? 3 : 1);
-                      const pick = n => { const patch = { batchN: n }; if (n > 1) { patch.pinOrigin = true; if (camOpt.batchGap == null) patch.batchGap = +(2 * bt).toFixed(inchB ? 3 : 2); if (!ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); } setCamMany(patch); };
+                      const bn = camOpt.batchN || 1, inchB = camOpt.units === "inch";
+                      const gap = camOpt.batchGap != null ? camOpt.batchGap : (inchB ? 1 : 25.4);
+                      const blankW = camOpt.batchBlankW > 0 ? camOpt.batchBlankW : (camOpt.stockW > 0 ? camOpt.stockW : null);
+                      const pitch = blankW != null ? blankW + gap : null, fmtB = v => +(+v).toFixed(inchB ? 3 : 1);
+                      const pick = n => { const patch = { batchN: n }; if (n > 1) { patch.pinOrigin = true; if (camOpt.batchGap == null) patch.batchGap = inchB ? 1 : 25.4; if (!(camOpt.batchBlankW > 0) && camOpt.stockW > 0) patch.batchBlankW = camOpt.stockW; if (!ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); } setCamMany(patch); };
                       return (
                         <div data-wn="cam-batch" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
                           <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Cores at once</div>
                           <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
                             {[1, 2, 4].map(n => <button key={n} onClick={() => pick(n)} style={camSeg(bn === n)}>{n === 1 ? "1 core" : n + " cores"}</button>)}
                           </div>
-                          {bn === 1 ? <div style={{ ...camSmall, lineHeight: 1.4 }}>Cut 2 or 4 cores in one go, side by side on the bed. Every machine step then covers all of them.</div> : (<>
+                          {bn === 1 ? <div style={{ ...camSmall, lineHeight: 1.4 }}>Cut 2 or 4 cores in one go from separate blanks laid side by side on the bed. Every machine step then covers all of them.</div> : (<>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 4 }}>
-                              <div><div style={camSmall}>Gap between cores {uu}</div><NumberInput value={gap} step={camOpt.units === "inch" ? 0.05 : 1} min={0} onCommit={v => setCam("batchGap", Math.max(0, v))} style={camInput} /></div>
-                              <div style={{ ...camSmall, alignSelf: "end", lineHeight: 1.4, paddingBottom: 4 }}>{fmtB(pitch)} {uu} center to center · {fmtB((bn - 1) * pitch + wU)} {uu} wide in all</div>
+                              <div><div style={camSmall}>Width of one blank {uu}</div><NumberInput value={blankW != null ? blankW : ""} step={inchB ? 0.125 : 1} min={0} onCommit={v => setCam("batchBlankW", Math.max(0, v))} style={camInput} /></div>
+                              <div><div style={camSmall}>Gap between blanks {uu}</div><NumberInput value={gap} step={inchB ? 0.125 : 1} min={0} onCommit={v => setCam("batchGap", Math.max(0, v))} style={camInput} /></div>
                             </div>
+                            <div style={{ ...camSmall, lineHeight: 1.4, marginTop: 4 }}>{pitch != null ? `Blanks ${fmtB(pitch)} ${uu} apart, corner to corner (the same as center to center) · ${fmtB((bn - 1) * pitch + blankW)} ${uu} across all ${bn}` : "Enter the width of one blank."}</div>
                             <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", color: C.label, fontSize: 11.5, marginTop: 7, fontFamily: "'JetBrains Mono', monospace" }}>
                               <input type="checkbox" checked={!!camOpt.batchMirror} onChange={e => setCam("batchMirror", e.target.checked)} style={{ marginTop: 2 }} />
                               <span>Mirror every other core<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4 }}>Cores 2 and 4 come out as mirror images (the other foot's ski), so each pair is a left and a right. Only matters if the two edges of your ski differ; a symmetric ski comes out the same either way.</span></span>
                             </label>
                             <div style={{ ...camSmall, lineHeight: 1.45, marginTop: 6 }}>
-                              The cores sit side by side across the bed, core 1 at the alignment hole where X0 Y0 is and the others each {fmtB(pitch)} {uu} further over. The gap is between the widest points of neighboring skis; it starts at two bit diameters. Each core gets its own pair of alignment holes, and every file in this batch is zeroed on core 1's tail hole, so each core goes back on its own pins. In each file the bit finishes one core before moving to the next, and each tool runs on all the cores before the next tool change.
+                              Lay the blanks side by side with the gap between them, each core centered in its own blank. Core 1's blank is the one at X0 Y0; the others follow in +{camOpt.partAxis === "x" ? "Y" : "X"}. Marking the centerline on the ends of each blank makes lining them up easy: each core's alignment holes and cuts sit on its blank's centerline. Each core gets its own pair of alignment holes, every file in this batch is zeroed on core 1's tail hole, and each core goes back on its own pins. The gap starts at 1 inch. In each file the bit finishes one core before moving to the next, and each tool runs on all the cores before the next tool change.
                             </div>
                             <div style={{ color: C.amber, fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
-                              Keep the gap and the number of cores the same for every file in this batch. The alignment holes are drilled where the first file puts them; changing either one afterward moves the later files off the holes.
+                              Keep the blank width, the gap and the number of cores the same for every file in this batch. The alignment holes are drilled where the first file puts them; changing any of them afterward moves the later files off the holes.
                             </div>
                           </>)}
                         </div>
