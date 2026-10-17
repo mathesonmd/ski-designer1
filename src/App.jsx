@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-17b";
+const APP_BUILD = "2026-10-17c";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -4800,7 +4800,7 @@ function buildBatchCAM(ski, opt, bt) {
   const lat = opt.partAxis === "x" ? "machY" : "machX";
   const stats = { ...s0, lines: g.length, cuts: sum("cuts"), rapids: sum("rapids"), cutDistMM: sum("cutDistMM"), estMin: +sum("estMin").toFixed(1),
     minZ: Math.min(...st.map(s => s.minZ)), maxZ: Math.max(...st.map(s => s.maxZ)),
-    [lat]: +(s0[lat] + (N - 1) * pitchU).toFixed(inch ? 2 : 0), stockY: +(s0.stockY + (N - 1) * pitchU).toFixed(inch ? 3 : 1), batch: { n: N, pitch: +pitchU.toFixed(inch ? 3 : 1), blankW: blankU, gap: gapU, mirrorAlt: !!bt.mirrorAlt } };
+    [lat]: +(s0[lat] + (N - 1) * pitchU).toFixed(inch ? 2 : 0), stockY: +(s0.stockY + (N - 1) * pitchU).toFixed(inch ? 3 : 1), batch: { n: N, pitch: +pitchU.toFixed(inch ? 3 : 1), blankW: blankU, gap: gapU, mirrorAlt: !!bt.mirrorAlt, coreMachX: s0.machX, coreMachY: s0.machY } };
   return { gcode, stats };
 }
 // Top-down toolpath preview: parses the generated G-code and draws rapids (dim/dashed) and cutting
@@ -4883,9 +4883,14 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
   const pcx = (bx0 + bx1) / 2, pcy = (by0 + by1) / 2;
   const bedOX = pinZero ? pcx - bedX1 / 2 : 0, bedOY = pinZero ? pcy - bedY1 / 2 : 0;
   const stkOX = pinZero ? pcx - stkX1 / 2 : 0, stkOY = pinZero ? pcy - stkY1 / 2 : 0;
+  // Batch: one blank per core, centered on that core's centerline (core 1 on X0 Y0's line, the rest each a pitch further).
+  const sb = hasStock && stock.batch;
+  const stkRects = !hasStock ? [] : sb
+    ? Array.from({ length: sb.n }, (_, j) => sb.lateral === "x" ? { ox: j * sb.pitch - stkX1 / 2, oy: pcy - stkY1 / 2 } : { ox: pcx - stkX1 / 2, oy: j * sb.pitch - stkY1 / 2 })
+    : [{ ox: stkOX, oy: stkOY }];
   let mnx = bx0, mxx = bx1, mny = by0, mxy = by1;
   if (hasBed) { mnx = Math.min(mnx, bedOX); mny = Math.min(mny, bedOY); mxx = Math.max(mxx, bedOX + bedX1); mxy = Math.max(mxy, bedOY + bedY1); }
-  if (hasStock) { mnx = Math.min(mnx, stkOX); mny = Math.min(mny, stkOY); mxx = Math.max(mxx, stkOX + stkX1); mxy = Math.max(mxy, stkOY + stkY1); }
+  for (const r of stkRects) { mnx = Math.min(mnx, r.ox); mny = Math.min(mny, r.oy); mxx = Math.max(mxx, r.ox + stkX1); mxy = Math.max(mxy, r.oy + stkY1); }
   if ((hasBed || hasStock) && !pinZero) { mnx = Math.min(mnx, 0); mny = Math.min(mny, 0); }   // include the zero corner
   const bw = (mxx - mnx) || 1, bh = (mxy - mny) || 1, pad = 26;
   const sBase = Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh);
@@ -4902,7 +4907,8 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
     ctx.font = "9px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
     ctx.fillText(machine.fits ? "MACHINE BED" : "EXCEEDS BED", MXc(bedOX, 0) + 3, MYc(0, bedOY + bedY1) + 11);
   }
-  if (hasStock) {
+  if (hasStock) stkRects.forEach((r, k) => {
+    const stkOX = r.ox, stkOY = r.oy;
     const col = stock.fits ? "200,147,90" : "232,85,42";
     ctx.fillStyle = `rgba(${col},0.12)`; ctx.fillRect(MXc(stkOX, 0), MYc(0, stkOY + stkY1), stock.xExt * s, stock.yExt * s);
     ctx.strokeStyle = `rgba(${col},0.95)`; ctx.lineWidth = 2; ctx.setLineDash([]);
@@ -4913,8 +4919,9 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim) {
     ctx.beginPath(); ctx.moveTo(MXc(stkOX, 0), MYc(0, stkOY + stock.yExt / 2)); ctx.lineTo(MXc(stkOX + stkX1, 0), MYc(0, stkOY + stock.yExt / 2)); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = `rgba(${col},1)`; ctx.font = "bold 10px 'JetBrains Mono', monospace"; ctx.textAlign = "left";
-    ctx.fillText(stock.fits ? "YOUR STOCK" : "TOOLPATH EXCEEDS STOCK", MXc(stkOX, 0) + 4, MYc(0, stkOY + stkY1) + 14);
-  }
+    ctx.fillText(sb ? (stock.xExt * s < 90 ? String(k + 1) : `BLANK ${k + 1}${stock.fits ? "" : " · CUT EXCEEDS IT"}`) : (stock.fits ? "YOUR STOCK" : "TOOLPATH EXCEEDS STOCK"), MXc(stkOX, 0) + 4, MYc(0, stkOY + stkY1) + 14);
+  });
+
   if (pinZero) {
     // X0 Y0 marker: the center of the tail alignment hole, where these files are zeroed.
     const zx = MXc(0, 0), zy = MYc(0, 0);
@@ -10025,9 +10032,17 @@ export default function App() {
   const camStock = useMemo(() => {
     const isB = camOpt.op === "base";
     const L = (isB ? camOpt.baseStockL : camOpt.stockL) || 0, W = (isB ? camOpt.baseStockW : camOpt.stockW) || 0;   // base op uses its own material size
-    if (!L || !W || !camResult || !camResult.stats) return null;
+    if (!L || !(W || (camResult && camResult.stats && camResult.stats.batch)) || !camResult || !camResult.stats) return null;
     const xExt = camOpt.partAxis === "y" ? W : L, yExt = camOpt.partAxis === "y" ? L : W;   // along machine X / Y
-    const s = camResult.stats, mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
+    const s = camResult.stats;
+    if (s.batch) {
+      // Batch: one blank per core, each the batch blank width, side by side at the batch spacing. Fit is checked per core.
+      const bw = W > 0 ? W : s.batch.blankW, bx = camOpt.partAxis === "y" ? bw : L, by = camOpt.partAxis === "y" ? L : bw;
+      const cx = s.batch.coreMachX, cy = s.batch.coreMachY;
+      return { xExt: bx, yExt: by, fits: cx <= bx + 1e-6 && cy <= by + 1e-6, overX: +(cx - bx).toFixed(2), overY: +(cy - by).toFixed(2), pinZero: true,
+        batch: { n: s.batch.n, pitch: s.batch.pitch, lateral: camOpt.partAxis === "y" ? "x" : "y" } };
+    }
+    const mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
     return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks) };
   }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, ski.alignMarks, camResult]);
   // Bit diameters by tool number, for drawing the bit in the simulation when the file itself doesn't say
@@ -12909,6 +12924,20 @@ export default function App() {
                 <div style={{ ...camSmall, lineHeight: 1.4, marginBottom: 6 }}>Where X and Y are zeroed for files that don't use the alignment holes. Two-sided core work zeroes on the tail alignment hole instead.</div>
                 </AccordionSection>
                 <AccordionSection isOpen={camSec.materials} onToggle={() => toggleCamSec("materials")} title="Your material sizes">
+                {(camOpt.batchN || 1) > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") && (() => {
+                  const inchB = camOpt.units === "inch", gap = camOpt.batchGap != null ? camOpt.batchGap : (inchB ? 1 : 25.4);
+                  const bw = camOpt.batchBlankW > 0 ? camOpt.batchBlankW : (camOpt.stockW > 0 ? camOpt.stockW : null), fmtB = v => +(+v).toFixed(inchB ? 3 : 1);
+                  return (
+                    <div style={{ marginBottom: 10, padding: 9, border: `1px solid ${C.heading}`, borderRadius: 5, background: C.inputBg }}>
+                      <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>{camOpt.batchN} BLANKS, SIDE BY SIDE</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <div><div style={camSmall}>Width of one blank {uu}</div><NumberInput value={bw != null ? bw : ""} step={inchB ? 0.125 : 1} min={0} onCommit={v => setCam("batchBlankW", Math.max(0, v))} style={camInput} /></div>
+                        <div><div style={camSmall}>Gap between blanks {uu}</div><NumberInput value={gap} step={inchB ? 0.125 : 1} min={0} onCommit={v => setCam("batchGap", Math.max(0, v))} style={camInput} /></div>
+                      </div>
+                      <div style={{ ...camSmall, lineHeight: 1.45, marginTop: 5 }}>{bw != null ? `Blanks ${fmtB(bw + gap)} ${uu} apart, corner to corner (and center to center). Each core is cut centered in its own blank. Same settings as in Cores at once below; keep them the same for every file in the batch.` : "Enter the width of one blank, so the app knows how far apart the blanks sit."}</div>
+                    </div>
+                  );
+                })()}
                 <div style={{ marginBottom: 10, padding: 9, border: `1px solid ${C.heading}`, borderRadius: 5, background: C.inputBg }}>
                   {(camOpt.op === "taper" || isMold) ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR ASSEMBLED CORE — measure after gluing walls</div>
@@ -12920,9 +12949,13 @@ export default function App() {
                         <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
                       ))}
                     </div>
+                    {camOpt.pinOrigin && ski.alignMarks ? (
+                    <div style={{ marginTop: 8, padding: 7, border: `1px solid ${C.heading}`, borderRadius: 4, color: C.value, fontSize: 10.5, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      <b style={{ color: C.heading }}>On the machine:</b> set the core top face up on its alignment pins, the same way it was cut out (tail at the same end). This file is zeroed on the center of the tail alignment hole, so keep that zero; don't zero on a corner. The sizes above are only used to check the carve stays on the core.
+                    </div>) : (
                     <div style={{ marginTop: 8, padding: 7, border: `1px solid ${C.heading}`, borderRadius: 4, color: C.value, fontSize: 10.5, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
                       <b style={{ color: C.heading }}>On the machine:</b> the core has sidecut, so it isn't a rectangle. Line it up down the <b>centerline of the bed</b>, then zero X / Y / Z at the <b>bottom-left corner of its rectangular envelope</b> (the bounding box around the widest points — not the tapered edge itself). Do <b>not</b> set a work offset. This cut never centers — it's zeroed right at the corner.
-                    </div>
+                    </div>)}
                     {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your measured core" : `✗ toolpath exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : isOutline ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR RAW CORE BLANK</div>
@@ -12932,10 +12965,14 @@ export default function App() {
                         <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
                       ))}
                     </div>
+                    {camOpt.pinOrigin && ski.alignMarks ? (
+                      <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>This file is zeroed on the tail alignment hole, on the blank's lengthwise centerline, so the core is cut centered in the blank. See the steps below for where to set X0 Y0.</div>
+                    ) : (<>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: camOpt.centerInStock ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace", marginTop: 7 }}>
                       <input type="checkbox" checked={camOpt.centerInStock} onChange={e => setCam("centerInStock", e.target.checked)} /> Center profile in stock (follows the stringer)
                     </label>
                     <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>Only the outline cut centers — zero at the blank's bottom-left corner.</div>
+                    </>)}
                     {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : isBaseOp ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR BASE MATERIAL (P-tex sheet)</div>
