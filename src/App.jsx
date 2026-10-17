@@ -665,15 +665,17 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-17";
+const APP_BUILD = "2026-10-17b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-16b",
+  id: "2026-10-17b",
   title: "What's new",
   items: [
+    { title: "Cut 2 or 4 cores at once", go: "cam", target: "cam-batch",
+      body: "In the CAM workspace, Cores at once lays 2 or 4 cores side by side on the bed, and every machine step then covers all of them. Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You set the gap between cores (it starts at two bit diameters), and you can mirror every other core to get left and right skis." },
     { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
       body: "Make the waist wider than the tip and the tail for a reverse sidecut: the radius now shows as a reverse radius, and Single radius draws one arc on each side. Under Side Profile, camber can go below zero (reverse camber), and with the rocker unlinked the two rockers can each run up to half the length, so they meet in the middle for one continuous curve. The new Reverse/Reverse template sets all of this up. The old Spatula template is now called Wide Shovel, since it has a normal sidecut." },
     { title: "Light mode", go: "plan", target: "theme",
@@ -4189,7 +4191,8 @@ function buildCoreCAM(ski, opt) {
   const PC = t => G.push(pst.comment === "()" ? "(" + String(t).replace(/[()]/g, "") + ")" : "; " + t);
   const PB = () => G.push("");
   let curTool = null;
-  const toolChange = n => { curTool = n; if (pst.tc === "manual") { P("M5"); PC("TOOL CHANGE -> T" + n + " - resume when ready"); P("M0"); } else if (pst.tc === "m6t") P("M6 T" + n); else P("T" + n + " M6"); };
+  const toolChange = n => { curTool = n; if (o._marks) G.push(";@@TOOL"); _tcMark(n); };
+  const _tcMark = n => { if (pst.tc === "manual") { P("M5"); PC("TOOL CHANGE -> T" + n + " - resume when ready"); P("M0"); } else if (pst.tc === "m6t") P("M6 T" + n); else P("T" + n + " M6"); if (o._marks) G.push(";@@TC_END"); };
   // Switch tools only when the tool number actually changes (no pointless pause), then restart the spindle.
   const useTool = n => { if (n === curTool) return; P(`G0 Z${f(safeZ)}`); toolChange(n); if (!o.baseOp) P(`S${o.spindle} M3`); };
   let cuts = 0, rapids = 0, cutDist = 0, minZ = 1e9, maxZ = -1e9;
@@ -4201,7 +4204,10 @@ function buildCoreCAM(ski, opt) {
   // which puts the part on the table exactly as drawn in the plan view. Length along machine X must be a true
   // 90-degree ROTATION of that, (along, -lateral); outputting (along, lateral) would cut the mirror image of an
   // asymmetric board. The bottom face (blank turned over about its long axis) adds one more mirror.
-  const latSgn = (o.bottomSide ? -1 : 1) * (o.partAxis === "x" ? -1 : 1);
+  // mirrorCore (batch): output this core as the mirror image (the other foot's ski). It is one more reflection of
+  // the lateral axis, so every cut-direction rule that already flips for the bottom face flips for it too.
+  const reflectOut = !!o.bottomSide !== !!o.mirrorCore;
+  const latSgn = (reflectOut ? -1 : 1) * (o.partAxis === "x" ? -1 : 1);
   const emitXY = (x, y) => { const sx = x + originShiftLen, sy = latSgn * y + originShiftWid; const p = o.partAxis === "x" ? [sx, sy] : [sy, sx]; return [p[0] + (o.offsetX || 0) + cOffX, p[1] + (o.offsetY || 0) + cOffY]; };
   const tkC = (mx, my) => { if (mx < minCX) minCX = mx; if (mx > maxCX) maxCX = mx; if (my < minCY) minCY = my; if (my > maxCY) maxCY = my; };
   const g0 = (x, y) => { const [mx, my] = emitXY(x, y); P(`G0 X${f(mx)} Y${f(my)}`); rapids++; };
@@ -4312,7 +4318,7 @@ function buildCoreCAM(ski, opt) {
       // past the tip and tail, off the part.
       if (o.profPattern === "loops" && !isBase) {
         const m = Math.max(1, Math.ceil(yR / so)), sp = yR / m;
-        let coreLeft = true; if (!o.spindleCW) coreLeft = !coreLeft;
+        let coreLeft = true; if (!o.spindleCW) coreLeft = !coreLeft; if (o.mirrorCore) coreLeft = !coreLeft;
         const runs = [];
         for (let i = 0; i < m; i++) { const y = yR - i * sp, yA = coreLeft ? -y : y; runs.push([yA, true], [-yA, false]); }
         runs.push([0, true]);   // center line last
@@ -4344,7 +4350,7 @@ function buildCoreCAM(ski, opt) {
           // Both sidewall lanes run so the spun cutter rotates INTO the core (conventional on each side,
           // toward the center), so it can't lift the glued-on ABS wall away from the wood and tear the edge.
           // Interior lanes zigzag (or one-way) for speed. Flip with sidewallEngage / spindleCW for your setup.
-          if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) { let base = isLeft; if (o.sidewallEngage === "climb") base = !base; if (!o.spindleCW) base = !base; wantPlus = base; }
+          if (o.sidewallEngage !== "off" && !isBase && (isLeft || isRight)) { let base = isLeft; if (o.sidewallEngage === "climb") base = !base; if (!o.spindleCW) base = !base; if (o.mirrorCore) base = !base; wantPlus = base; }
           else { wantPlus = o.profPattern === "oneway" ? (o.profDir === "+") : ((o.profDir === "+") !== (li % 2 === 1)); }
           const xStart = wantPlus ? X0 : X1, xEnd = wantPlus ? X1 : X0, step = (xEnd >= xStart ? 1 : -1) * 3;
           g0(xStart, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(xStart));
@@ -4462,7 +4468,7 @@ function buildCoreCAM(ski, opt) {
     // The rule above is in internal coords; both part orientations output through one reflection of that frame, so
     // on the machine (M3, clockwise spindle) climb = clockwise travel around an outside profile. The bottom-face
     // mirror adds a second reflection, which reverses the loop, so compensate there.
-    if (o.bottomSide) wantCCW = !wantCCW;
+    if (reflectOut) wantCCW = !wantCCW;   // bottom face, or a mirrored batch core (both on: they cancel)
     if (isCCW !== wantCCW) path = path.slice().reverse();
     // densify so the ramp Z and tabs sample smoothly along long offset segments
     { const dstep = 4, dp = []; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < n; j++) { const t = j / n; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } path = dp; }
@@ -4681,7 +4687,7 @@ function buildCoreCAM(ski, opt) {
     const offAt = d => (d > 1e-9 ? offsetPolygonInward(outl, d) : d < -1e-9 ? offsetPolygonOutward(outl, -d) : offsetPolygonInward(outl, 0)).map(p => ({ x: p.y, y: p.x }));
     // Conventional milling on every pass (climb can pull a glued sidewall off). Wood on the inner side of the
     // pass = like an outside profile; wood on the outer side = like a pocket wall. Same frame rules as the outline.
-    const wantCW = (woodInside) => { let w = woodInside; if (!o.spindleCW) w = !w; if (o.bottomSide) w = !w; return w; };
+    const wantCW = (woodInside) => { let w = woodInside; if (!o.spindleCW) w = !w; if (reflectOut) w = !w; return w; };
     const levels = []; { const n = Math.max(1, Math.ceil(depth / Math.max(0.1, o.stepdown) - 1e-6)); for (let k = 1; k <= n; k++) levels.push(o.stockThick - depth * k / n); }
     useTool(o.toolNum);
     PB(); PC(isRab
@@ -4721,12 +4727,78 @@ function buildCoreCAM(ski, opt) {
   if (o.bandKind) { if (o.drillAlign) runDowels(); runBand(); }
   else if (o.bottomSide) { if (o.drillAlign) runDowels(); runBores(); if (o.doPerimeter) runPerimeter(); }
   else if (o.drillAlign) runDowels();
+  if (o._marks) G.push(";@@END");
   PB(); P(`G0 Z${f(safeZ)}`); P("G0 X0 Y0"); pst.end.forEach(e => P(e)); if (pst.pct) G.push("%");
   let _gc = G.join("\n"), _lines = G.length;
   if (o.arcOut) { const dec = pst.decimals != null ? pst.decimals : (inch ? 4 : 3); _gc = arcFitGcode(_gc, 0.02 / uL, dec, pst.lineNum); _lines = _gc.split("\n").length; }
   return { gcode: _gc, stats: { lines: _lines, cuts, rapids, cutDistMM: Math.round(cutDist), minZ: +(minZ / uL).toFixed(inch ? 3 : 2), maxZ: +(maxZ / uL).toFixed(inch ? 3 : 2), estMin: +(cutDist / o.feed + rapids * 0.03).toFixed(1), unit: uu, ext: pst.ext, machX: +((maxCX - minCX) / uL).toFixed(inch ? 2 : 0), machY: +((maxCY - minCY) / uL).toFixed(inch ? 2 : 0), stockX: dv(stockX), stockY: dv(stockY), stockT, stockLbl, stockKind: o.slatPolys ? "sheet" : isBase ? "mold" : o.baseOp ? "base" : "blank", setThick: disp.stockThick } };
 }
 
+// Batch: the same core (or alternating mirror images) cut 2 or 4 at a time, side by side across the bed. Each core is
+// built as its own program, offset sideways by the pitch (widest point of the ski plus the gap), then merged: one
+// header, and for each tool, core 1's tool change followed by every core's moves for that tool, one core at a time.
+// Every file is zeroed on core 1's tail hole, so each core's holes, and so its pins, sit at the same place in every file.
+function buildBatchCAM(ski, opt, bt) {
+  const N = bt.n, inch = opt.units === "inch", uL = inch ? 25.4 : 1;
+  let wMin = 1e9, wMax = -1e9; for (const p of getFullOutlinePoints(ski)) { wMin = Math.min(wMin, p.x); wMax = Math.max(wMax, p.x); }
+  const gapU = bt.gap, pitchU = (wMax - wMin) / uL + gapU;   // user units
+  if (!(gapU >= 0)) throw new Error("Enter the gap between cores.");
+  const lateralKey = opt.partAxis === "x" ? "offsetY" : "offsetX";
+  const runs = [];
+  for (let j = 0; j < N; j++) {
+    const phys = bt.reversed ? N - 1 - j : j, mirror = !!bt.mirrorAlt && phys % 2 === 1;
+    const r = buildCoreCAM(ski, { ...opt, [lateralKey]: (opt[lateralKey] || 0) + j * pitchU, mirrorCore: mirror, _marks: true });
+    if (!r.stats) return r;
+    runs.push({ ...r, mirror, phys });
+  }
+  // Neighboring cuts must not overlap: one core's cut width (bit center extents plus the bit) has to fit in the pitch.
+  const s0 = runs[0].stats, cutW = (opt.partAxis === "x" ? s0.machY : s0.machX) + (opt.toolDia || 0);
+  if (cutW > pitchU + 1e-6) throw new Error(`The cuts for neighboring cores would overlap by ${+(cutW - pitchU).toFixed(inch ? 3 : 1)} ${inch ? "in" : "mm"}. Make the gap between cores bigger.`);
+  const split = txt => {
+    const L = txt.split("\n"), pre = [], segs = [], foot = []; let cur = null, inTc = false, done = false;
+    for (const l of L) {
+      if (done) { foot.push(l); continue; }
+      if (l === ";@@END") { if (cur) segs.push(cur); cur = null; done = true; continue; }
+      if (l === ";@@TOOL") { if (cur) segs.push(cur); cur = { tc: [], body: [] }; inTc = true; continue; }
+      if (l === ";@@TC_END") { inTc = false; continue; }
+      if (!cur) pre.push(l); else (inTc ? cur.tc : cur.body).push(l);
+    }
+    return { pre, segs, foot };
+  };
+  const parts = runs.map(r => split(r.gcode));
+  if (parts.some(pp => pp.segs.length !== parts[0].segs.length)) throw new Error("Couldn't line up the cores' programs. Try one core at a time.");
+  const fmt = v => (+v).toFixed(inch ? 3 : 1);
+  const out = [];
+  for (const l of parts[0].pre) {
+    const m = l.match(/^(.*NEEDED: )([\d.]+) x ([\d.]+)(.*)$/);
+    if (m) { out.push(`${m[1]}${m[2]} x ${fmt(+m[3] + (N - 1) * pitchU)}${m[4]}`); continue; }
+    if (/Origin: X0 Y0 = center of the TAIL dowel hole/.test(l)) { out.push(l.replace("TAIL dowel hole", "TAIL dowel hole of core 1")); continue; }
+    out.push(l);
+  }
+  const cm = (t) => (opt.postOverride && opt.postOverride.comment === "()") || /^\(/.test(parts[0].pre.find(l => /^[;(]/.test(l)) || "") ? "(" + t.replace(/[()]/g, "") + ")" : "; " + t;
+  // Insert the batch summary after the first header comment line.
+  out.splice(1, 0, cm(`BATCH: ${N} cores side by side, ${fmt(pitchU)} ${inch ? "in" : "mm"} apart center to center (${fmt(gapU)} gap between the widest points), core 1 nearest X0${bt.mirrorAlt ? ", cores 2 and 4 mirrored (the other foot)" : ""}`));
+  for (let si = 0; si < parts[0].segs.length; si++) {
+    out.push(...parts[0].segs[si].tc);
+    const safe = (parts[0].segs[si].body.find(l => /^(N\d+ )?G0 Z-?[\d.]+\s*$/.test(l)) || "").replace(/^N\d+ /, "");
+    parts.forEach((pp, j) => {
+      out.push(cm(`---- core ${j + 1} of ${N}${runs[j].mirror ? " (mirrored)" : ""} ----`));
+      if (j > 0 && safe) out.push(safe);
+      out.push(...pp.segs[si].body);
+    });
+  }
+  out.push(...parts[0].foot);
+  // One program: renumber line numbers if the post uses them.
+  let g = out;
+  if (out.some(l => /^N\d+ /.test(l))) { let n = 0; g = out.map(l => { const s = l.replace(/^N\d+ /, ""); return (s.trim() === "" || /^[%(;O]/.test(s)) ? s : "N" + (n += 10) + " " + s; }); }
+  const gcode = g.join("\n"), st = runs.map(r => r.stats);
+  const sum = k => st.reduce((a, s) => a + (s[k] || 0), 0);
+  const lat = opt.partAxis === "x" ? "machY" : "machX";
+  const stats = { ...s0, lines: g.length, cuts: sum("cuts"), rapids: sum("rapids"), cutDistMM: sum("cutDistMM"), estMin: +sum("estMin").toFixed(1),
+    minZ: Math.min(...st.map(s => s.minZ)), maxZ: Math.max(...st.map(s => s.maxZ)),
+    [lat]: +(s0[lat] + (N - 1) * pitchU).toFixed(inch ? 2 : 0), stockY: +(s0.stockY + (N - 1) * pitchU).toFixed(inch ? 3 : 1), batch: { n: N, pitch: +pitchU.toFixed(inch ? 3 : 1), mirrorAlt: !!bt.mirrorAlt } };
+  return { gcode, stats };
+}
 // Top-down toolpath preview: parses the generated G-code and draws rapids (dim/dashed) and cutting
 // moves colored by depth (deep = torch red, shallow = brass), so paths can be checked before cutting.
 // Shared canvas renderer: parses G-code and draws rapids (dim dashed) + cuts colored by depth. When a
@@ -9112,7 +9184,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // must scale when switching mm<->inch. Used BOTH by the unit toggle and by the load-time defensive pass, so
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
-  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough",
+  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap",
   "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
@@ -9796,7 +9868,7 @@ export default function App() {
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabPerSide: 2, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
-      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional", taperPattern: "loops",
+      stepover: 6, profPattern: "zigzag", profDir: "+", sidewallThick: 0, edgeOverlap: 0, sidewallEngage: "conventional", taperPattern: "loops", batchN: 1, batchGap: null, batchMirror: false,
       // Sidewalls: "glue" (strips glued on after the cutout) or "pour" (channel cut first, filled with poly). Edge
       // rabbet: "router" (by hand, instructions only; the default) or "cnc" (its own file on the underside). Rabbet sizes have no default: the
       // builder enters them. Channel width 10 mm and 1.5 mm of wood left under it follow the builder's stated
@@ -9919,6 +9991,14 @@ export default function App() {
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+      const bn = camOpt.batchN || 1;
+      if (bn > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") && ["outline", "taper", "rabbet", "channel", "bore"].includes(camOpt.op)) {
+        if (!ski.alignMarks || !camOpt.pinOrigin) throw new Error("Cutting several cores at once needs the alignment holes and every file zeroed on the tail alignment hole, so each core goes back on its own pins. Turn on Drill alignment holes and Zero every file on the tail alignment hole.");
+        // Poured sidewalls with inserts: the whole planed blank is turned over onto the pins, which swaps the cores
+        // end for end across the bed (core 1 lands where the last core was). Only matters when alternate cores are mirrored.
+        const reversed = camOpt.job === "coreInserts" && pour && camOpt.op !== "channel";
+        return buildBatchCAM(ski, opt, { n: bn, gap: camOpt.batchGap != null ? camOpt.batchGap : 2 * (camOpt.outlineToolDia || 0), mirrorAlt: !!camOpt.batchMirror, reversed });
+      }
       return buildCoreCAM(ski, opt);
     } catch (e) { return { gcode: "; error\n" + e, stats: null }; }
   }, [ski, camOpt, slatPolys, borePts, alignDrillOp]);
@@ -9969,7 +10049,7 @@ export default function App() {
     const pinOn = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks);
     const pourS = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
     const firstZeroed = !(camOpt.op === "rabbet" && camOpt.job === "core" && !camOpt.pinOrigin);   // core job, glued walls: the first file was zeroed on the stock corner
-    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" || (camOpt.op === "outline" && camOpt.job === "core" && !pourS) ? `Before anything else: jog to where you want the TAIL-side alignment hole, on the lengthwise centerline of the blank, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
+    const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (pinOn ? ((camOpt.op === "bore" && !pourS) || camOpt.op === "channel" || (camOpt.op === "outline" && camOpt.job === "core" && !pourS) ? `Before anything else: jog to where you want the TAIL-side alignment hole${(camOpt.batchN || 1) > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") ? " of core 1 (the cores line up across the blank toward +" + (camOpt.partAxis === "x" ? "Y" : "X") + ", so leave room for core 1's half-width on the other side)" : ", on the lengthwise centerline of the blank"}, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
     const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
     const ahS = ski.alignMarks ? alignHoles(ski) : [];
@@ -10025,6 +10105,12 @@ export default function App() {
       steps.push("Afterwards: take the core off and glue on the sidewalls. Leave the holes in the spoilboard and the X/Y zero alone. Every later file for this ski is laid out from the center of the tail-side hole.");
     } else if (pinOn && camOpt.op === "outline") {
       steps.splice(0, 1, "Cut out the core shape from the top face, after turning the core over.", pinLine, flipLine);
+    }
+    if (s.batch) {
+      // Batch: say where every core sits and that each goes back on its own pins.
+      const bp = s.batch.pitch;
+      rows.push(["Cores in this file", `${s.batch.n}, side by side, ${bp} ${uu} apart center to center${s.batch.mirrorAlt ? " (cores 2 and 4 mirrored)" : ""}`]);
+      steps.splice(1, 0, `This file cuts ${s.batch.n} cores side by side. Core 1 sits on the alignment holes at X0 Y0; core 2 is ${bp} ${uu} over in +${camOpt.partAxis === "x" ? "Y" : "X"}${s.batch.n > 2 ? `, core 3 ${+(2 * bp).toFixed(3)} and core 4 ${+(3 * bp).toFixed(3)} ${uu}` : ""}. Each core has its own pair of alignment holes and goes back on its own pins, in the same place it was cut.`);
     }
     const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(CAM_STEP_NAMES[camOpt.op] || camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">${t("study.print", "Print / Save PDF")}</button></body></html>`;
@@ -12940,7 +13026,9 @@ export default function App() {
                     const pinsH = pinMax != null ? " Pins should stand no taller than " + cvG(pinMax) + " " + uu + " above the table, so the bit can't reach them." : "";
                     const setZero = (face) => [
                       "Lay the flat blank on the table, " + face + " face up, with its length running along the machine's long axis. Hold it down clear of the cut.",
-                      "Jog to where the tail alignment hole should go: on the blank's lengthwise centerline" + (tailHole ? ", with room for the ski behind it (the hole is " + cvL(tailHole.y) + " in from the ski's tail end)" : "") + ".",
+                      ((camOpt.batchN || 1) > 1
+                        ? (() => { let a = 1e9, b = -1e9; try { for (const q of getFullOutlinePoints(ski)) { a = Math.min(a, q.x); b = Math.max(b, q.x); } } catch (e) {} return "Jog to where core 1's tail alignment hole should go. The cores line up across the blank toward +" + (camOpt.partAxis === "x" ? "Y" : "X") + ", so core 1's centerline needs to be at least half the ski's widest point (" + cvL((b - a) / 2) + ") in from the blank's edge on the other side, plus whatever margin you want"; })()
+                        : "Jog to where the tail alignment hole should go: on the blank's lengthwise centerline") + (tailHole ? ", with room for the ski behind it (the hole is " + cvL(tailHole.y) + " in from the ski's tail end)" : "") + ".",
                       "Set X0 Y0 there. " + zText,
                       "Write down the machine coordinates of that point (your controller shows them as machine position). Every later file starts from this exact point.",
                     ];
@@ -13017,6 +13105,14 @@ export default function App() {
                         lastFace = "top";
                       } else continue;
                       pages.push(pg);
+                    }
+                    const bnW = camOpt.batchN || 1;
+                    if (bnW > 1) {
+                      let firstSet = true;
+                      for (const pg of pages) {
+                        if (pg.scene && pg.scene.zero === "set" && firstSet) { firstSet = false; pg.points.splice(1, 0, `You're cutting ${bnW} cores side by side, so the blank has to be wide enough for all of them. Core 1 is the one at X0 Y0; the others line up to its +${camOpt.partAxis === "x" ? "Y" : "X"} side.`); }
+                        else if (pg.scene && pg.scene.pins) pg.points.splice(Math.min(2, pg.points.length), 0, "Every core goes on its own pair of pins, in the same place it was cut: core 1 on the holes at X0 Y0, the others in order beside it.");
+                      }
                     }
                     return pages;
                   })();
@@ -13144,6 +13240,37 @@ export default function App() {
                         <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline. Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them." : "Sidewall strips are glued to the core after it's cut out."}</div>
                       </div>
                     )}
+                    {(job === "coreInserts" || job === "core") && (() => {
+                      const bn = camOpt.batchN || 1, bt = camOpt.outlineToolDia || 0;
+                      const gap = camOpt.batchGap != null ? camOpt.batchGap : 2 * bt;
+                      let wMin = 1e9, wMax = -1e9; try { for (const p of getFullOutlinePoints(ski)) { wMin = Math.min(wMin, p.x); wMax = Math.max(wMax, p.x); } } catch (e) {}
+                      const inchB = camOpt.units === "inch", wU = (wMax - wMin) / (inchB ? 25.4 : 1), pitch = wU + gap, fmtB = v => +(+v).toFixed(inchB ? 3 : 1);
+                      const pick = n => { const patch = { batchN: n }; if (n > 1) { patch.pinOrigin = true; if (camOpt.batchGap == null) patch.batchGap = +(2 * bt).toFixed(inchB ? 3 : 2); if (!ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); } setCamMany(patch); };
+                      return (
+                        <div data-wn="cam-batch" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
+                          <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Cores at once</div>
+                          <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                            {[1, 2, 4].map(n => <button key={n} onClick={() => pick(n)} style={camSeg(bn === n)}>{n === 1 ? "1 core" : n + " cores"}</button>)}
+                          </div>
+                          {bn === 1 ? <div style={{ ...camSmall, lineHeight: 1.4 }}>Cut 2 or 4 cores in one go, side by side on the bed. Every machine step then covers all of them.</div> : (<>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 4 }}>
+                              <div><div style={camSmall}>Gap between cores {uu}</div><NumberInput value={gap} step={camOpt.units === "inch" ? 0.05 : 1} min={0} onCommit={v => setCam("batchGap", Math.max(0, v))} style={camInput} /></div>
+                              <div style={{ ...camSmall, alignSelf: "end", lineHeight: 1.4, paddingBottom: 4 }}>{fmtB(pitch)} {uu} center to center · {fmtB((bn - 1) * pitch + wU)} {uu} wide in all</div>
+                            </div>
+                            <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", color: C.label, fontSize: 11.5, marginTop: 7, fontFamily: "'JetBrains Mono', monospace" }}>
+                              <input type="checkbox" checked={!!camOpt.batchMirror} onChange={e => setCam("batchMirror", e.target.checked)} style={{ marginTop: 2 }} />
+                              <span>Mirror every other core<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4 }}>Cores 2 and 4 come out as mirror images (the other foot's ski), so each pair is a left and a right. Only matters if the two edges of your ski differ; a symmetric ski comes out the same either way.</span></span>
+                            </label>
+                            <div style={{ ...camSmall, lineHeight: 1.45, marginTop: 6 }}>
+                              The cores sit side by side across the bed, core 1 at the alignment hole where X0 Y0 is and the others each {fmtB(pitch)} {uu} further over. The gap is between the widest points of neighboring skis; it starts at two bit diameters. Each core gets its own pair of alignment holes, and every file in this batch is zeroed on core 1's tail hole, so each core goes back on its own pins. In each file the bit finishes one core before moving to the next, and each tool runs on all the cores before the next tool change.
+                            </div>
+                            <div style={{ color: C.amber, fontSize: 10.5, lineHeight: 1.45, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>
+                              Keep the gap and the number of cores the same for every file in this batch. The alignment holes are drilled where the first file puts them; changing either one afterward moves the later files off the holes.
+                            </div>
+                          </>)}
+                        </div>
+                      );
+                    })()}
                     {walkPages.length > 0 && <button data-wn="cam-walk" onClick={() => setCamWalk(0)} style={{ width: "100%", background: C.heading, border: "none", color: C.bgDeep, borderRadius: 5, padding: "9px 10px", marginBottom: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>{"\u25B6"} Walk me through it, step by step</button>}
                     <div style={{ ...camLabel, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{job === "mold" ? "Pick one" : "Your steps"}</div>
                     {camWalk != null && walkPages[camWalk] && (() => {
