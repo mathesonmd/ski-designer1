@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-18";
+const APP_BUILD = "2026-10-18b";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -675,7 +675,7 @@ const WHATS_NEW = {
   title: "What's new",
   items: [
     { title: "Top mold ribs and guide holes",
-      body: "Press mold in the CAM workspace now makes ribs only: bottom ribs (full length or 3-section) and new full-length top ribs, whose curved edge follows the bottom ribs' curve raised by a gap you enter for the ski and rubber or bladder. Full-length ribs get three guide holes for a 1/4 inch dowel or threaded rod, 2 inches in from each end and one in the middle, centered top to bottom. The carved solid mold option is gone. Rib, base and recess files are now always zeroed on a corner, not the ski's alignment hole." },
+      body: "Press mold in the CAM workspace now makes ribs only: bottom ribs (full length or 3-section) and new full-length top ribs, whose curved edge follows the bottom ribs' curve raised by a gap you enter for the ski and rubber or bladder. Full-length ribs get three guide holes for a 1/4 inch dowel or threaded rod, 2 inches in from each end and one in the middle, centered top to bottom. The carved solid mold option is gone. Rib, base and recess files are now always zeroed on a corner, not the ski's alignment hole. On 3-section ribs, the threaded-rod holes now start centered in the base height and move with it when you change it." },
     { title: "Cut 2 or 4 cores at once", go: "cam", target: "cam-batch",
       body: "In the CAM workspace, Cores at once cuts 2 or 4 cores from separate blanks laid side by side on the bed, each core centered in its own blank, and every machine step then covers all of them. Enter the width of one blank and the gap between blanks (it starts at 1 inch). Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You can mirror every other core to get left and right skis." },
     { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
@@ -9885,7 +9885,7 @@ export default function App() {
       alignToolNum: 3, alignToolDia: 6.35,   // dowel-hole tool (defaults to a 1/4" endmill; helical-bores the dowel dia)
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
       slatToolNum: 4, slatToolDia: 6.35, slatFeed: 2000, slatPlunge: 600, slatBase: 20, slatSections: "three", slatOverlap: 60, slatCopies: 6, slatSheetW: 1200,
-      slatHoles: true, slatHoleDia: 6.35, slatSide: "bottom", slatTopGap: null, slatHoleEndIn: null, slatHoleH: 12, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
+      slatHoles: true, slatHoleDia: 6.35, slatSide: "bottom", slatTopGap: null, slatHoleEndIn: null, slatHoleH: null, slatHoleSpacing: 10, slatHoleEndZone: 300, slatHoleToolNum: 5,
       machineX: 1219.2, machineY: 2438.4, showMachine: true, camV: 9,
       boreToolNum: 6, boreToolDia: 6.35, boreFeed: 1500, borePlunge: 400, boreDia: 7, boreDepth: 9, boreHelix: true, boreRows: 2, boreCols: 4, boreSpaceX: 40, boreSpaceY: 40, boreCenter: 0.5, boreSrc: "design", insBarrelDia: null, insFlangeProfile: "flat", insFlangeDia: null, insFlangeDepth: null, insConeBotDia: null, insConeStep: null, insStepover: null, insBarrelMode: "through", insBarrelDepth: null, alignDrillOp: null, alignPinDepth: 1, pinOrigin: false, boreWithProfile: true, outlineSide: "top", postKey: "centroid", postOverride: null, partAxis: "y", roughing: false, roughToolNum: 2, roughToolDia: 12.7, roughStepover: 8, roughStepdown: 4, finishAllowance: 1, offsetX: 0, offsetY: 0, moldInvert: false, pocketToolNum: 1, pocketToolDia: 6.35, pocketFeed: 2000, pocketPlunge: 600, pocketCenterX: 0.5, pocketCenterY: 0, pocketL: 300, pocketW: 60, pocketDepth: 6,
       perimeterSide: "outside", cutThrough: 0.5, tabN: 4, tabPerSide: 2, tabHeight: 2, tabLen: 8, perimDir: "conventional", rampEntry: true, rampLen: 12,
@@ -9897,7 +9897,7 @@ export default function App() {
       taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
       chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = inch ? +(12 / 25.4).toFixed(3) : 12; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; } if ((s.ribV || 0) < 2) { if (s.slatHoleH === 12 || (s.slatHoleH != null && Math.abs(s.slatHoleH - 12 / 25.4) < 1e-3)) m.slatHoleH = null; m.ribV = 2; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = null; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -9911,7 +9911,7 @@ export default function App() {
     const L = ski.length, uLm = camOpt.units === "inch" ? 25.4 : 1;
     const slatBase = camOpt.slatBase * uLm, overlap = camOpt.slatOverlap * uLm;
     const sheetY = Math.max(80, (camOpt.slatSheetW || 1200) * uLm), copies = Math.max(1, Math.round(camOpt.slatCopies || 1));
-    const holesOn = !!camOpt.slatHoles, holeH = (camOpt.slatHoleH || 15) * uLm, holeSp = Math.max(2, (camOpt.slatHoleSpacing || 10) * uLm), holeMargin = Math.max(holeSp, 20);
+    const holesOn = !!camOpt.slatHoles, holeH = (camOpt.slatHoleH != null ? camOpt.slatHoleH : camOpt.slatBase / 2) * uLm, holeSp = Math.max(2, (camOpt.slatHoleSpacing || 10) * uLm), holeMargin = Math.max(holeSp, 20);
     const holeEndZone = Math.max(holeSp, (camOpt.slatHoleEndZone || 300) * uLm);   // holes only within this of each end; middle skipped
     let bmin = 1e9; for (let x = 0; x <= L; x += 4) bmin = Math.min(bmin, sideProfileHeightAt(ski, x));
     const topY = x => (sideProfileHeightAt(ski, x) - bmin) + slatBase;
@@ -12747,6 +12747,8 @@ export default function App() {
                   const top = (camOpt.slatSide || "bottom") === "top", whole = top || camOpt.slatSections === "whole";
                   const numF = (lab, key, step) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key] == null ? "" : camOpt[key]} step={step} onChange={e => { const v = parseFloat(e.target.value); setCam(key, isFinite(v) ? v : null); }} style={camInput} /></div>);
                   const endIn = camOpt.slatHoleEndIn != null ? camOpt.slatHoleEndIn : (camOpt.units === "inch" ? 2 : 50.8);
+                  const holeAuto = camOpt.slatHoleH == null, holeHv = holeAuto ? +(camOpt.slatBase / 2).toFixed(camOpt.units === "inch" ? 3 : 2) : camOpt.slatHoleH;
+                  const holeBad = holeHv - (camOpt.slatHoleDia || 0) / 2 < 0 || holeHv + (camOpt.slatHoleDia || 0) / 2 > camOpt.slatBase;
                   return (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
                     <div style={{ ...camLabel, color: C.heading }}>{top ? "Top mold ribs" : "Bottom mold ribs"}</div>
@@ -12781,16 +12783,27 @@ export default function App() {
                         </div>
                       </>) : (<>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginTop: 6 }}>
-                          {[["Hole diameter " + uu, "slatHoleDia", st], ["From bottom " + uu, "slatHoleH", st], ["Row spacing " + uu, "slatHoleSpacing", st], ["Tool number", "slatHoleToolNum", 1]].map(([lab, key, step]) => (
+                          {[["Hole diameter " + uu, "slatHoleDia", st]].map(([lab, key, step]) => (
+                            <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                          ))}
+                          <div><div style={camSmall}>From bottom {uu}</div><input type="number" value={holeHv} step={st} onChange={e => { const v = parseFloat(e.target.value); setCam("slatHoleH", isFinite(v) ? v : null); }} style={camInput} /></div>
+                          {[["Row spacing " + uu, "slatHoleSpacing", st], ["Tool number", "slatHoleToolNum", 1]].map(([lab, key, step]) => (
                             <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
                           ))}
                         </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+                          {holeAuto ? <span>Centered in the base height. Follows the base height when you change it.</span> : (<>
+                            <span>Set by you, so it stays put if you change the base height.</span>
+                            <button onClick={() => setCam("slatHoleH", null)} style={camSeg(false)}>Center in base</button>
+                          </>)}
+                        </div>
+                        {holeBad && <div style={{ color: C.amber, fontSize: 11, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>The holes reach outside the base height ({camOpt.slatBase} {uu}). On the low spot of the curve they would break through the top of the rib.</div>}
                         <div style={{ marginTop: 6 }}>
                           <div style={camSmall}>End zone {uu} (holes only within this of each end; middle skipped)</div>
                           <input type="number" value={camOpt.slatHoleEndZone} step={st} onChange={e => setCam("slatHoleEndZone", parseFloat(e.target.value) || 0)} style={camInput} />
                         </div>
                         <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                          A row of holes every {camOpt.slatHoleSpacing} {uu} within {camOpt.slatHoleEndZone} {uu} of each end of the center ribs (the middle is skipped, since the tip and tail pieces never slide there), plus one per end piece, all at {camOpt.slatHoleH} {uu} off the flat bottom. Drilled with T{camOpt.slatHoleToolNum}.
+                          A row of holes every {camOpt.slatHoleSpacing} {uu} within {camOpt.slatHoleEndZone} {uu} of each end of the center ribs (the middle is skipped, since the tip and tail pieces never slide there), plus one per end piece, all at {holeHv} {uu} off the flat bottom. Drilled with T{camOpt.slatHoleToolNum}.
                         </div>
                       </>))}
                   </div>
