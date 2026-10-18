@@ -665,17 +665,27 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
+<<<<<<< HEAD
 const APP_BUILD = "2026-10-18b";
+=======
+const APP_BUILD = "2026-10-17d";
+>>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
+<<<<<<< HEAD
   id: "2026-10-18",
   title: "What's new",
   items: [
     { title: "Top mold ribs and guide holes",
       body: "Press mold in the CAM workspace now makes ribs only: bottom ribs (full length or 3-section) and new full-length top ribs, whose curved edge follows the bottom ribs' curve raised by a gap you enter for the ski and rubber or bladder. Full-length ribs get three guide holes for a 1/4 inch dowel or threaded rod, 2 inches in from each end and one in the middle, centered top to bottom. The carved solid mold option is gone. Rib, base and recess files are now always zeroed on a corner, not the ski's alignment hole. On 3-section ribs, the threaded-rod holes now start centered in the base height and move with it when you change it." },
+=======
+  id: "2026-10-17b",
+  title: "What's new",
+  items: [
+>>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
     { title: "Cut 2 or 4 cores at once", go: "cam", target: "cam-batch",
       body: "In the CAM workspace, Cores at once cuts 2 or 4 cores from separate blanks laid side by side on the bed, each core centered in its own blank, and every machine step then covers all of them. Enter the width of one blank and the gap between blanks (it starts at 1 inch). Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You can mirror every other core to get left and right skis." },
     { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
@@ -10086,8 +10096,13 @@ export default function App() {
         batch: { n: s.batch.n, pitch: s.batch.pitch, lateral: camOpt.partAxis === "y" ? "x" : "y" } };
     }
     const mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
+<<<<<<< HEAD
     return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job)) };
   }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, camOpt.job, ski.alignMarks, camResult]);
+=======
+    return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks) };
+  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, ski.alignMarks, camResult]);
+>>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
   // Bit diameters by tool number, for drawing the bit in the simulation when the file itself doesn't say
   // (the file's header names only its first tool). Same units as the file.
   const simToolDias = useMemo(() => {
