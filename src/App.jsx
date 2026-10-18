@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-17c";
+const APP_BUILD = "2026-10-17d";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -5029,7 +5029,15 @@ function ToolpathSimPane({ gcode, ok, preview3D, machine, stock, toolDias, playR
   const total = mv ? mv.total : 0;
   return (
     <>
-      <div ref={rootRef} style={{ flex: 1, minHeight: 320, background: C.canvasBg, borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div ref={rootRef} style={{ flex: 1, minHeight: 320, background: C.canvasBg, borderRadius: 6, border: `1px solid ${C.panelBorder}`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+        {/* No file yet: say why right here, instead of leaving the preview empty. */}
+        {String(gcode || "").startsWith("; error") && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, zIndex: 2, pointerEvents: "none" }}>
+            <div style={{ maxWidth: 520, background: `rgba(${C.amberRGB},0.10)`, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "12px 14px", fontSize: 12, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+              Nothing to preview yet. {String(gcode).split("\n").slice(1).join(" ").replace(/^\s*Error:\s*/, "").trim()}
+            </div>
+          </div>
+        )}
         {preview3D
           ? <Toolpath3DView gcode={gcode} machine={machine} sim={sim} />
           : <ToolpathView gcode={gcode} width={880} height={500} machine={machine} stock={stock} sim={sim} />}
