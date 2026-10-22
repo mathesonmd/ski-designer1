@@ -665,27 +665,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-<<<<<<< HEAD
-const APP_BUILD = "2026-10-18b";
-=======
-const APP_BUILD = "2026-10-17d";
->>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
+const APP_BUILD = "2026-10-22";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-<<<<<<< HEAD
-  id: "2026-10-18",
+  id: "2026-10-22",
   title: "What's new",
   items: [
+    { title: "Each job shows only its own settings",
+      body: "In the CAM workspace, Base material now shows only what a drag knife uses: knife tool number, feed, plunge, safe height, blade offset, lead-in and how far the blade goes past the bottom of the sheet. Spindle speed, bit size and depth per pass are gone from it. Press mold and Clear a recess now have their own material sizes (the rib sheet, and the piece with the recess) instead of sharing the core blank's, so changing one no longer changes the other. Enter your rib sheet's thickness under Your material sizes." },
     { title: "Top mold ribs and guide holes",
       body: "Press mold in the CAM workspace now makes ribs only: bottom ribs (full length or 3-section) and new full-length top ribs, whose curved edge follows the bottom ribs' curve raised by a gap you enter for the ski and rubber or bladder. Full-length ribs get three guide holes for a 1/4 inch dowel or threaded rod, 2 inches in from each end and one in the middle, centered top to bottom. The carved solid mold option is gone. Rib, base and recess files are now always zeroed on a corner, not the ski's alignment hole. On 3-section ribs, the threaded-rod holes now start centered in the base height and move with it when you change it." },
-=======
-  id: "2026-10-17b",
-  title: "What's new",
-  items: [
->>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
     { title: "Cut 2 or 4 cores at once", go: "cam", target: "cam-batch",
       body: "In the CAM workspace, Cores at once cuts 2 or 4 cores from separate blanks laid side by side on the bed, each core centered in its own blank, and every machine step then covers all of them. Enter the width of one blank and the gap between blanks (it starts at 1 inch). Each core gets its own alignment holes, every file is zeroed on core 1's tail hole, and the bit finishes one core before moving to the next. You can mirror every other core to get left and right skis." },
     { title: "Reverse sidecut and full rocker", go: "dimensions", target: "sidecut",
@@ -4277,7 +4269,7 @@ function buildCoreCAM(ski, opt) {
   PC(`${new Date().toISOString().slice(0, 10)}  |  ${inch ? "IMPERIAL inch/IPM" : "METRIC mm"}  |  post: ${pst.name}`);
   PC(`${stockLbl} NEEDED: ${dv(stockX)} x ${dv(stockY)} ${uu}, ${thickNote}`);
   PC(`Z ZERO = ${o.zZero === "bed" ? "BED / TABLE TOP" : "TOP OF STOCK"}   (stock ${disp.stockThick} ${uu})`);
-  PC(`Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
+  PC(o.baseOp ? `Drag knife T${o.toolNum}   Spindle OFF   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}` : `Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
   if (o.doProfile) {
     if (!isBase) PC(`Runs past the tip and tail ends of the core by one bit radius${(o.taperEndOver || 0) > 0 ? " plus " + disp.taperEndOver + " " + uu + " extra" : ""}, so the ends (including the point of a V-cut) are fully cut.`);
     PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (wallPerSide > 0 || o.edgeOverlap > 0 ? ", to assembled edge (from measured width) + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
@@ -9217,7 +9209,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap", "batchBlankW",
   "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
-  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
+  "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "baseCutThrough", "slatStockThick", "slatSheetL", "pocketStockL", "pocketStockW", "pocketStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
   "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
@@ -9890,7 +9882,7 @@ export default function App() {
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true, stockL: 0, stockW: 0, centerInStock: true,
-      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, bladeOffset: 1, dragLeadIn: 12,
+      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, baseCutThrough: 0.5, slatStockThick: null, slatSheetL: null, pocketStockL: 0, pocketStockW: 0, pocketStockThick: 13, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       alignToolNum: 3, alignToolDia: 6.35,   // dowel-hole tool (defaults to a 1/4" endmill; helical-bores the dowel dia)
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
@@ -9907,7 +9899,7 @@ export default function App() {
       taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
       chanWidth: 10, chanSkin: 1.5, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; } if ((s.ribV || 0) < 2) { if (s.slatHoleH === 12 || (s.slatHoleH != null && Math.abs(s.slatHoleH - 12 / 25.4) < 1e-3)) m.slatHoleH = null; m.ribV = 2; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = null; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } return m; } } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; } if ((s.ribV || 0) < 2) { if (s.slatHoleH === 12 || (s.slatHoleH != null && Math.abs(s.slatHoleH - 12 / 25.4) < 1e-3)) m.slatHoleH = null; m.ribV = 2; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = null; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } if (s.matV !== 1) { if (s.baseCutThrough === undefined && s.cutThrough != null) m.baseCutThrough = s.cutThrough; if (s.pocketStockThick === undefined) { if (s.stockL != null) m.pocketStockL = s.stockL; if (s.stockW != null) m.pocketStockW = s.stockW; if (s.stockThick != null) m.pocketStockThick = s.stockThick; } m.matV = 1; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -10036,6 +10028,7 @@ export default function App() {
       const pour = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour";
       const postThick = pour ? (camOpt.pourThick > 0 ? camOpt.pourThick : +(camOpt.stockThick - (camOpt.chanSkin || 0)).toFixed(camOpt.units === "inch" ? 4 : 3)) : camOpt.stockThick;   // rounded so the file header doesn't print float noise
       if (camOpt.op === "slat" && slatPolys && slatPolys._error) throw new Error(slatPolys._error);
+      if (camOpt.op === "slat" && !(camOpt.slatStockThick > 0)) throw new Error("Enter the thickness of the sheet you are cutting the ribs from, under Your material sizes.");
       if ((camOpt.op === "rabbet" || camOpt.op === "channel") && !ski.alignMarks) throw new Error((camOpt.op === "rabbet" ? "The edge rabbet" : "The sidewall channel") + " needs the alignment holes, so the core goes back on the pins in the same place. Turn on Drill alignment holes.");
       const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: (pour && camOpt.op !== "channel") ? postThick : camOpt.stockThick, pouredSidewalls: pour, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job)), alignPinDepth: camOpt.alignPinDepth };
       const opt = camOpt.op === "rabbet"
@@ -10047,13 +10040,13 @@ export default function App() {
         : camOpt.op === "mold"
         ? { ...b, doProfile: true, doPerimeter: false, heightMode: "base", moldInvert: camOpt.moldInvert, moldMargin: camOpt.moldMargin, toolNum: camOpt.moldToolNum, toolDia: camOpt.moldToolDia, feed: camOpt.moldFeed, plunge: camOpt.moldPlunge, stepover: camOpt.stepover, profPattern: camOpt.profPattern, profDir: camOpt.profDir, sidewallEngage: "off", roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance }
         : camOpt.op === "slat"
-        ? { ...b, doProfile: false, doPerimeter: false, slatPolys, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
+        ? { ...b, doProfile: false, doPerimeter: false, slatPolys, stockThick: camOpt.slatStockThick, stockL: camOpt.slatSheetL || 0, stockW: camOpt.slatSheetW || 0, toolNum: camOpt.slatToolNum, toolDia: camOpt.slatToolDia, feed: camOpt.slatFeed, plunge: camOpt.slatPlunge, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, slatHoleDia: camOpt.slatHoleDia, slatHoleToolNum: camOpt.slatHoleToolNum }
         : camOpt.op === "bore"
         ? { ...b, bottomSide: true, doProfile: false, doPerimeter: !!camOpt.boreWithProfile, borePts, ...(camOpt.boreWithProfile ? { toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabPerSide: camOpt.tabPerSide, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen } : { toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge }), insToolNum: camOpt.boreToolNum, insToolDia: camOpt.boreToolDia, insFeed: camOpt.boreFeed, insPlunge: camOpt.borePlunge, insBarrelDia: camOpt.insBarrelDia, insFlangeProfile: camOpt.insFlangeProfile, insFlangeDia: camOpt.insFlangeDia, insFlangeDepth: camOpt.insFlangeDepth, insConeBotDia: camOpt.insConeBotDia, insConeStep: camOpt.insConeStep, insStepover: camOpt.insStepover, insBarrelMode: camOpt.insBarrelMode, insBarrelDepth: camOpt.insBarrelDepth, drillAlign: !!ski.alignMarks && alignDrillOp === "bore", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "base"
-        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.cutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
+        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.baseCutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
         : camOpt.op === "pocket"
-        ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
+        ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, stockThick: camOpt.pocketStockThick, stockL: camOpt.pocketStockL, stockW: camOpt.pocketStockW, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       const bn = camOpt.batchN || 1;
       if (bn > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") && ["outline", "taper", "rabbet", "channel", "bore"].includes(camOpt.op)) {
@@ -10083,8 +10076,9 @@ export default function App() {
     return { short: mShort, long: mLong, fits, pinZero };
   }, [camOpt.showMachine, camOpt.machineX, camOpt.machineY, camOpt.units, camOpt.pinOrigin, camOpt.job, camOpt.op, ski.alignMarks, camResult]);
   const camStock = useMemo(() => {
-    const isB = camOpt.op === "base";
-    const L = (isB ? camOpt.baseStockL : camOpt.stockL) || 0, W = (isB ? camOpt.baseStockW : camOpt.stockW) || 0;   // base op uses its own material size
+    // Each job checks against its own material: the base sheet, the rib sheet, the piece with the recess, or the core blank.
+    const sz = { base: ["baseStockL", "baseStockW"], slat: ["slatSheetL", "slatSheetW"], pocket: ["pocketStockL", "pocketStockW"] }[camOpt.op] || ["stockL", "stockW"];
+    const L = camOpt[sz[0]] || 0, W = camOpt[sz[1]] || 0;
     if (!L || !(W || (camResult && camResult.stats && camResult.stats.batch)) || !camResult || !camResult.stats) return null;
     const xExt = camOpt.partAxis === "y" ? W : L, yExt = camOpt.partAxis === "y" ? L : W;   // along machine X / Y
     const s = camResult.stats;
@@ -10096,13 +10090,8 @@ export default function App() {
         batch: { n: s.batch.n, pitch: s.batch.pitch, lateral: camOpt.partAxis === "y" ? "x" : "y" } };
     }
     const mx = s.machX != null ? s.machX : s.stockY, my = s.machY != null ? s.machY : s.stockX;
-<<<<<<< HEAD
     return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job)) };
-  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, camOpt.job, ski.alignMarks, camResult]);
-=======
-    return { xExt, yExt, fits: mx <= xExt + 1e-6 && my <= yExt + 1e-6, overX: +(mx - xExt).toFixed(2), overY: +(my - yExt).toFixed(2), pinZero: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks) };
-  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, ski.alignMarks, camResult]);
->>>>>>> 9450f7d7b06a10afaec11644e0dc4f761d373f48
+  }, [camOpt.op, camOpt.stockL, camOpt.stockW, camOpt.baseStockL, camOpt.baseStockW, camOpt.slatSheetL, camOpt.slatSheetW, camOpt.pocketStockL, camOpt.pocketStockW, camOpt.partAxis, camOpt.units, camOpt.pinOrigin, camOpt.job, ski.alignMarks, camResult]);
   // Bit diameters by tool number, for drawing the bit in the simulation when the file itself doesn't say
   // (the file's header names only its first tool). Same units as the file.
   const simToolDias = useMemo(() => {
@@ -10116,13 +10105,14 @@ export default function App() {
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
     const opName = CAM_STEP_NAMES[camOpt.op] || camOpt.op;
     const post = (POST_PROFILES[camOpt.postKey] || {}).name || camOpt.postKey;
-    const tool = `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
+    const tool = camOpt.op === "base" ? `T${camOpt.baseToolNum} · drag knife` : `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
     const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
     if (camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper")) rows.push(["Rough tool", `T${camOpt.roughToolNum} · ${camOpt.roughToolDia} ${uu} dia — leaves ${camOpt.finishAllowance} ${uu}`]);
     if (camOpt.op === "slat" && camOpt.slatHoles) rows.push(["Drill tool", `T${camOpt.slatHoleToolNum} · ${camOpt.slatHoleDia} ${uu} dia — rod holes`]);
-    rows.push(["Spindle", `${camOpt.spindle} rpm ${camOpt.spindleCW ? "CW" : "CCW"}`], ["Feed / plunge", `${camOpt[tK("Feed")]} / ${camOpt[tK("Plunge")]} ${uf}`]);
+    rows.push(["Spindle", camOpt.op === "base" ? "Off (the blade is dragged, not spun)" : `${camOpt.spindle} rpm ${camOpt.spindleCW ? "CW" : "CCW"}`], ["Feed / plunge", `${camOpt[tK("Feed")]} / ${camOpt[tK("Plunge")]} ${uf}`]);
     const so = camOpt.op === "outline" || camOpt.op === "slat" || camOpt.op === "bore";
-    rows.push([so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`], ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
+    if (camOpt.op === "base") rows.push(["Blade", `offset ${camOpt.bladeOffset} ${uu} · one pass, ${camOpt.baseCutThrough} ${uu} past the bottom of the sheet`]);
+    rows.push(...(camOpt.op === "base" ? [] : [[so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`]]), ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
     if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
     const pinOn = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job));
     const pourS = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
@@ -12629,11 +12619,21 @@ export default function App() {
               ))}</div>);
             const commonRow = (<>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
-                  {[pourPost ? ["Thickness after planing " + uu, "pourThick", st] : ["Stock thickness " + uu, "stockThick", st], ["Spindle speed (rpm)", "spindle", 500], ["Safe height " + uu, "safeZ", st], ["Depth per pass " + uu, "stepdown", st]].concat(isOutline || isSlat || isBore ? [] : [["Stepover " + uu, "stepover", st]]).map(([lab, key, step]) => (
+                  {(pourPost ? [["Thickness after planing " + uu, "pourThick", st]] : []).concat([["Spindle speed (rpm)", "spindle", 500], ["Safe height " + uu, "safeZ", st], ["Depth per pass " + uu, "stepdown", st]]).concat(isOutline || isSlat || isBore ? [] : [["Stepover " + uu, "stepover", st]]).map(([lab, key, step]) => (
                     <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={key === "pourThick" ? (camOpt.pourThick > 0 ? camOpt.pourThick : +pourPlaned.toFixed(camOpt.units === "inch" ? 4 : 2)) : camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
                   ))}
                 </div>
               <div style={{ ...camSmall, marginTop: -4, marginBottom: 8, lineHeight: 1.4 }}>Safe height: how high the bit lifts to move between cuts. Depth per pass: how deep each pass cuts.{isOutline || isSlat || isBore ? "" : " Stepover: how far the bit moves sideways between passes."}</div>
+            </>);
+            // Drag knife: the spindle stays off, the blade has no cutting diameter and the cut is one pass, so only
+            // these apply. The rest of its settings (blade offset, lead-in, depth) are in its own panel.
+            const knifeRow = (<>
+              <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr 1fr", gap: 6, marginBottom: 4 }}>
+                {[["Knife tool number", "baseToolNum", 1, ""], ["Feed rate", "baseFeed", stf, " " + uf], ["Plunge rate", "basePlunge", stf, " " + uf], ["Safe height", "safeZ", st, " " + uu]].map(([lab, key, step, unit]) => (
+                  <div key={key}><div style={camSmall}>{lab}{unit}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                ))}
+              </div>
+              <div style={{ ...camSmall, marginBottom: 8, lineHeight: 1.4 }}>Safe height: how high the knife lifts to move between cuts. The spindle stays off for this file.</div>
             </>);
             const feedsHelper = (<FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />);
             const alignBox = (
@@ -12777,12 +12777,12 @@ export default function App() {
                       </div>
                     </>)}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                      {[[top ? "Height above the curve " + uu : "Base height " + uu, "slatBase", st]].concat(!top && camOpt.slatSections === "three" ? [["Overlap " + uu, "slatOverlap", st]] : []).concat([["Copies", "slatCopies", 1], ["Sheet width " + uu, "slatSheetW", st], ["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]]).map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
+                      {[[top ? "Height above the curve " + uu : "Base height " + uu, "slatBase", st]].concat(!top && camOpt.slatSections === "three" ? [["Overlap " + uu, "slatOverlap", st]] : []).concat([["Copies", "slatCopies", 1], ["Cut into spoilboard " + uu, "cutThrough", st], ["Holding tabs", "tabN", 1], ["Tab length " + uu, "tabLen", st], ["Tab height " + uu, "tabHeight", st]]).map(([lab, key, step]) => (<div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>))}
                     </div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                       {top
-                        ? `Cuts ${camOpt.slatCopies} full-length top ribs, nested into columns within your sheet width. Flat on top; the flat edge sits ${camOpt.slatBase} ${uu} above the highest point of the curve.`
-                        : `Cuts ${camOpt.slatCopies}× each rib, nested into columns within your sheet width. The top edge follows the camber and rocker curve; Base height is the material under its lowest point.${camOpt.slatSections === "three" ? " 3-section adds sliding tip and tail pieces (Overlap) so one set fits many lengths." : ""}`}
+                        ? `Cuts ${camOpt.slatCopies} full-length top ribs, nested into columns that fit across your sheet (sheet size is under Your material sizes). Flat on top; the flat edge sits ${camOpt.slatBase} ${uu} above the highest point of the curve.`
+                        : `Cuts ${camOpt.slatCopies}× each rib, nested into columns that fit across your sheet (sheet size is under Your material sizes). The top edge follows the camber and rocker curve; Base height is the material under its lowest point.${camOpt.slatSections === "three" ? " 3-section adds sliding tip and tail pieces (Overlap) so one set fits many lengths." : ""}`}
                     </div>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: C.label, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", marginTop: 8 }}>
                       <input type="checkbox" checked={camOpt.slatHoles} onChange={e => setCam("slatHoles", e.target.checked)} /> {whole ? "Guide holes for a rod or dowel" : "Threaded-rod alignment holes"}
@@ -12897,11 +12897,10 @@ export default function App() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                       <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>
                       <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                      <div><div style={camSmall}>Cut depth {uu}</div><input type="number" value={camOpt.cutThrough} step={st} min={0} onChange={e => setCam("cutThrough", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                      <div><div style={camSmall}>Knife tool number</div><input type="number" value={camOpt.baseToolNum} step={1} min={1} onChange={e => setCam("baseToolNum", parseInt(e.target.value) || 1)} style={camInput} /></div>
+                      <div><div style={camSmall}>Past the bottom of the sheet {uu}</div><input type="number" value={camOpt.baseCutThrough} step={st} min={0} onChange={e => setCam("baseCutThrough", parseFloat(e.target.value) || 0)} style={camInput} /></div>
                     </div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      Chuck the Donek, set the blade offset stamped on your blade, and set the cut depth to your base thickness plus a little extra. Spindle stays off; it plunges in the waste, cuts a lead-in to pre-align the blade, then follows the base line with corner swivels. Tape or vacuum the base down.
+                      Put the drag knife in the spindle and set the blade offset for your blade. The blade goes through the whole sheet ({camOpt.baseStockThick} {uu}, under Your material sizes) and on into the spoilboard by Past the bottom of the sheet, so it cuts all the way through: {+((camOpt.baseStockThick || 0) + (camOpt.baseCutThrough || 0)).toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} below the top of the sheet in all. The spindle stays off. It plunges in the waste, runs a short lead-in to line the blade up, then follows the base line, swiveling at corners. Tape or vacuum the base down.
                     </div>
                   </div>
                 ) : (
@@ -12958,7 +12957,7 @@ export default function App() {
                         {camResult.stats.stockKind === "mold"
                           ? `≥ ${camResult.stats.stockT} ${camResult.stats.unit} thick (carve + base) · you set ${camResult.stats.setThick}`
                           : camResult.stats.stockKind === "sheet"
-                          ? `${camResult.stats.setThick} ${camResult.stats.unit} MDF (= rib thickness)`
+                          ? `${camResult.stats.setThick} ${camResult.stats.unit} sheet (each rib is this thick)`
                           : `${camResult.stats.setThick} ${camResult.stats.unit} thick`}
                       </div>
                     </div>
@@ -13078,15 +13077,38 @@ export default function App() {
                     <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, fontFamily: "'JetBrains Mono', monospace" }}>Zero at the bottom-left corner of the base sheet. Tape or vacuum it down flat.</div>
                     {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your base sheet" : `✗ exceeds sheet by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
                   </>) : (<>
-                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① MATERIALS</div>
-                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Your stock ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats && !isSlat ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
+                    {isSlat ? (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR RIB SHEET (MDF or plywood)</div>
+                    <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                      The sheet the ribs are cut from, not the core blank. Its thickness is how thick each rib is. The ribs lie along the sheet's length and stack across its width; when a column of ribs fills the width, the next column starts beside it along the length.
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "slatSheetL"], ["Width", "slatSheetW"], ["Thickness", "slatStockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key] != null ? camOpt[key] : ""} step={camOpt.units === "inch" ? (key === "slatStockThick" ? 0.01 : 1) : (key === "slatStockThick" ? 0.5 : 10)} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    {!(camOpt.slatStockThick > 0) && <div style={{ color: C.amber, fontSize: 10.5, marginTop: 5, fontFamily: "'JetBrains Mono', monospace" }}>Enter the sheet's thickness.</div>}
+                    <div style={{ color: C.labelDim, fontSize: 9.5, marginTop: 5, fontFamily: "'JetBrains Mono', monospace" }}>Zero at the bottom-left corner of the sheet.</div>
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your sheet" : `✗ exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>) : isPocket ? (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① THE PIECE YOU'RE CUTTING THE RECESS INTO</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Its own sizes, kept apart from the core blank ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[["Length", "pocketStockL"], ["Width", "pocketStockW"], ["Thickness", "pocketStockThick"]].map(([lab, key]) => (
+                        <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
+                      ))}
+                    </div>
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your piece" : `✗ exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>) : (<>
+                    <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR CORE BLANK</div>
+                    <div style={{ color: C.labelDim, fontSize: 10, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>The blank the core is cut from ({camOpt.units === "inch" ? "in" : "mm"}){camResult.stats ? ` · min needed ${camResult.stats.stockX}×${camResult.stats.stockY}` : ""}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                       {[["Length", "stockL"], ["Width", "stockW"], ["Thickness", "stockThick"]].map(([lab, key]) => (
                         <div key={key}><div style={camSmall}>{lab}</div><NumberInput value={camOpt[key]} step={camOpt.units === "inch" ? 0.25 : 5} min={0} onCommit={v => setCam(key, v)} style={camInput} /></div>
                       ))}
                     </div>
-                    {isSlat && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}><div style={camSmall}>Mold-slat sheet width {camOpt.units === "inch" ? "in" : "mm"} (MDF sheet — set thickness above; a 4×8×¾ sheet is 8ft = {camOpt.units === "inch" ? "96" : "2438"})</div><NumberInput value={camOpt.slatSheetW} step={camOpt.units === "inch" ? 1 : 10} min={0} onCommit={v => setCam("slatSheetW", v)} style={camInput} /></div>}
-                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds stock by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                    {camStock && <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", color: camStock.fits ? C.ok : "#e8552a" }}>{camStock.fits ? "✓ toolpath fits your stock" : `✗ exceeds it by ${Math.max(camStock.overX, camStock.overY)} ${camOpt.units === "inch" ? "in" : "mm"}`}</div>}
+                  </>)}
                   </>)}
                 </div>
                 </AccordionSection>
@@ -13351,6 +13373,10 @@ export default function App() {
                         <span>Cut out the core shape as its own file<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.4 }}>Adds a separate step right after this one, run in the same setup before anything is moved.</span></span>
                       </label>
                     </details>
+                    {partHead("Get the file")}{outputBody}
+                  </>) : isBaseOp ? (<>
+                    {partHead("This file")}{knifeRow}
+                    {opPanel}
                     {partHead("Get the file")}{outputBody}
                   </>) : (<>
                     {partHead("This file")}{commonRow}{toolRow(camOpt.op)}{feedsHelper}
