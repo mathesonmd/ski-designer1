@@ -665,15 +665,17 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-22";
+const APP_BUILD = "2026-10-25";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-22",
+  id: "2026-10-25",
   title: "What's new",
   items: [
+    { title: "Edit core thickness from the layup",
+      body: "The wood core layer in Layup / Materials now shows the core's thickness and has an Edit core thickness button. It opens Edges & Core, shows the Core view, and takes you to the core thickness points, where you can change any point or double-click the line in the Core view to add one." },
     { title: "Each job shows only its own settings",
       body: "In the CAM workspace, Base material now shows only what a drag knife uses: knife tool number, feed, plunge, safe height, blade offset, lead-in and how far the blade goes past the bottom of the sheet. Spindle speed, bit size and depth per pass are gone from it. Press mold and Clear a recess now have their own material sizes (the rib sheet, and the piece with the recess) instead of sharing the core blank's, so changing one no longer changes the other. Enter your rib sheet's thickness under Your material sizes." },
     { title: "Top mold ribs and guide holes",
@@ -10723,6 +10725,24 @@ export default function App() {
       else localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id);
     } catch (e) {}
   }, []);
+  // "Edit core thickness" in the layup: core thickness is set in Edges & Core (and by clicking the Core view), so
+  // this opens that section, makes sure the Core view is showing, and scrolls to the thickness points with a brief outline.
+  const [coreFlash, setCoreFlash] = useState(0);
+  const jumpToCoreThickness = () => {
+    setCamOpen(false); setSidebarQuery("");
+    if (isCompact) setDrawerOpen(true);
+    else setActiveViews(prev => (prev.size >= SKI_VIEWS.length || prev.has("core")) ? prev : new Set([...prev, "core"]));
+    setSectionsOpen(prev => { const next = { ...prev, coreFill: true }; try { localStorage.setItem(ACCORDION_KEY, JSON.stringify(next)); } catch (e) {} return next; });
+    setCoreFlash(Date.now());
+  };
+  useEffect(() => {
+    if (!coreFlash) return;
+    let tries = 0, raf = 0;
+    const tick = () => { const el = document.querySelector('[data-wn="core-points"]'); if (el && el.getBoundingClientRect().height > 0) { try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} return; } if (++tries < 60) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    const t = setTimeout(() => setCoreFlash(0), 2500);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [coreFlash]);
   const markWhatsNewSeen = () => { try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (e) {} };
   const closeWhatsNew = () => { setWnOpen(false); markWhatsNewSeen(); };
   const endTour = () => { setWnStep(null); setWnRect(null); setWnLost(false); markWhatsNewSeen(); };
@@ -11590,7 +11610,7 @@ export default function App() {
               {[["Straight", "linear"], ["Smooth", "smooth"]].map(([lab, m]) => { const on = (m === "linear") === lin; return (
                 <button key={m} onClick={() => setI(m)} style={{ padding: "4px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}` }}>{lab}</button>); })}
             </div>); })()}
-          <div style={{ marginTop: 2, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
+          <div data-wn="core-points" style={{ marginTop: 2, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, outline: coreFlash ? `2px solid ${C.heading}` : "none", outlineOffset: 3, borderRadius: 3 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 5 }}>
             {(ski.coreProfile || []).map((nd, i) => ({ nd, i })).reverse().map(({ nd, i }) => {
               const last = (ski.coreProfile || []).length - 1;
@@ -11811,9 +11831,18 @@ export default function App() {
                             const regen = patch => { const a = patch.a || woodA, b = patch.b || woodB, n = Math.max(1, Math.min(41, Math.round(patch.n || nStr))), tw = patch.w > 0 ? patch.w : (coreW || 100); upd(idx, { stripMode: true, stripA: a, stripB: b, coreWidth: tw, strips: makeStrips(a, b, n, tw), mat: a, wood: a, woods: [{ mat: a, pct: 100 }] }); };
                             const oneWood = mat => upd(idx, { stripMode: false, woods: [{ mat, pct: 100 }], mat, wood: mat, mat2: undefined, pct2: undefined, density: undefined });
                             const btn2 = { background: `${C.heading}22`, border: `1px solid ${C.heading}`, color: C.heading, borderRadius: 4, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" };
+                            // Thickness isn't set here: it's the core profile in Edges & Core. Show it and link there.
+                            const thk = (ski.coreProfile || []).map(n => n.thick).filter(v => isFinite(v));
+                            const tMin = thk.length ? Math.min(...thk) : null, tMax = thk.length ? Math.max(...thk) : null, fmtT = v => (+v.toFixed(1)).toString();
+                            const thickRow = (<div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+                              <span style={hLab}>Thickness</span>
+                              <span style={{ ...gLab, color: C.value }}>{tMin == null ? "not set" : tMin === tMax ? fmtT(tMin) + " mm" : fmtT(tMin) + " to " + fmtT(tMax) + " mm"}</span>
+                              <button onClick={jumpToCoreThickness} style={btn2}>Edit core thickness</button>
+                            </div>);
                             if (!stripOn) {
                               const m = CORE_MATERIALS[ws[0].mat] || CORE_MATERIALS.poplar;
                               return (<div style={{ flexBasis: "100%" }}>
+                                {thickRow}
                                 {legacyBlend && <div style={{ ...gLab, color: C.heading, marginBottom: 6, lineHeight: 1.45 }}>This design uses an older percentage mix ({ws.map(w => woodName(w.mat) + " " + (w.pct || 0) + "%").join(", ")}). Mixed-wood cores are now set up as strips. <button onClick={() => regen({ a: ws[0].mat, b: ws[1].mat, n: 3, w: needW })} style={{ ...btn2, marginLeft: 4 }}>Convert to strips</button></div>}
                                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
                                   <span style={hLab}>Wood</span>{woodSel(ws[0].mat, v => oneWood(v))}
@@ -11827,6 +11856,7 @@ export default function App() {
                             const moveStrip = (si, d) => { const j = si + d; if (j < 0 || j >= strips.length) return; const ns = strips.map(s => ({ ...s })); const t = ns[si]; ns[si] = ns[j]; ns[j] = t; upd(idx, { strips: ns }); };
                             const species = [...new Set(strips.map(s => s.mat))];
                             return (<div style={{ flexBasis: "100%" }}>
+                              {thickRow}
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                                 <span style={{ ...hLab, color: C.heading, fontWeight: 700 }}>Mixed wood core, {strips.length} strips</span>
                                 <button onClick={() => oneWood(woodA)} style={{ background: "transparent", border: `1px solid ${C.inputBorder}`, color: C.label, borderRadius: 4, fontSize: 10.5, padding: "3px 8px", cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>Use one wood</button>
