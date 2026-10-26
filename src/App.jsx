@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-26c";
+const APP_BUILD = "2026-10-26d";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -9370,7 +9370,42 @@ const CLASS_CONFIG = {
   // Upgrade prices in dollars, keyed "wood:ash", "glass:biax", "stringer:carbon15". Anything not listed is
   // priced at the consultation.
   prices: {},
+  // Wood veneer on the top of every ski. The first is the standard. Colors are only for the preview drawing
+  // (base color, grain or spalt-line color, and the look of the figure); the veneer is shown, not added to
+  // the flex estimate.
+  veneers: [
+    { key: "walnut", label: "Black walnut", base: "#5b3f2c", line: "#2e1d12", figure: "grain" },
+    { key: "whiteOak", label: "White oak", base: "#c9a877", line: "#6e5028", figure: "grain" },
+    { key: "spaltedMaple", label: "Spalted maple", base: "#e4d5b5", line: "#2a2219", figure: "spalt" },
+  ],
 };
+// Wood figure drawn with SVG noise: long streaks for straight grain; dark wandering zone lines for spalting.
+// Rendered once per page; swatches and the ski preview fill with url(#clsVen-<key>).
+function VeneerDefs({ veneers }) {
+  const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+  return (<svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true"><defs>
+    {veneers.map(v => { const [r, g, b] = hex(v.line); return (
+      <filter key={v.key} id={"clsVenF-" + v.key} x="0" y="0" width="100%" height="100%">
+        {v.figure === "spalt" ? (<>
+          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.035" numOctaves="2" seed="7" result="n" />
+          <feColorMatrix in="n" type="matrix" values={`0 0 0 0 ${r} 0 0 0 0 ${g} 0 0 0 0 ${b} 1 0 0 0 0`} result="na" />
+          <feComponentTransfer in="na" result="zone"><feFuncA type="table" tableValues="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.95 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0" /></feComponentTransfer>
+          <feComponentTransfer in="na" result="stain"><feFuncA type="table" tableValues="0 0 0 0 0 0.22 0.22 0 0 0 0 0.15 0 0 0 0 0" /></feComponentTransfer>
+          <feTurbulence type="fractalNoise" baseFrequency="0.006 0.35" numOctaves="2" seed="2" result="g" />
+          <feColorMatrix in="g" type="matrix" values={`0 0 0 0 ${r} 0 0 0 0 ${g} 0 0 0 0 ${b} 0.9 0 0 0 -0.45`} result="grain" />
+          <feMerge><feMergeNode in="stain" /><feMergeNode in="grain" /><feMergeNode in="zone" /></feMerge>
+        </>) : (<>
+          <feTurbulence type="fractalNoise" baseFrequency="0.004 0.3" numOctaves="3" seed="4" result="n" />
+          <feColorMatrix in="n" type="matrix" values={`0 0 0 0 ${r} 0 0 0 0 ${g} 0 0 0 0 ${b} 3.4 0 0 0 -1.25`} />
+        </>)}
+      </filter>); })}
+  </defs></svg>);
+}
+// Fills a box with one veneer: the base color, then its figure on top.
+const VeneerFill = ({ v, x, y, w, h, clip }) => (<g clipPath={clip}>
+  <rect x={x} y={y} width={w} height={h} fill={v.base} />
+  <rect x={x} y={y} width={w} height={h} fill="#000" filter={`url(#clsVenF-${v.key})`} />
+</g>);
 function classBuildSki(model, lengthIdx, lay) {
   const len = model.lengths[Math.min(lengthIdx, model.lengths.length - 1)];
   const base = PRESETS.find(p => p.name === len.preset) || PRESETS[0];
@@ -9403,6 +9438,8 @@ function ClassDesigner() {
   const [you, setYou] = useState({ name: "", email: "", height: "", weight: "", ability: "", where: "", current: "" });
   const [notes, setNotes] = useState("");
   const [art, setArt] = useState(null);
+  const [veneer, setVeneer] = useState(cfg.veneers[0].key);
+  const ven = cfg.veneers.find(v => v.key === veneer) || cfg.veneers[0];
   const [send, setSend] = useState({ busy: false, done: false, error: null });
   const [wide, setWide] = useState(typeof window !== "undefined" ? window.innerWidth >= 900 : true);
   useEffect(() => { const f = () => setWide(window.innerWidth >= 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
@@ -9417,14 +9454,14 @@ function ClassDesigner() {
     } catch (e) { return null; }
   }, [ski, stdSki]);
   const priceOf = k => cfg.prices[k];
-  const choices = [["wood", lay.wood, std.wood], ["glass", lay.glassTop, std.glassTop], ["glass", lay.glassBot, std.glassBot], ["stringer", lay.stringer, std.stringer]];
+  const choices = [["wood", lay.wood, std.wood], ["glass", lay.glassTop, std.glassTop], ["glass", lay.glassBot, std.glassBot], ["stringer", lay.stringer, std.stringer], ["veneer", veneer, cfg.veneers[0].key]];
   const upgrades = choices.filter(([, v, s]) => v !== s).map(([g, v]) => ({ key: g + ":" + v, price: priceOf(g + ":" + v) }));
   const known = upgrades.filter(u => u.price != null), unknown = upgrades.filter(u => u.price == null);
   const priceTag = (g, v, s) => v === s ? "Standard" : (priceOf(g + ":" + v) != null ? "+$" + priceOf(g + ":" + v) : "Priced at consultation");
   const woodName = k => (CORE_MATERIALS[k] || CORE_MATERIALS.poplar).name;
   const glassName = k => (cfg.glass.find(g => g.key === k) || cfg.glass[0]).label;
   const strName = k => (cfg.stringers.find(s => s.key === k) || cfg.stringers[0]).label;
-  const upgName = key => { const [g, v] = key.split(":"); return g === "wood" ? woodName(v) + " core" : g === "glass" ? glassName(v) : strName(v) + " stringers"; };
+  const upgName = key => { const [g, v] = key.split(":"); return g === "veneer" ? (cfg.veneers.find(x => x.key === v) || {}).label + " veneer" : g === "wood" ? woodName(v) + " core" : g === "glass" ? glassName(v) : strName(v) + " stringers"; };
   const lenLabel = model.lengths[Math.min(lenIdx, model.lengths.length - 1)].label;
   const font = "'JetBrains Mono', monospace";
   const card = { background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 8, padding: 14 };
@@ -9460,8 +9497,8 @@ function ClassDesigner() {
       <div style={{ fontFamily: font, fontSize: 13, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{model.name} · {lenLabel}</div>
       {plan && <svg viewBox={`0 0 ${W} ${plan.H}`} style={{ width: "100%", display: "block" }}>
         <defs><clipPath id="clsOutline"><path d={plan.d} /></clipPath></defs>
-        <path d={plan.d} fill={C.inputBg} />
-        {art && <image href={art} x="0" y="0" width={W} height={plan.H} preserveAspectRatio="xMidYMid slice" clipPath="url(#clsOutline)" />}
+        <VeneerFill v={ven} x={0} y={0} w={W} h={plan.H} clip="url(#clsOutline)" />
+        {art && <image href={art} x="0" y="0" width={W} height={plan.H} preserveAspectRatio="xMidYMid slice" clipPath="url(#clsOutline)" style={{ mixBlendMode: "multiply" }} />}
         <path d={plan.d} fill="none" stroke={C.heading} strokeWidth="1.5" />
       </svg>}
       <div style={{ ...lab, marginTop: 4 }}>From above, tail on the left</div>
@@ -9499,7 +9536,7 @@ function ClassDesigner() {
         model: model.name, length: lenLabel, core: woodName(lay.wood), glass_top: glassName(lay.glassTop), glass_bottom: glassName(lay.glassBot), stringers: strName(lay.stringer),
         estimated_change: cmp ? `flex ${pct(cmp.flex)}, twist ${pct(cmp.tors)}, ${Math.round(cmp.grams)} g per ski vs standard` : "",
         upgrades_priced: known.map(u => upgName(u.key) + " $" + u.price).join(", ") || "none", upgrades_to_price: unknown.map(u => upgName(u.key)).join(", ") || "none",
-        artwork: art ? "Has artwork; ask them to send the file" : "none", notes, design_link: designLink(), timestamp: new Date().toISOString() }) });
+        veneer: ven.label, artwork: art ? "Has artwork; ask them to send the file" : "none", notes, design_link: designLink(), timestamp: new Date().toISOString() }) });
       setSend(res.ok ? { busy: false, done: true, error: null } : { busy: false, done: false, error: "That didn't go through. Try again, or email matheson@blackchapelstudios.com." });
     } catch (e) { setSend({ busy: false, done: false, error: "Network error. Try again." }); }
   };
@@ -9527,12 +9564,20 @@ function ClassDesigner() {
       <button onClick={() => setLay(std)} style={{ ...chip(false), fontSize: 11.5 }}>Back to the standard build</button>
     </>),
     (<>
+      <div style={{ fontFamily: font, fontSize: 13, color: C.label, marginBottom: 6 }}>Wood veneer top</div>
+      <div style={{ display: "grid", gridTemplateColumns: wide ? "1fr 1fr" : "1fr", gap: 6, marginBottom: 6 }}>
+        {cfg.veneers.map(v => (<button key={v.key} onClick={() => setVeneer(v.key)} style={{ ...chip(veneer === v.key), display: "flex", alignItems: "center", gap: 10 }}>
+          <svg width="54" height="30" viewBox="0 0 54 30" style={{ flexShrink: 0, borderRadius: 4, border: `1px solid ${C.inputBorder}` }}><VeneerFill v={v} x={0} y={0} w={54} h={30} /></svg>
+          <div><div>{v.label}</div><div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>{priceTag("veneer", v.key, cfg.veneers[0].key)}</div></div>
+        </button>))}
+      </div>
+      <div style={{ ...lab, lineHeight: 1.5, marginBottom: 14 }}>Every ski gets a real wood veneer on top, so each one's grain is different from the drawing.</div>
       <div style={lab}>Topsheet artwork</div>
       <input type="file" accept="image/*" onChange={e => { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setArt(r.result); r.readAsDataURL(f); }} style={{ ...inp, padding: 8 }} />
       {art && <button onClick={() => setArt(null)} style={{ ...chip(false), marginTop: 6, fontSize: 11.5 }}>Remove artwork</button>}
-      <div style={{ ...lab, lineHeight: 1.5, marginTop: 8 }}>Your picture is laid over the ski in the preview so you can see how it sits. It stays on your device; send us the full-size file after you submit.</div>
+      <div style={{ ...lab, lineHeight: 1.5, marginTop: 8 }}>Your picture is laid over the veneer in the preview so you can see how it sits, with the wood showing through it. It stays on your device; send us the full-size file after you submit.</div>
       <div style={{ ...lab, marginTop: 10 }}>Anything else about the look</div>
-      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} placeholder="Colors, base color, wood veneer, a name on the ski..." style={{ ...inp, resize: "vertical" }} />
+      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} placeholder="Base color, inlays, a name on the ski..." style={{ ...inp, resize: "vertical" }} />
     </>),
     (send.done ? (<div style={{ fontFamily: font, color: C.value, fontSize: 14, lineHeight: 1.6 }}>Sent. We'll get in touch to set up your consultation{art ? ", and to get your artwork file" : ""}.</div>) : (<>
       <div style={{ fontFamily: font, fontSize: 13, color: C.label, lineHeight: 1.8 }}>
@@ -9540,6 +9585,7 @@ function ClassDesigner() {
         <div><span style={{ color: C.labelDim }}>Core</span> {woodName(lay.wood)}</div>
         <div><span style={{ color: C.labelDim }}>Fiberglass</span> {glassName(lay.glassTop)} above, {glassName(lay.glassBot)} below</div>
         <div><span style={{ color: C.labelDim }}>Stringers</span> {strName(lay.stringer)}</div>
+        <div><span style={{ color: C.labelDim }}>Veneer</span> {ven.label}</div>
         <div><span style={{ color: C.labelDim }}>Artwork</span> {art ? "yes" : "none yet"}</div>
       </div>
       <div style={{ ...card, marginTop: 10, fontFamily: font, fontSize: 12.5, color: C.label, lineHeight: 1.6 }}>
@@ -9556,6 +9602,7 @@ function ClassDesigner() {
   ];
   return (
     <div style={{ height: "100vh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg, color: C.value, fontFamily: font }}>
+      <VeneerDefs veneers={cfg.veneers} />
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${C.panelBorder || C.inputBorder}` }}>
         <img src={cfg.logoSrc} alt={cfg.brandName} style={{ height: 34, width: "auto", filter: C.logoFilter || "none" }} />
         {cfg.partner && (<>
