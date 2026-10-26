@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-25";
+const APP_BUILD = "2026-10-26";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -9336,7 +9336,240 @@ function studyDesignHTML(variants, opts) {
   return `<div style="margin-top:16px"><div style="display:flex;flex-wrap:wrap;gap:14px">${cells}</div></div>`;
 }
 
+// ── Class design page (open the site with ?class) ──
+// A customer-facing page for class students and customers: they start from the builders' models, choose a
+// length from the molds, change the parts of the layup that need no new tooling (core wood, fiberglass,
+// stringers), preview their artwork, and send it in. Every request is followed by a consultation with the
+// builder. Shape is fixed by the model. Everything a builder offers lives in CLASS_CONFIG.
+const CLASS_MODE = typeof window !== "undefined" && /(^|[?&])class(=|&|$)/.test((window.location && window.location.search || "").slice(1));
+const CLASS_CONFIG = {
+  // While true the page says the models are stand-ins and prices aren't set. Turn off once the real
+  // templates, molds and prices are in.
+  preview: true,
+  brandName: "Black Chapel Studios",
+  logoSrc: "/blackchapel-logo.png",
+  title: "Design your ski",
+  intro: "Start from one of our models, pick your length, choose what goes inside it, and see how those choices change the way it flexes. Send it to us and we'll go over it with you before the build.",
+  // Each model: the builders' shape, offered in the lengths there are molds for. Each length points at a
+  // full design (for now the app's presets, as stand-ins).
+  models: [
+    { key: "allmtn", name: "All-mountain", lengths: [{ label: "178 cm", preset: "All-Mtn" }] },
+    { key: "powder", name: "Powder", lengths: [{ label: "186 cm", preset: "Powder" }] },
+    { key: "shovel", name: "Wide shovel", lengths: [{ label: "180 cm", preset: "Wide Shovel" }] },
+  ],
+  // Layup choices that need no new tooling. The first entry in each list is the standard build.
+  woods: ["poplar", "aspen", "ash", "paulownia", "maple", "beech", "bamboo"],
+  glass: [{ key: "triax", label: "Glass triax", mat: "glassTriax" }, { key: "biax", label: "Glass biax", mat: "glassBiax" }],
+  stringers: [{ key: "none", label: "None" }, { key: "carbon15", label: "Carbon, 15 mm wide", carbon: "narrow" }, { key: "carbon25", label: "Carbon, 25 mm wide", carbon: "medium" }],
+  // Upgrade prices in dollars, keyed "wood:ash", "glass:biax", "stringer:carbon15". Anything not listed is
+  // priced at the consultation.
+  prices: {},
+};
+function classBuildSki(model, lengthIdx, lay) {
+  const len = model.lengths[Math.min(lengthIdx, model.lengths.length - 1)];
+  const base = PRESETS.find(p => p.name === len.preset) || PRESETS[0];
+  const ski = JSON.parse(JSON.stringify(base));
+  const gl = k => CLASS_CONFIG.glass.find(g => g.key === k) || CLASS_CONFIG.glass[0];
+  const st = CLASS_CONFIG.stringers.find(s => s.key === lay.stringer) || CLASS_CONFIG.stringers[0];
+  const carb = st.carbon ? CARBON[st.carbon] : null;
+  // Same order the designer uses: stringers just above the base and just below the topsheet.
+  const uni = () => carb && carb.E > 0 ? [{ id: _sid(), kind: "uni", mat: "carbonUni", gsm: FIBERS.carbonUni.gsm, width: carb.width || 0 }] : [];
+  const gb = gl(lay.glassBot), gt = gl(lay.glassTop);
+  const stack = [{ id: _sid(), kind: "base" }, ...uni(), { id: _sid(), kind: "fabric", mat: gb.mat, gsm: FIBERS[gb.mat].gsm },
+    { id: _sid(), kind: "core", wood: lay.wood }, { id: _sid(), kind: "fabric", mat: gt.mat, gsm: FIBERS[gt.mat].gsm }, ...uni(), { id: _sid(), kind: "topsheet" }];
+  ski.layup = { ...(ski.layup || DEFAULT_LAYUP), wood: lay.wood, stack };
+  ski.designName = model.name + " " + len.label;
+  return ski;
+}
+function ClassDesigner() {
+  const cfg = CLASS_CONFIG;
+  const std = { wood: cfg.woods[0], glassTop: cfg.glass[0].key, glassBot: cfg.glass[0].key, stringer: cfg.stringers[0].key };
+  const [step, setStep] = useState(0);
+  const [modelKey, setModelKey] = useState(cfg.models[0].key);
+  const [lenIdx, setLenIdx] = useState(0);
+  const [lay, setLay] = useState(std);
+  const [you, setYou] = useState({ name: "", email: "", height: "", weight: "", ability: "", where: "", current: "" });
+  const [notes, setNotes] = useState("");
+  const [art, setArt] = useState(null);
+  const [send, setSend] = useState({ busy: false, done: false, error: null });
+  const [wide, setWide] = useState(typeof window !== "undefined" ? window.innerWidth >= 900 : true);
+  useEffect(() => { const f = () => setWide(window.innerWidth >= 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  const model = cfg.models.find(m => m.key === modelKey) || cfg.models[0];
+  const ski = useMemo(() => classBuildSki(model, lenIdx, lay), [model, lenIdx, lay]);
+  const stdSki = useMemo(() => classBuildSki(model, lenIdx, std), [model, lenIdx]);   // eslint-disable-line
+  const cmp = useMemo(() => {
+    try {
+      const a = computeFlexProfile(ski), b = computeFlexProfile(stdSki);
+      const ma = computeBOM(ski).totalMassKg, mb = computeBOM(stdSki).totalMassKg;
+      return { flex: b.k3pt > 0 ? a.k3pt / b.k3pt - 1 : 0, tors: b.underfootGJ > 0 ? a.underfootGJ / b.underfootGJ - 1 : 0, grams: (ma - mb) * 1000, stations: a.stations, stdStations: b.stations };
+    } catch (e) { return null; }
+  }, [ski, stdSki]);
+  const priceOf = k => cfg.prices[k];
+  const choices = [["wood", lay.wood, std.wood], ["glass", lay.glassTop, std.glassTop], ["glass", lay.glassBot, std.glassBot], ["stringer", lay.stringer, std.stringer]];
+  const upgrades = choices.filter(([, v, s]) => v !== s).map(([g, v]) => ({ key: g + ":" + v, price: priceOf(g + ":" + v) }));
+  const known = upgrades.filter(u => u.price != null), unknown = upgrades.filter(u => u.price == null);
+  const priceTag = (g, v, s) => v === s ? "Standard" : (priceOf(g + ":" + v) != null ? "+$" + priceOf(g + ":" + v) : "Priced at consultation");
+  const woodName = k => (CORE_MATERIALS[k] || CORE_MATERIALS.poplar).name;
+  const glassName = k => (cfg.glass.find(g => g.key === k) || cfg.glass[0]).label;
+  const strName = k => (cfg.stringers.find(s => s.key === k) || cfg.stringers[0]).label;
+  const upgName = key => { const [g, v] = key.split(":"); return g === "wood" ? woodName(v) + " core" : g === "glass" ? glassName(v) : strName(v) + " stringers"; };
+  const lenLabel = model.lengths[Math.min(lenIdx, model.lengths.length - 1)].label;
+  const font = "'JetBrains Mono', monospace";
+  const card = { background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 8, padding: 14 };
+  const lab = { color: C.labelDim, fontSize: 11, fontFamily: font, marginBottom: 4 };
+  const inp = { width: "100%", boxSizing: "border-box", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 5, padding: "9px 10px", color: C.value, fontSize: 14, fontFamily: font };
+  const chip = on => ({ padding: "9px 12px", borderRadius: 6, cursor: "pointer", fontFamily: font, fontSize: 12.5, textAlign: "left", background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, fontWeight: on ? 700 : 400 });
+  const STEPS = ["About you", "Model", "Length", "What's inside", "Look", "Send"];
+  // ── Preview drawings ──
+  const W = 640, plan = (() => {
+    let pts = []; try { pts = getFullOutlinePoints(ski); } catch (e) {}
+    if (!pts.length) return null;
+    const L = ski.length, maxW = Math.max(...pts.map(p => Math.abs(p.x))) * 2, s = (W - 20) / L, H = maxW * s + 20;
+    const d = pts.map((p, i) => (i ? "L" : "M") + (10 + p.y * s).toFixed(1) + " " + (H / 2 - p.x * s).toFixed(1)).join(" ") + " Z";
+    return { d, H };
+  })();
+  const prof = (() => {
+    const L = ski.length, s = (W - 20) / L, ex = 3, ys = []; for (let x = 0; x <= L; x += 10) ys.push([x, sideProfileHeightAt(ski, x)]);
+    const top = Math.max(...ys.map(q => q[1])) * s * ex, H = top + 14;
+    return { d: ys.map(([x, h], i) => (i ? "L" : "M") + (10 + x * s).toFixed(1) + " " + (H - 6 - h * s * ex).toFixed(1)).join(" "), H };
+  })();
+  const flexPath = (st, H) => { if (!st || !st.length) return ""; const mx = Math.max(...cmp.stations.map(q => q.ei), ...cmp.stdStations.map(q => q.ei)) || 1; return st.map((q, i) => (i ? "L" : "M") + (10 + q.pos * (W - 20)).toFixed(1) + " " + (H - 4 - q.ei / mx * (H - 10)).toFixed(1)).join(" "); };
+  const pct = v => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(0) + "%";
+  const bar = (label, v, word) => (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: font, fontSize: 12, color: C.label }}><span>{label}</span><span style={{ color: C.value }}>{Math.abs(v) < 0.005 ? "same as standard" : pct(v) + " " + word}</span></div>
+      <div style={{ position: "relative", height: 8, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 4, marginTop: 3 }}>
+        <div style={{ position: "absolute", left: "50%", top: -3, bottom: -3, width: 1, background: C.labelDim }} />
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: v >= 0 ? "50%" : `${50 - Math.min(50, Math.abs(v) * 100)}%`, width: `${Math.min(50, Math.abs(v) * 100)}%`, background: C.heading, borderRadius: 3 }} />
+      </div>
+    </div>);
+  const preview = (
+    <div style={{ ...card, position: wide ? "sticky" : "static", top: 12 }}>
+      <div style={{ fontFamily: font, fontSize: 13, color: C.heading, fontWeight: 700, marginBottom: 6 }}>{model.name} · {lenLabel}</div>
+      {plan && <svg viewBox={`0 0 ${W} ${plan.H}`} style={{ width: "100%", display: "block" }}>
+        <defs><clipPath id="clsOutline"><path d={plan.d} /></clipPath></defs>
+        <path d={plan.d} fill={C.inputBg} />
+        {art && <image href={art} x="0" y="0" width={W} height={plan.H} preserveAspectRatio="xMidYMid slice" clipPath="url(#clsOutline)" />}
+        <path d={plan.d} fill="none" stroke={C.heading} strokeWidth="1.5" />
+      </svg>}
+      <div style={{ ...lab, marginTop: 4 }}>From above, tail on the left</div>
+      <svg viewBox={`0 0 ${W} ${prof.H}`} style={{ width: "100%", display: "block", marginTop: 6 }}><path d={prof.d} fill="none" stroke={C.heading} strokeWidth="1.5" /></svg>
+      <div style={lab}>From the side (height exaggerated 3 times)</div>
+      {cmp && (<>
+        <div style={{ fontFamily: font, fontSize: 12, color: C.label, margin: "12px 0 6px" }}>Compared with this model's standard build</div>
+        {bar("Flex", cmp.flex, cmp.flex >= 0 ? "stiffer" : "softer")}
+        {bar("Twist", cmp.tors, cmp.tors >= 0 ? "stiffer" : "softer")}
+        <div style={{ fontFamily: font, fontSize: 12, color: C.label }}>Weight: <span style={{ color: C.value }}>{Math.abs(cmp.grams) < 5 ? "about the same" : (cmp.grams > 0 ? "about " + Math.round(cmp.grams) + " g heavier" : "about " + Math.round(-cmp.grams) + " g lighter") + " per ski"}</span></div>
+        <svg viewBox={`0 0 ${W} 70`} style={{ width: "100%", display: "block", marginTop: 8 }}>
+          <path d={flexPath(cmp.stdStations, 70)} fill="none" stroke={C.labelDim} strokeWidth="1.2" strokeDasharray="4 3" />
+          <path d={flexPath(cmp.stations, 70)} fill="none" stroke={C.heading} strokeWidth="1.8" />
+        </svg>
+        <div style={lab}>Stiffness along the ski: yours (solid) and the standard build (dashed)</div>
+        <div style={{ ...lab, lineHeight: 1.45, marginTop: 6 }}>These are estimates from the design, for comparing choices. We'll go over the real build with you.</div>
+      </>)}
+    </div>);
+  const field = (k, label, ph, type) => (<div style={{ marginBottom: 10 }}><div style={lab}>{label}</div><input type={type || "text"} value={you[k]} placeholder={ph || ""} onChange={e => setYou(y => ({ ...y, [k]: e.target.value }))} style={inp} /></div>);
+  const optList = (title, items, val, set, group, stdVal) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: font, fontSize: 13, color: C.label, marginBottom: 6 }}>{title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: wide ? "1fr 1fr" : "1fr", gap: 6 }}>
+        {items.map(([k, name]) => <button key={k} onClick={() => set(k)} style={chip(val === k)}><div>{name}</div><div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>{priceTag(group, k, stdVal)}</div></button>)}
+      </div>
+    </div>);
+  const designLink = () => { const enc = encodeDesign(ski); return enc ? `${window.location.origin}${window.location.pathname}#d=${enc}` : ""; };
+  const submit = async () => {
+    if (!you.email) { setSend({ busy: false, done: false, error: "Add your email on the About you step so we can reach you." }); return; }
+    setSend({ busy: true, done: false, error: null });
+    try {
+      const res = await fetch(FORMSPREE_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify({
+        source: "Class design request", name: you.name || "(not provided)", email: you.email,
+        height: you.height, weight: you.weight, ability: you.ability, where_they_ski: you.where, current_skis: you.current,
+        model: model.name, length: lenLabel, core: woodName(lay.wood), glass_top: glassName(lay.glassTop), glass_bottom: glassName(lay.glassBot), stringers: strName(lay.stringer),
+        estimated_change: cmp ? `flex ${pct(cmp.flex)}, twist ${pct(cmp.tors)}, ${Math.round(cmp.grams)} g per ski vs standard` : "",
+        upgrades_priced: known.map(u => upgName(u.key) + " $" + u.price).join(", ") || "none", upgrades_to_price: unknown.map(u => upgName(u.key)).join(", ") || "none",
+        artwork: art ? "Has artwork; ask them to send the file" : "none", notes, design_link: designLink(), timestamp: new Date().toISOString() }) });
+      setSend(res.ok ? { busy: false, done: true, error: null } : { busy: false, done: false, error: "That didn't go through. Try again, or email matheson@blackchapelstudios.com." });
+    } catch (e) { setSend({ busy: false, done: false, error: "Network error. Try again." }); }
+  };
+  const body = [
+    (<>
+      <div style={{ ...lab, fontSize: 12.5, lineHeight: 1.5, marginBottom: 12 }}>This helps us check your length and build. Write height and weight however you like (feet and inches, or cm and kg).</div>
+      {field("name", "Name")}{field("email", "Email", "", "email")}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>{field("height", "Height", "5' 10\" or 178 cm")}{field("weight", "Weight", "165 lb or 75 kg")}</div>
+      <div style={{ marginBottom: 10 }}><div style={lab}>How you ski</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{["Beginner", "Intermediate", "Advanced", "Expert"].map(a => <button key={a} onClick={() => setYou(y => ({ ...y, ability: a }))} style={chip(you.ability === a)}>{a}</button>)}</div></div>
+      {field("where", "Where and what you like to ski", "Groomers at Brighton, trees, backcountry...")}{field("current", "Skis you ride now (and what you like or don't)")}
+    </>),
+    (<div style={{ display: "grid", gap: 8 }}>{cfg.models.map(m => { const p = PRESETS.find(x => x.name === m.lengths[0].preset) || PRESETS[0]; return (
+      <button key={m.key} onClick={() => { setModelKey(m.key); setLenIdx(0); }} style={chip(modelKey === m.key)}>
+        <div style={{ fontSize: 14 }}>{m.name}</div>
+        <div style={{ fontSize: 11.5, opacity: 0.85, marginTop: 3 }}>{p.tipWidth} / {p.waistWidth} / {p.tailWidth} mm at tip / waist / tail · {m.lengths.map(l => l.label).join(", ")}</div>
+      </button>); })}
+      <div style={{ ...lab, lineHeight: 1.5 }}>The shape of each model comes from our templates and molds, so it stays as it is. You choose the length, what goes inside, and the look.</div></div>),
+    (<><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{model.lengths.map((l, i) => <button key={l.label} onClick={() => setLenIdx(i)} style={chip(lenIdx === i)}>{l.label}</button>)}</div>
+      <div style={{ ...lab, lineHeight: 1.5, marginTop: 10 }}>These are the lengths we have molds for in this model. Not sure? Tell us your height, weight and how you ski on the first step, and we'll talk it through at the consultation.</div></>),
+    (<>
+      {optList("Core wood", cfg.woods.map(k => [k, woodName(k)]), lay.wood, v => setLay(l => ({ ...l, wood: v })), "wood", std.wood)}
+      {optList("Fiberglass above the core", cfg.glass.map(g => [g.key, g.label]), lay.glassTop, v => setLay(l => ({ ...l, glassTop: v })), "glass", std.glassTop)}
+      {optList("Fiberglass below the core", cfg.glass.map(g => [g.key, g.label]), lay.glassBot, v => setLay(l => ({ ...l, glassBot: v })), "glass", std.glassBot)}
+      {optList("Stringers (strips that add stiffness down the length)", cfg.stringers.map(s => [s.key, s.label]), lay.stringer, v => setLay(l => ({ ...l, stringer: v })), "stringer", std.stringer)}
+      <button onClick={() => setLay(std)} style={{ ...chip(false), fontSize: 11.5 }}>Back to the standard build</button>
+    </>),
+    (<>
+      <div style={lab}>Topsheet artwork</div>
+      <input type="file" accept="image/*" onChange={e => { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setArt(r.result); r.readAsDataURL(f); }} style={{ ...inp, padding: 8 }} />
+      {art && <button onClick={() => setArt(null)} style={{ ...chip(false), marginTop: 6, fontSize: 11.5 }}>Remove artwork</button>}
+      <div style={{ ...lab, lineHeight: 1.5, marginTop: 8 }}>Your picture is laid over the ski in the preview so you can see how it sits. It stays on your device; send us the full-size file after you submit.</div>
+      <div style={{ ...lab, marginTop: 10 }}>Anything else about the look</div>
+      <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} placeholder="Colors, base color, wood veneer, a name on the ski..." style={{ ...inp, resize: "vertical" }} />
+    </>),
+    (send.done ? (<div style={{ fontFamily: font, color: C.value, fontSize: 14, lineHeight: 1.6 }}>Sent. We'll get in touch to set up your consultation{art ? ", and to get your artwork file" : ""}.</div>) : (<>
+      <div style={{ fontFamily: font, fontSize: 13, color: C.label, lineHeight: 1.8 }}>
+        <div><span style={{ color: C.labelDim }}>Ski</span> {model.name}, {lenLabel}</div>
+        <div><span style={{ color: C.labelDim }}>Core</span> {woodName(lay.wood)}</div>
+        <div><span style={{ color: C.labelDim }}>Fiberglass</span> {glassName(lay.glassTop)} above, {glassName(lay.glassBot)} below</div>
+        <div><span style={{ color: C.labelDim }}>Stringers</span> {strName(lay.stringer)}</div>
+        <div><span style={{ color: C.labelDim }}>Artwork</span> {art ? "yes" : "none yet"}</div>
+      </div>
+      <div style={{ ...card, marginTop: 10, fontFamily: font, fontSize: 12.5, color: C.label, lineHeight: 1.6 }}>
+        {upgrades.length === 0 ? "Standard build: no upgrades." : (<>
+          {known.map(u => <div key={u.key}>{upgName(u.key)}: +${u.price}</div>)}
+          {known.length > 0 && <div style={{ color: C.value, marginTop: 4 }}>Upgrades so far: +${known.reduce((a, u) => a + u.price, 0)}</div>}
+          {unknown.length > 0 && <div style={{ color: C.labelDim, marginTop: 4 }}>{unknown.length === upgrades.length ? "Your upgrades are" : "The rest are"} priced at your consultation.</div>}
+        </>)}
+      </div>
+      <div style={{ ...lab, lineHeight: 1.5, marginTop: 10 }}>Sending this doesn't place an order. We'll set up a consultation to go over your design and make sure it can be built the way you want.</div>
+      {send.error && <div style={{ color: C.amber || "#e8a33a", fontFamily: font, fontSize: 12.5, marginTop: 8 }}>{send.error}</div>}
+      <button onClick={submit} disabled={send.busy} style={{ ...chip(true), marginTop: 10, fontSize: 14, padding: "11px 16px" }}>{send.busy ? "Sending..." : "Send my design"}</button>
+    </>)),
+  ];
+  return (
+    <div style={{ height: "100vh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: C.bg, color: C.value, fontFamily: font }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${C.panelBorder || C.inputBorder}` }}>
+        <img src={cfg.logoSrc} alt={cfg.brandName} style={{ height: 34, width: "auto", filter: C.logoFilter || "none" }} />
+        <div style={{ color: C.heading, fontSize: 13, letterSpacing: 2, textTransform: "uppercase" }}>{cfg.title}</div>
+      </div>
+      {cfg.preview && <div style={{ background: `${C.heading}22`, borderBottom: `1px solid ${C.heading}`, color: C.heading, fontSize: 12, padding: "8px 16px", lineHeight: 1.45 }}>Preview: these models are stand-ins until our own templates are loaded, and upgrade prices aren't set yet.</div>}
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: 16 }}>
+        <div style={{ color: C.label, fontSize: 13, lineHeight: 1.6, marginBottom: 14, maxWidth: 760 }}>{cfg.intro}</div>
+        <div style={{ display: "grid", gridTemplateColumns: wide ? "minmax(0,1.15fr) minmax(0,1fr)" : "1fr", gap: 16, alignItems: "start" }}>
+          {preview}
+          <div style={card}>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14 }}>{STEPS.map((s, i) => <button key={s} onClick={() => setStep(i)} style={{ ...chip(step === i), padding: "6px 9px", fontSize: 11 }}>{i + 1}. {s}</button>)}</div>
+            <div style={{ fontSize: 16, color: C.heading, fontWeight: 700, marginBottom: 10 }}>{STEPS[step]}</div>
+            {body[step]}
+            {!(step === STEPS.length - 1) && <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
+              <button onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0} style={{ ...chip(false), opacity: step === 0 ? 0.4 : 1 }}>Back</button>
+              <button onClick={() => setStep(s => Math.min(STEPS.length - 1, s + 1))} style={chip(true)}>Next: {STEPS[step + 1]}</button>
+            </div>}
+          </div>
+        </div>
+        <div style={{ color: C.labelDim, fontSize: 10.5, letterSpacing: 1, textAlign: "center", marginTop: 24 }}>POWERED BY BLACK CHAPEL STUDIOS SKI DESIGNER</div>
+      </div>
+    </div>);
+}
+
 export default function App() {
+  if (CLASS_MODE) return <ClassDesigner />;   // the class design page has its own layout
   const [ski, setSki] = useState(DEFAULT_SKI);
   const [printOpts, setPrintOpts] = useState({ core: true, profile: true, rocker: true, align: true });
   const [stepBusy, setStepBusy] = useState(false);
