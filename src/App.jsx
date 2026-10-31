@@ -665,7 +665,7 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-30b";
+const APP_BUILD = "2026-10-31";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
@@ -683,7 +683,7 @@ const WHATS_NEW = {
     { title: "True-scale side profile",
       body: "The side profile normally stretches the heights (up to 3 times) so small rises are readable, by an amount that changes with the size of the window. The TRUE SCALE button in its corner draws heights at the same scale as the length, so the shape is what the ski really looks like. Your choice is remembered on this device." },
     { title: "Grid in the CAM preview", go: "cam",
-      body: "In the CAM workspace's 2D preview, tick Grid to draw a grid lined up on X0 Y0, labeled in your file's units. Set how far apart the lines are next to it (it starts at 25 mm or 1 inch)." },
+      body: "The CAM workspace's 2D preview now shows a grid, lined up on X0 Y0. It's in centimeters to start (every 5 cm); switch it to inches next to the Grid box, set how far apart the lines are, or untick Grid to hide it. The grid's units are separate from the file's units." },
     { title: "Edit core thickness from the layup",
       body: "The wood core layer in Layup / Materials now shows the core's thickness and has an Edit core thickness button. It opens Edges & Core, shows the Core view, and takes you to the core thickness points, where you can change any point or double-click the line in the Core view to add one." },
     { title: "Each job shows only its own settings",
@@ -4950,12 +4950,12 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim, grid) {
       const gx0 = Math.floor((0 - ox) / s / st) * st, gx1 = (W - ox) / s, gy0 = Math.floor((-oy) / s / st) * st, gy1 = (H - oy) / s;
       const every = px >= 44 ? 1 : px >= 18 ? 5 : 10;
       ctx.lineWidth = 1; ctx.setLineDash([]); ctx.font = "8.5px 'JetBrains Mono', monospace";
-      const fmt = v => String(+v.toFixed(3));
+      const k2 = grid.toLabel || 1, fmt = v => String(+(v * k2).toFixed(2));
       for (let gx = gx0, k = Math.round(gx0 / st); gx <= gx1 + 1e-9; gx += st, k++) {
         const x = Math.round(MXc(gx, 0)) + 0.5, major = k % every === 0;
         ctx.strokeStyle = k === 0 ? `rgba(${C.blueRGB},0.45)` : `rgba(${C.dimRGB},${major ? 0.22 : 0.09})`;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-        if (major) { ctx.fillStyle = `rgba(${C.dimRGB},0.75)`; ctx.textAlign = "center"; ctx.fillText(fmt(gx), x, H - 4); }
+        if (major) { ctx.fillStyle = `rgba(${C.dimRGB},0.75)`; ctx.textAlign = "center"; ctx.fillText(fmt(gx), x, 26); }
       }
       for (let gy = gy0, k = Math.round(gy0 / st); gy <= gy1 + 1e-9; gy += st, k++) {
         const y = Math.round(MYc(0, gy)) + 0.5, major = k % every === 0;
@@ -4963,6 +4963,7 @@ function drawToolpathCanvas(cv, data, machine, view, stock, sim, grid) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
         if (major) { ctx.fillStyle = `rgba(${C.dimRGB},0.75)`; ctx.textAlign = "left"; ctx.fillText(fmt(gy), 3, y - 3); }
       }
+      if (grid.unit) { ctx.fillStyle = `rgba(${C.dimRGB},0.9)`; ctx.textAlign = "right"; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.fillText("GRID IN " + (grid.unit === "in" ? "INCHES" : "CM"), W - 6, H - 6); }
     }
   }
   if (hasBed) {
@@ -5035,7 +5036,7 @@ function ToolpathView({ gcode, width, height, machine, stock, sim, grid }) {
   const parsed = useMemo(() => parseToolpath(gcode), [gcode]);   // parse ONCE per G-code, not per pan/zoom frame
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock, sim, grid); }, [parsed, width, height, machine, stock, zoom, pan, sim, C.canvasBg, grid && grid.step]);
+  useEffect(() => { const cv = ref.current; if (!cv) return; const fw = Math.max(1, Math.floor(width)), fh = Math.max(1, Math.floor(height)); if (cv.width !== fw) cv.width = fw; if (cv.height !== fh) cv.height = fh; tf.current = drawToolpathCanvas(cv, parsed, machine, { zoom, panX: pan.x, panY: pan.y }, stock, sim, grid); }, [parsed, width, height, machine, stock, zoom, pan, sim, C.canvasBg, grid && grid.step, grid && grid.unit]);
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   const ptr = e => { const cv = ref.current, r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height), sc: cv.width / r.width }; };
   const onWheel = e => { e.preventDefault(); const t = tf.current; if (!t) return; const p = ptr(e); const wx = (p.x - t.ox) / t.s, wy = (t.H - p.y - t.oy) / t.s; const nz = Math.max(1, Math.min(24, zoom * (1 - e.deltaY * 0.0015))); const ns = t.sBase * nz; setZoom(nz); setPan({ x: (p.x - wx * ns) - ((ref.current.width - t.bw * ns) / 2 - t.mnx * ns), y: (t.H - p.y - wy * ns) - ((t.H - t.bh * ns) / 2 - t.mny * ns) }); };
@@ -9319,7 +9320,7 @@ function NumberInput({ value, min, max, step, onCommit, style, onFocus, onBlur }
 // must scale when switching mm<->inch. Used BOTH by the unit toggle and by the load-time defensive pass, so
 // a new field only has to be added here once and it can never again leak a mm default into an inch config.
 const CAM_LEN_KEYS = [
-  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap", "batchBlankW", "gridStep",
+  "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap", "batchBlankW",
   "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "chanExtra", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "baseCutThrough", "slatStockThick", "slatSheetL", "pocketStockL", "pocketStockW", "pocketStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
   "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
@@ -10399,8 +10400,8 @@ export default function App() {
       // practice (10 mm wide, 1 to 2 mm shallower than the stock); both are editable.
       taperEndOver: 0, sidewallMethod: "glue", rabbetHow: "router", rabbetWidth: null, rabbetDepth: null,
       rabbetToolNum: 7, rabbetToolDia: 6.35, rabbetFeed: 1500, rabbetPlunge: 400,
-      chanWidth: 10, chanSkin: 1.5, chanProfiled: false, chanExtra: 1, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
-    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; } if ((s.ribV || 0) < 2) { if (s.slatHoleH === 12 || (s.slatHoleH != null && Math.abs(s.slatHoleH - 12 / 25.4) < 1e-3)) m.slatHoleH = null; m.ribV = 2; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = null; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } if (s.matV !== 1) { if (s.baseCutThrough === undefined && s.cutThrough != null) m.baseCutThrough = s.cutThrough; if (s.pocketStockThick === undefined) { if (s.stockL != null) m.pocketStockL = s.stockL; if (s.stockW != null) m.pocketStockW = s.stockW; if (s.stockThick != null) m.pocketStockThick = s.stockThick; } m.matV = 1; } return m; } } catch (e) {}
+      chanWidth: 10, chanSkin: 1.5, chanProfiled: false, chanExtra: 1, showGrid: true, gridUnit: "cm", gridStep: null, gridV: 1, channelToolNum: 8, channelToolDia: 6.35, channelFeed: 2000, channelPlunge: 600, pourThick: null };
+    try { const s = JSON.parse(localStorage.getItem("bcs_cam")); if (s) { const m = { ...d, ...s }; const inch = m.units === "inch"; if (s.tabPerSide === undefined && s.tabN > 0) m.tabPerSide = Math.max(1, Math.round(s.tabN / 2)); if (!s.pinZeroV) { m.pinOrigin = true; m.pinZeroV = 1; } if (!s.taperPattern) m.taperPattern = "loops"; if (!s.ribV) { if (s.slatHoleDia === 6.6) m.slatHoleDia = 6.35; else if (s.slatHoleDia != null && Math.abs(s.slatHoleDia - 6.6 / 25.4) < 1e-3) m.slatHoleDia = 0.25; m.ribV = 1; } if ((s.ribV || 0) < 2) { if (s.slatHoleH === 12 || (s.slatHoleH != null && Math.abs(s.slatHoleH - 12 / 25.4) < 1e-3)) m.slatHoleH = null; m.ribV = 2; }   /* every core job now zeroes on the tail hole by default (once; the user can still untick it) */ if (inch) { for (const k of CAM_LEN_KEYS) { if (s[k] === undefined && typeof d[k] === "number") m[k] = +(d[k] / 25.4).toFixed(4); } } if (m.camV !== d.camV) { m.machineX = d.machineX; m.machineY = d.machineY; m.origin = "corner"; m.slatHoleSpacing = inch ? +(10 / 25.4).toFixed(3) : 10; m.slatHoleH = null; m.slatHoleDia = inch ? +(6.6 / 25.4).toFixed(3) : 6.6; m.slatHoleEndZone = inch ? +(300 / 25.4).toFixed(2) : 300; m.bladeOffset = inch ? +(1 / 25.4).toFixed(3) : 1; m.dragLeadIn = inch ? +(12 / 25.4).toFixed(2) : 12; m.roughToolDia = inch ? +(12.7 / 25.4).toFixed(3) : 12.7; m.finishAllowance = inch ? +(1 / 25.4).toFixed(3) : 1; m.roughStepover = inch ? +(8 / 25.4).toFixed(3) : 8; m.roughStepdown = inch ? +(4 / 25.4).toFixed(3) : 4; m.baseToolDia = inch ? +(3.175 / 25.4).toFixed(3) : 3.175; m.baseFeed = inch ? +(2500 / 25.4).toFixed(1) : 2500; m.basePlunge = inch ? +(800 / 25.4).toFixed(1) : 800; m.tabLen = inch ? +(8 / 25.4).toFixed(3) : 8; m.camV = d.camV; } if (s.matV !== 1) { if (s.baseCutThrough === undefined && s.cutThrough != null) m.baseCutThrough = s.cutThrough; if (s.pocketStockThick === undefined) { if (s.stockL != null) m.pocketStockL = s.stockL; if (s.stockW != null) m.pocketStockW = s.stockW; if (s.stockThick != null) m.pocketStockThick = s.stockThick; } m.matV = 1; } if (s.gridV !== 1) { m.showGrid = true; m.gridUnit = "cm"; m.gridStep = null; m.gridV = 1; } return m; } } catch (e) {}
     return d;
   });
   const setCam = (k, v) => setCamOpt(o => { const n = { ...o, [k]: v }; try { localStorage.setItem("bcs_cam", JSON.stringify(n)); } catch (e) {} return n; });
@@ -14118,7 +14119,8 @@ export default function App() {
                   <input type="checkbox" checked={!!camOpt.showGrid} onChange={e => setCam("showGrid", e.target.checked)} /> Grid
                 </label>}
                 {!preview3D && camOpt.showGrid && <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.labelDim, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
-                  every <input type="number" min={0} step={camOpt.units === "inch" ? 0.25 : 5} value={camOpt.gridStep > 0 ? camOpt.gridStep : (camOpt.units === "inch" ? 1 : 25)} onChange={e => { const v = parseFloat(e.target.value); setCam("gridStep", v > 0 ? v : null); }} style={{ width: 64, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} /> {camOpt.units === "inch" ? "in" : "mm"}
+                  every <input type="number" min={0} step={(camOpt.gridUnit || "cm") === "in" ? 0.5 : 1} value={camOpt.gridStep > 0 ? camOpt.gridStep : ((camOpt.gridUnit || "cm") === "in" ? 2 : 5)} onChange={e => { const v = parseFloat(e.target.value); setCam("gridStep", v > 0 ? v : null); }} style={{ width: 56, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "3px 5px", color: C.value, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} />
+                  {[["cm", "cm"], ["in", "in"]].map(([v, l]) => <button key={v} onClick={() => setCamMany({ gridUnit: v, gridStep: null })} style={{ padding: "3px 7px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 3, background: (camOpt.gridUnit || "cm") === v ? C.heading : C.inputBg, color: (camOpt.gridUnit || "cm") === v ? C.bgDeep : C.label, border: `1px solid ${(camOpt.gridUnit || "cm") === v ? C.heading : C.inputBorder}` }}>{l}</button>)}
                 </span>}
                 {camResult.stats && camMachine && (
                   <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, fontWeight: 700, color: camMachine.fits ? C.ok : "#e8552a" }}>
@@ -14211,7 +14213,7 @@ export default function App() {
                 </label>
               </div>
               )}
-              <ToolpathSimPane key={themeName} gcode={camResult.gcode} ok={!!camResult.stats} preview3D={preview3D} machine={camMachine} stock={camStock} toolDias={simToolDias} playReq={simReq} C={C} grid={camOpt.showGrid && !preview3D ? { step: camOpt.gridStep > 0 ? camOpt.gridStep : (camOpt.units === "inch" ? 1 : 25) } : null} />
+              <ToolpathSimPane key={themeName} gcode={camResult.gcode} ok={!!camResult.stats} preview3D={preview3D} machine={camMachine} stock={camStock} toolDias={simToolDias} playReq={simReq} C={C} grid={camOpt.showGrid && !preview3D ? (() => { const gu = camOpt.gridUnit || "cm", stepG = camOpt.gridStep > 0 ? camOpt.gridStep : (gu === "in" ? 2 : 5), mmPerG = gu === "in" ? 25.4 : 10, mmPerF = camOpt.units === "inch" ? 25.4 : 1; return { step: stepG * mmPerG / mmPerF, toLabel: mmPerF / mmPerG, unit: gu }; })() : null} />
               <div style={{ display: "flex", gap: 16, alignItems: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.labelDim }}>
                 <span>rapids dashed · cuts colored by depth</span>
                 {camResult.stats && <span style={{ marginLeft: "auto" }}>Z {camResult.stats.minZ}…{camResult.stats.maxZ} {camResult.stats.unit} · ~{(camResult.stats.cutDistMM / 1000).toFixed(1)} m · {camResult.stats.estMin} min · {camResult.stats.lines.toLocaleString()} lines</span>}
