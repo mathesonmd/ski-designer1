@@ -665,15 +665,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-10-31";
+const APP_BUILD = "2026-11-02";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-10-30b",
+  id: "2026-11-02",
   title: "What's new",
   items: [
+    { title: "Set where the camber's high point sits", go: "dimensions",
+      body: "Under Side Profile, Camber high point now has two choices. Between the rocker starts is how it has always worked: the high point sits halfway between where the tip and tail rockers start, so it moves when you change a rocker length. Set its position keeps it a fixed distance back from the middle of the ski (snoCAD calls this camber setback), so changing the rockers no longer moves it. For a single camber; multi-zone and reverse camber are unchanged." },
+    { title: "Rocker guides in the zooms, even with lots of rocker",
+      body: "In the tip and tail zoom panels, the rocker start line now shows wherever it falls inside the panel. When it starts beyond the edge of the panel, a measuring line runs from the widest point to the edge with an arrow and the full distance." },
     { title: "Poured sidewall channel that follows the core thickness", go: "cam",
       body: "For poured sidewalls, the sidewall channel step can now cut a channel that follows the core thickness: it's cut from the bottom face, as deep as the finished core will be at each point plus a little extra (1 mm to start). After the pour you level the poly flush instead of planing, and shaping the top face only takes off that extra poly, so it uses much less poly. Pick it under Channel depth in the channel step." },
     { title: "Alignment holes past the tip and tail", go: "cam",
@@ -1742,6 +1746,16 @@ function rockerHeight(s, totalHeight) {
 // end to its takeoff point; camber arcs between the two takeoffs. The takeoff points are the contacts
 // when rocker is linked, or independent (inboard) points when unlinked — so this one function drives
 // the on-screen side view, the rocker DXF, and the combined export consistently in both modes.
+// Where the camber's high point sits along the ski (mm from the tail end). By default it's halfway between the
+// rocker start points, so it moves when a rocker length changes. With camberApexSet (mm from the middle of the
+// ski, + toward the tail) it stays put. Kept a little inside the rocker start points so both sides of the
+// camber keep some length.
+function camberApexX(ski) {
+  const t = rockerTakeoffLens(ski), a = t.tail, b = ski.length - t.tip, mid = (a + b) / 2;
+  if (ski.camberApexSet == null || !isFinite(ski.camberApexSet)) return mid;
+  const m = Math.max(5, (b - a) * 0.05);
+  return Math.max(a + m, Math.min(b - m, ski.length / 2 - ski.camberApexSet));
+}
 function sideProfileHeightAt(ski, xmm) {
   const t = rockerTakeoffLens(ski);
   const tailTakeoff = t.tail;                 // mm from tail end
@@ -1760,7 +1774,13 @@ function sideProfileHeightAt(ski, xmm) {
   // Reverse camber (negative camber): the middle sags below the rocker start points, shaped so it meets each
   // rocker curve level (no crease), and the ski rests on its middle.
   if (ski.camberHeight < 0) { const sv = Math.sin(Math.PI * tt); return ski.camberHeight * sv * sv; }
-  if (zones <= 1) return ski.camberHeight * 4 * tt * (1 - tt);
+  if (zones <= 1) {
+    if (ski.camberApexSet == null) return ski.camberHeight * 4 * tt * (1 - tt);
+    // Set high point: a half-parabola on each side of it, level at the top and 0 at each rocker start point.
+    const ap = span > 0 ? (camberApexX(ski) - tailTakeoff) / span : 0.5;
+    const u = tt < ap ? (ap - tt) / ap : (tt - ap) / (1 - ap);
+    return ski.camberHeight * (1 - u * u);
+  }
   // Multi-zone camber (triple camber and beyond): N rounded humps across the running length. A raised
   // cosine keeps the valleys between humps smooth instead of pinching to a sharp point, and the smoothness
   // control lifts those valleys into small rockers (the way Never Summer's CRC sits camber zones between
@@ -6266,18 +6286,36 @@ function PlanView({ ski, setSki, width, height, orientation = "horizontal", tops
         };
         const riseCol = C.contactLabel || "#f0895c";
         const gap = Math.abs(yWide - yRise);
-        const inView = y => y >= viewMinY - 1 && y <= viewMinY + viewSpanY + 1;
+        // What the panel actually shows (its inner rectangle), not just the nominal zoom range.
+        const rx0 = panelX + 3, rx1 = panelX + panelW - 3, ry0 = panelY + 22, ry1 = panelY + zoomPanelH - 4;
+        const onScreen = p => p.x >= rx0 && p.x <= rx1 && p.y >= ry0 && p.y <= ry1;
         if (gap < 0.5) cross(yRise, riseCol, [], "ROCKER STARTS AT THE WIDEST POINT", false);
         else {
           cross(yWide, C.heading, [5, 3], "WIDEST", false);
-          if (inView(yRise)) {
+          const rx = -(wMax + 26), r1 = toFrame(rx, yWide);
+          const tick = y => { const e0 = toFrame(rx - 4, y), e1 = toFrame(rx + 4, y); ctx.beginPath(); ctx.moveTo(e0.x, e0.y); ctx.lineTo(e1.x, e1.y); ctx.stroke(); };
+          ctx.strokeStyle = C.label; ctx.lineWidth = 1;
+          if (onScreen(toFrame(0, yRise))) {
             cross(yRise, riseCol, [], "ROCKER STARTS", true);
-            const rx = -(wMax + 26), r0 = toFrame(rx, yRise), r1 = toFrame(rx, yWide);
+            const r0 = toFrame(rx, yRise);
             ctx.strokeStyle = C.label; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(r0.x, r0.y); ctx.lineTo(r1.x, r1.y); ctx.stroke();
-            [yRise, yWide].forEach(y => { const e0 = toFrame(rx - 4, y), e1 = toFrame(rx + 4, y); ctx.beginPath(); ctx.moveTo(e0.x, e0.y); ctx.lineTo(e1.x, e1.y); ctx.stroke(); });
+            tick(yRise); tick(yWide);
             const mid = toFrame(rx - 9, (yRise + yWide) / 2);
             ctx.fillStyle = C.value || C.label; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
             ctx.fillText(`${Math.round(gap)} mm`, mid.x, mid.y + 3);
+          } else {
+            // The rocker starts beyond this view: run the measuring line from the widest point to the panel's edge,
+            // with an arrow pointing the way, and give the full distance.
+            const dir = Math.sign(yRise - yWide); let yEnd = yWide;
+            for (let k = 1; k <= 400; k++) { const y = yWide + dir * gap * k / 400; if (!onScreen(toFrame(rx, y))) break; yEnd = y; }
+            yEnd -= dir * Math.min(Math.abs(yEnd - yWide) * 0.08, 12);
+            const e = toFrame(rx, yEnd);
+            ctx.beginPath(); ctx.moveTo(r1.x, r1.y); ctx.lineTo(e.x, e.y); ctx.stroke(); tick(yWide);
+            const back = toFrame(rx, yEnd - dir * 8), ux = e.x - back.x, uy = e.y - back.y, ul = Math.hypot(ux, uy) || 1, nx = -uy / ul, ny = ux / ul;
+            ctx.fillStyle = riseCol; ctx.beginPath(); ctx.moveTo(e.x + ux / ul * 4, e.y + uy / ul * 4); ctx.lineTo(back.x + nx * 4, back.y + ny * 4); ctx.lineTo(back.x - nx * 4, back.y - ny * 4); ctx.closePath(); ctx.fill();
+            const mid = toFrame(rx - 9, (yWide + yEnd) / 2);
+            ctx.fillStyle = riseCol; ctx.font = "bold 9px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+            ctx.fillText(`rocker starts ${Math.round(gap)} mm this way`, mid.x, mid.y + 3);
           }
         }
         // Always spell it out in the panel's corner too, so it reads even when the rocker starts outside this view.
@@ -7122,7 +7160,7 @@ function ProfileView({ ski, setSki, width, height }) {
 
     // ── Draggable measurement handles: tail rise, tip rise, camber peak ──
     const tk = rockerTakeoffLens(ski);
-    const camberMidX = (tk.tail + (L - tk.tip)) / 2;   // midpoint between takeoffs (camber peak)
+    const camberMidX = camberApexX(ski);   // the camber's high point (midway between takeoffs unless set)
     const handleDefs = [
       { key: "tailHeight", xmm: 0, ymm: TAH, min: 5, max: 60, step: 1, align: "left" },
       { key: "tipHeight",  xmm: L, ymm: TH,  min: 5, max: 80, step: 1, align: "right" },
@@ -12039,6 +12077,26 @@ export default function App() {
           {ski.camberHeight < 0 && <div style={{ color: C.labelDim, fontSize: 10, marginTop: -4, marginBottom: 6, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
             Reverse camber: the middle of the ski sits {Math.abs(ski.camberHeight)} mm below the rocker start points, so the ski rests on its middle and those points sit off the snow. For one continuous curve from tip to tail with no flat spot, unlink the rocker and set both rocker lengths to half the ski's length so they meet in the middle.
           </div>}
+          {ski.camberHeight > 0 && (ski.camberZones || 1) <= 1 && (() => {
+            const tk = rockerTakeoffLens(ski), mid = ((tk.tail + (ski.length - tk.tip)) / 2), apex = camberApexX(ski), fromMid = Math.round(ski.length / 2 - apex);
+            const set = ski.camberApexSet != null;
+            const segBtn = on => ({ flex: 1, padding: "5px 6px", fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 3, background: on ? C.heading : C.inputBg, color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}`, fontWeight: on ? 700 : 400 });
+            return (<div style={{ marginBottom: 8 }}>
+              <div style={{ color: C.label, fontSize: 11, marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>Camber high point</div>
+              <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+                <button onClick={() => setSki(s => ({ ...s, camberApexSet: null }))} style={segBtn(!set)}>Between the rocker starts</button>
+                <button onClick={() => setSki(s => ({ ...s, camberApexSet: Math.round(s.length / 2 - camberApexX(s)) }))} style={segBtn(set)}>Set its position</button>
+              </div>
+              {set && <div style={{ marginBottom: 4 }}>
+                <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 3, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>Back from the middle of the ski, mm (toward the tail; negative is toward the tip)</div>
+                <input type="number" value={ski.camberApexSet} step={5} onChange={e => { const v = parseFloat(e.target.value); setSki(s => ({ ...s, camberApexSet: isFinite(v) ? v : 0 })); }} style={{ width: "100%", boxSizing: "border-box", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "6px 9px", color: C.value, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} />
+              </div>}
+              <div style={{ color: C.labelDim, fontSize: 10, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                {set ? "It stays here when you change the rocker lengths. " : "It sits halfway between where the tip and tail rockers start, so it moves when you change a rocker length. Set its position to keep it in one place (snoCAD calls this camber setback). "}
+                Now {Math.abs(fromMid) < 1 ? "at the middle of the ski" : Math.abs(fromMid) + " mm " + (fromMid > 0 ? "toward the tail from" : "toward the tip from") + " the middle of the ski"}, {Math.round(apex)} mm from the tail end.{set && Math.abs(apex - (ski.length / 2 - ski.camberApexSet)) > 0.5 ? " That's as far as it can go: it has to stay between the rocker start points." : ""}
+              </div>
+            </div>);
+          })()}
           {inputField("Camber zones", "camberZones", 1, 5, 1)}
           {ski.camberZones > 1 && (<>
             {inputField("Zone smoothness", "camberSmooth", 0, 1, 0.05)}
