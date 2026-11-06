@@ -585,7 +585,7 @@ function syncCoreContacts(ski){
   const oT = oldTail ? oldTail.pos : tailPos;
   const oP = oldTip ? oldTip.pos : tipPos;
   const span = (oP - oT) || 1;
-  return cp.map(n => {
+  const out = cp.map(n => {
     if (n.end) return { ...n, pos: n.pos <= 0.5 ? 0.0 : 1.0 };
     if (n.contact === 'tail') return { ...n, pos: tailPos };
     if (n.contact === 'tip') return { ...n, pos: tipPos };
@@ -593,6 +593,37 @@ function syncCoreContacts(ski){
     const frac = (n.pos - oT) / span;
     return { ...n, pos: tailPos + frac * (tipPos - tailPos) };
   });
+  // The flat zone is set in mm, so it stays where it is when the ski's dimensions change.
+  return ski.flatZone && ski.flatZone.on ? applyFlatZone({ ...ski, coreProfile: out }).coreProfile : out;
+}
+// ── Flat zone under the binding(s) ──
+// ski.flatZone = { on, len, center (mm from the tail end), thick (mm), parked }. While on, the core is held flat
+// at one thickness from center - len/2 to center + len/2: two "flat" points mark its ends, and any other points
+// that fall inside it are parked (kept in flatZone.parked) so they come back if the zone moves off them or is
+// turned off. The zone stays between the contact points.
+function flatZoneSpan(ski) {
+  const z = ski.flatZone; if (!z || !z.on || !(z.len > 0) || z.center == null) return null;
+  const L = ski.length, tailC = ski.tailLength, tipC = L - ski.tipLength, room = tipC - tailC - 20;
+  if (room <= 20) return null;
+  const len = Math.max(20, Math.min(room, z.len)), c = Math.max(tailC + 10 + len / 2, Math.min(tipC - 10 - len / 2, z.center));
+  return { a: (c - len / 2) / L, b: (c + len / 2) / L, len, center: c };
+}
+function applyFlatZone(ski) {
+  const cp = ski.coreProfile; if (!cp || !cp.length) return ski;
+  const z = ski.flatZone, parkedIn = (z && z.parked) || [];
+  const pool = cp.filter(n => !n.flat).concat(parkedIn.map(n => ({ pos: n.pos, thick: n.thick }))).sort((a, b) => a.pos - b.pos);
+  const interp = cp[0] && cp[0].interp;
+  if (interp && pool[0]) pool[0] = { ...pool[0], interp };
+  const span = flatZoneSpan(ski);
+  if (!span) return { ...ski, coreProfile: pool, flatZone: z ? { ...z, parked: [] } : z };
+  const keep = [], park = [];
+  for (const n of pool) { if (!n.end && !n.contact && n.pos > span.a - 0.0005 && n.pos < span.b + 0.0005) park.push({ pos: n.pos, thick: n.thick }); else keep.push(n); }
+  // Thickness: as set, or to start, the thickest the core was anywhere over the zone (so turning it on never thins the core underfoot).
+  let T = z.thick; if (!(T > 0)) { T = 0; for (let k = 0; k <= 40; k++) T = Math.max(T, getCoreThickAt(pool, span.a + (span.b - span.a) * k / 40)); T = Math.round(T * 10) / 10; }
+  keep.push({ pos: span.a, thick: T, flat: "a" }, { pos: span.b, thick: T, flat: "b" });
+  keep.sort((a, b) => a.pos - b.pos);
+  if (interp) keep[0] = { ...keep[0], interp };
+  return { ...ski, coreProfile: keep, flatZone: { ...z, thick: T, parked: park } };
 }
 const DEFAULT_LAYUP={wood:"poplar",glass:"triax23",glassLayers:1,fabricSplit:false,glassBot:"triax23",glassBotLayers:1,metal:"none",carbon:"none",carbonLayers:1};
 // Desktop main-canvas views, top → bottom. Multi-select: any subset can be shown at once.
@@ -665,15 +696,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-11-02";
+const APP_BUILD = "2026-11-05";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-11-02",
+  id: "2026-11-05",
   title: "What's new",
   items: [
+    { title: "Cut the base with a router bit", go: "cam",
+      body: "Base material can now be cut with a router bit instead of the drag knife: choose Cut with: Router bit in that step. The bit runs just outside the base line so the base keeps its exact shape, in passes down through the sheet. Its tool number, size, feed and plunge start out matching the bit you cut the core out with. There are no holding tabs, so tape or vacuum the sheet down." },
+    { title: "Keep the core flat under the binding",
+      body: "Under Edges & Core, tick Keep the core flat under the binding and enter how long the flat section is. The core then stays at one thickness over that length and tapers from its ends to your other points. In the Core view it shows as a plate above the core: drag it fore and aft to move it, drag its ends to change the length, and drag either flat point up or down to change the thickness. Points it covers are set aside, not deleted, and come back when it moves off them or you turn it off." },
     { title: "Set where the camber's high point sits", go: "dimensions",
       body: "Under Side Profile, Camber high point now has two choices. Between the rocker starts is how it has always worked: the high point sits halfway between where the tip and tail rockers start, so it moves when you change a rocker length. Set its position keeps it a fixed distance back from the middle of the ski (snoCAD calls this camber setback), so changing the rockers no longer moves it. For a single camber; multi-zone and reverse camber are unchanged." },
     { title: "Rocker guides in the zooms, even with lots of rocker",
@@ -4240,7 +4275,7 @@ function buildCoreCAM(ski, opt) {
   const toolChange = n => { curTool = n; if (o._marks) G.push(";@@TOOL"); _tcMark(n); };
   const _tcMark = n => { if (pst.tc === "manual") { P("M5"); PC("TOOL CHANGE -> T" + n + " - resume when ready"); P("M0"); } else if (pst.tc === "m6t") P("M6 T" + n); else P("T" + n + " M6"); if (o._marks) G.push(";@@TC_END"); };
   // Switch tools only when the tool number actually changes (no pointless pause), then restart the spindle.
-  const useTool = n => { if (n === curTool) return; P(`G0 Z${f(safeZ)}`); toolChange(n); if (!o.baseOp) P(`S${o.spindle} M3`); };
+  const useTool = n => { if (n === curTool) return; P(`G0 Z${f(safeZ)}`); toolChange(n); if (!(o.baseOp && !o.baseRouter)) P(`S${o.spindle} M3`); };
   let cuts = 0, rapids = 0, cutDist = 0, minZ = 1e9, maxZ = -1e9;
   let minCX = 1e9, maxCX = -1e9, minCY = 1e9, maxCY = -1e9;   // cut extents → required stock size
   const tk = z => { minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); };
@@ -4267,7 +4302,7 @@ function buildCoreCAM(ski, opt) {
   else {
     let fp = core;
     if (isBase && o.moldMargin > 0) { try { const e = offsetPolygonOutward(core, o.moldMargin); if (e && e.length >= 3) fp = e; } catch (e) {} }
-    else if (o.baseOp) { const m = (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(baseEdge || core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
+    else if (o.baseOp) { const m = o.baseRouter ? R * 2 + 2 : (o.bladeOffset || 1) + (o.dragLeadIn || 12) + 2; try { const e = offsetPolygonOutward(baseEdge || core, m); if (e && e.length >= 3) fp = e; } catch (e) {} }
     else if (o.doProfile && !isBase) { const ext = Math.max(0, wallPerSide + (o.edgeOverlap || 0)); if (ext > 0) { try { const e = offsetPolygonOutward(core, ext); if (e && e.length >= 3) fp = e; } catch (er) {} } { let cMin = 1e9, cMax = -1e9; for (const p of core) { if (p.x < cMin) cMin = p.x; if (p.x > cMax) cMax = p.x; } const run = R + Math.max(0, o.taperEndOver || 0); fp = fp.concat([{ x: cMin - run, y: 0 }, { x: cMax + run, y: 0 }]); } }   // taper: lanes also run past both ends   // taper: stock must cover the glued-on walls the carve reaches over
     else if (o.doPerimeter) { try { const e = offsetPolygonOutward(core, R); if (e && e.length >= 3) fp = e; } catch (e) {} }
     accXY(fp);
@@ -4313,7 +4348,7 @@ function buildCoreCAM(ski, opt) {
   PC(`${new Date().toISOString().slice(0, 10)}  |  ${inch ? "IMPERIAL inch/IPM" : "METRIC mm"}  |  post: ${pst.name}`);
   PC(`${stockLbl} NEEDED: ${dv(stockX)} x ${dv(stockY)} ${uu}, ${thickNote}`);
   PC(`Z ZERO = ${o.zZero === "bed" ? "BED / TABLE TOP" : "TOP OF STOCK"}   (stock ${disp.stockThick} ${uu})`);
-  PC(o.baseOp ? `Drag knife T${o.toolNum}   Spindle OFF   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}` : `Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
+  PC((o.baseOp && !o.baseRouter) ? `Drag knife T${o.toolNum}   Spindle OFF   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}` : `Tool T${o.toolNum}  ${disp.toolDia} ${uu} dia   Spindle ${o.spindle} ${o.spindleCW ? "CW" : "CCW"}   Feed ${disp.feed} ${uf}  Plunge ${disp.plunge} ${uf}`);
   if (o.doProfile) {
     if (!isBase) PC(`Runs past the tip and tail ends of the core by one bit radius${(o.taperEndOver || 0) > 0 ? " plus " + disp.taperEndOver + " " + uu + " extra" : ""}, so the ends (including the point of a V-cut) are fully cut.`);
     PC(`${isBase ? "Mold surface (camber/rocker)" : "Surface taper"}: ${o.profPattern}${o.profPattern === "oneway" ? " " + (o.profDir === "+" ? "tail->tip" : "tip->tail") : ""}${isBase ? ", margin " + disp.moldMargin + " " + uu : (wallPerSide > 0 || o.edgeOverlap > 0 ? ", to assembled edge (from measured width) + " + disp.edgeOverlap + " overlap " + uu : ", carve to core edge")}`);
@@ -4325,7 +4360,7 @@ function buildCoreCAM(ski, opt) {
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
   if (o.bottomSide && !o.bandKind) PC("BOTTOM FACE UP. Sections run in order: dowel holes, insert bores, outer profile. Each loads its own tool.");
-  if (!o.bottomSide) { toolChange(o.toolNum); P(o.baseOp ? "M5" : `S${o.spindle} M3`); } if (o.baseOp) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
+  if (!o.bottomSide) { toolChange(o.toolNum); P((o.baseOp && !o.baseRouter) ? "M5" : `S${o.spindle} M3`); } if ((o.baseOp && !o.baseRouter)) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
   if (o.doProfile) {
     PB(); PC("===== CORE PROFILE (top surface to thickness) =====");
     let minTop = 1e9; for (let x = 0; x <= L; x += 5) minTop = Math.min(minTop, topH(x));
@@ -4450,9 +4485,29 @@ function buildCoreCAM(ski, opt) {
     for (let i = 1; i < tc.length; i++) { g1(tc[i].x, tc[i].y, cutZ); cutDist += Math.hypot(tc[i].x - px, tc[i].y - py); px = tc[i].x; py = tc[i].y; }
     g0z(safeZ);
   };
-  if (o.baseOp) {
-    emitDragKnife(baseEdge, baseLbl);
-  }
+  // Base with a router bit: the bit runs just outside the base line (offset by its radius) so the base keeps
+  // its exact shape, in passes down to just past the bottom of the sheet. No holding tabs: tape or vacuum the
+  // sheet down, as for the knife.
+  const emitBaseRouter = (poly, label) => {
+    if (!poly || poly.length < 3) return;
+    PB(); PC(`===== ${label} - ROUTER BIT, cut just outside the base line =====`);
+    let path = offsetPolygonOutward(poly, R);
+    let area = 0; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length]; area += a.x * b.y - b.x * a.y; }
+    let wantCCW = o.perimDir === "climb"; if (!o.spindleCW) wantCCW = !wantCCW; if (reflectOut) wantCCW = !wantCCW;
+    if ((area > 0) !== wantCCW) path = path.slice().reverse();
+    { const dstep = 4, dp = []; for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length], d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / dstep)); for (let j = 0; j < n; j++) { const t = j / n; dp.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); } } path = dp; }
+    const verts = [{ x: path[0].x, y: path[0].y, run: 0 }]; let per = 0;
+    for (let i = 1; i <= path.length; i++) { const a = path[(i - 1) % path.length], b = path[i % path.length]; per += Math.hypot(b.x - a.x, b.y - a.y); verts.push({ x: b.x, y: b.y, run: per }); }
+    const botH = -o.cutThrough, pPass = Math.max(1, Math.ceil((o.stockThick - botH) / o.stepdown - 1e-6));
+    for (let k = 1; k <= pPass; k++) {
+      const targetH = Math.max(botH, o.stockThick - k * o.stepdown);
+      PC(`-- base pass ${k}/${pPass} (Z ${f(MZ(targetH))}) --`);
+      g0(verts[0].x, verts[0].y); g0z(MZ(o.stockThick + 1)); g1z(MZ(targetH));
+      cutLap(verts, per, () => targetH, null);
+      g0z(safeZ);
+    }
+  };
+  if (o.baseOp && !o.baseRouter) emitDragKnife(baseEdge, baseLbl);   // (the router version runs below, once cutLap exists)
   // Holding tabs: short bridges left on the final pass. Each tab gets exact start and end points on the path
   // and the bit steps straight up and straight down there, so the tab is exactly as long as asked. (Raising Z
   // only at the existing path points would put a sloped ramp on each side and stretch the tab.)
@@ -4539,6 +4594,7 @@ function buildCoreCAM(ski, opt) {
       g0z(safeZ);
     }
   };
+  if (o.baseOp && o.baseRouter) emitBaseRouter(baseEdge, baseLbl);
   if (o.doPerimeter && !o.bottomSide) runPerimeter();
   if (o.slatPolys && o.slatPolys.length) {
     PB(); PC("===== MOLD SLATS (camber/rocker ribs cut through sheet) =====");
@@ -7310,8 +7366,18 @@ function CoreView({ ski, setSki, width, height }) {
 
   const cps = useMemo(() => cp.map((n, i) => {
     const c = toC2(n.pos, n.thick);
-    return { id: `core_${i}`, cx: c.x, cy: c.y, idx: i, contact: n.contact, end: n.end };
+    return { id: `core_${i}`, cx: c.x, cy: c.y, idx: i, contact: n.contact, end: n.end, flat: n.flat };
   }), [cp, toC2]);
+  // Flat zone under the binding(s): drawn as a plate just above the core; drag it to move the zone, drag its
+  // ends to change its length.
+  const fz = flatZoneSpan(ski);
+  const plate = useMemo(() => {
+    if (!fz) return null;
+    const T = (ski.flatZone && ski.flatZone.thick) || getCoreThickAt(cp, (fz.a + fz.b) / 2);
+    const x0 = padL + fz.a * plotW, x1 = padL + fz.b * plotW, yTop = baseY - T * vScale - 26;
+    return { x0, x1, y0: yTop, y1: yTop + 8, T };
+  }, [fz && fz.a, fz && fz.b, ski.flatZone, cp, plotW, vScale, baseY, padL]);   // eslint-disable-line
+  const plateHit = (mx, my) => { if (!plate || my < plate.y0 - 7 || my > plate.y1 + 7 || mx < plate.x0 - 8 || mx > plate.x1 + 8) return null; if (Math.abs(mx - plate.x0) <= 8) return "flatA"; if (Math.abs(mx - plate.x1) <= 8) return "flatB"; return "flatMove"; };
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -7401,6 +7467,16 @@ function CoreView({ ski, setSki, width, height }) {
     ctx.stroke();
     ctx.restore();
 
+    if (plate) {
+      const on = dragging && String(dragging).startsWith("flat");
+      ctx.fillStyle = `rgba(${C.blueRGB},${on ? 0.10 : 0.06})`; ctx.fillRect(plate.x0, plate.y1, plate.x1 - plate.x0, baseY - plate.y1);
+      ctx.fillStyle = on || (hovered && String(hovered).startsWith("flat")) ? C.blue : `rgba(${C.blueRGB},0.75)`;
+      const r = 3, w = plate.x1 - plate.x0, h = plate.y1 - plate.y0;
+      ctx.beginPath(); ctx.moveTo(plate.x0 + r, plate.y0); ctx.lineTo(plate.x1 - r, plate.y0); ctx.quadraticCurveTo(plate.x1, plate.y0, plate.x1, plate.y0 + r); ctx.lineTo(plate.x1, plate.y1 - r); ctx.quadraticCurveTo(plate.x1, plate.y1, plate.x1 - r, plate.y1); ctx.lineTo(plate.x0 + r, plate.y1); ctx.quadraticCurveTo(plate.x0, plate.y1, plate.x0, plate.y1 - r); ctx.lineTo(plate.x0, plate.y0 + r); ctx.quadraticCurveTo(plate.x0, plate.y0, plate.x0 + r, plate.y0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = C.bg; [plate.x0 + 3, plate.x1 - 5].forEach(x => ctx.fillRect(x, plate.y0 + 2, 2, h - 4));
+      ctx.fillStyle = C.blue; ctx.font = "bold 10px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+      ctx.fillText(`FLAT ${Math.round(fz.len)} mm \u00B7 ${plate.T.toFixed(1)} thick${w > 160 ? " \u00B7 drag to move" : ""}`, (plate.x0 + plate.x1) / 2, plate.y0 - 5);
+    }
     cps.forEach(cpObj => {
       const isH = hovered === cpObj.id, isD = dragging === cpObj.id;
       const r = isD ? 7 : isH ? 6 : 4.5;
@@ -7414,6 +7490,7 @@ function CoreView({ ski, setSki, width, height }) {
       const fill = isD ? C.controlActive
         : isH ? C.controlHover
         : isContact ? (C.contactLine || "#e8552a")   // contact taper targets stand out (torch)
+        : cpObj.flat ? C.blue
         : C.coreNode;
       if (isContact) {
         // Draw a diamond for the pinned contact taper nodes so they read as special.
@@ -7446,7 +7523,7 @@ function CoreView({ ski, setSki, width, height }) {
     ctx.globalAlpha = 0.72;
     ctx.textAlign = "center"; ctx.fillText("double-click the line to add a point \u00B7 double-click a point to remove", padL + plotW / 2, padT - 6);
     ctx.globalAlpha = 1;
-  }, [ski, width, height, cp, cps, hovered, dragging, toC2, baseY, plotW, plotH, padL, padT, getThickAt]);
+  }, [ski, width, height, cp, cps, hovered, dragging, toC2, baseY, plotW, plotH, padL, padT, getThickAt, plate]);
 
   const findCP3 = useCallback((mx, my) => {
     for (const c of cps) if (Math.hypot(mx - c.cx, my - c.cy) < 14) return c.id;
@@ -7455,14 +7532,31 @@ function CoreView({ ski, setSki, width, height }) {
   const handleDown = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const id = findCP3(mx, my);
-    if (id) { setDragging(id); setDragStart({ mx, my, core: JSON.parse(JSON.stringify(cp)) }); }
-  }, [findCP3, cp]);
+    const id = findCP3(mx, my) || plateHit(mx, my);
+    if (id) { setDragging(id); setDragStart({ mx, my, core: JSON.parse(JSON.stringify(cp)), zone: fz ? { ...fz, thick: plate && plate.T } : null }); }
+  }, [findCP3, cp, plate, fz]);   // eslint-disable-line
   const handleMove = useCallback(e => {
     const rect = canvasRef.current.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    if (dragging && dragStart && String(dragging).startsWith("flat") && dragStart.zone) {
+      // Move the zone, or drag one end (the other end stays put).
+      const z0 = dragStart.zone, L = ski.length, dmm = (mx - dragStart.mx) / plotW * L;
+      const a0 = z0.a * L, b0 = z0.b * L;
+      let a = a0, b = b0;
+      if (dragging === "flatMove") { a = a0 + dmm; b = b0 + dmm; } else if (dragging === "flatA") a = Math.min(b0 - 20, a0 + dmm); else b = Math.max(a0 + 20, b0 + dmm);
+      const len = Math.round(b - a), center = Math.round((a + b) / 2);
+      setSki(s => applyFlatZone({ ...s, flatZone: { ...s.flatZone, len, center } }));
+      return;
+    }
     if (dragging && dragStart) {
       const cpObj = cps.find(c => c.id === dragging); if (!cpObj) return;
+      if (cpObj.flat) {
+        // An end of the flat zone: up and down sets the zone's thickness (both ends together).
+        const dyF = fromC2(mx, my).thick - fromC2(dragStart.mx, dragStart.my).thick;
+        const T = Math.round(clamp(dragStart.core[cpObj.idx].thick + dyF, 0.5, 15) * 10) / 10;
+        setSki(s => applyFlatZone({ ...s, flatZone: { ...s.flatZone, thick: T } }));
+        return;
+      }
       const cur = fromC2(mx, my), start = fromC2(dragStart.mx, dragStart.my);
       const dy = cur.thick - start.thick;
       const newCore = JSON.parse(JSON.stringify(dragStart.core));
@@ -7479,11 +7573,11 @@ function CoreView({ ski, setSki, width, height }) {
           newCore[cpObj.idx + 1].pos - 0.02
         );
       }
-      setSki(s => ({ ...s, coreProfile: newCore }));
+      setSki(s => applyFlatZone({ ...s, coreProfile: newCore }));
     } else {
-      setHovered(findCP3(mx, my));
+      setHovered(findCP3(mx, my) || plateHit(mx, my));
     }
-  }, [dragging, dragStart, cps, fromC2, findCP3, setSki]);
+  }, [dragging, dragStart, cps, fromC2, findCP3, setSki, plate, ski.length, plotW]);   // eslint-disable-line
   const handleUp = useCallback(() => { setDragging(null); setDragStart(null); }, []);
   // Double-click the line to drop a new adjustment point there; double-click an interior point to remove it.
   const handleDouble = useCallback(e => {
@@ -7493,25 +7587,26 @@ function CoreView({ ski, setSki, width, height }) {
     if (id) {
       const hit = cps.find(c => c.id === id); if (!hit) return;
       const node = cp[hit.idx];
-      if (node.contact || node.end) return;            // never remove pinned contact / end nodes
+      if (node.contact || node.end || node.flat) return;   // never remove pinned contact / end nodes or the flat zone's ends
       const newCore = cp.filter((_, i) => i !== hit.idx);
-      if (newCore.length >= 3) setSki(s => ({ ...s, coreProfile: newCore }));
+      if (newCore.length >= 3) setSki(s => applyFlatZone({ ...s, coreProfile: newCore }));
       return;
     }
     const click = fromC2(mx, my);
     if (click.pos <= 0.02 || click.pos >= 0.98) return;
+    if (fz && click.pos > fz.a && click.pos < fz.b) return;   // inside the flat zone: nothing to add
     const curveThick = getCoreThickAt(cp, click.pos);
     if (Math.abs(my - toC2(click.pos, curveThick).y) > 22) return;   // only when near the profile line
     const newCore = JSON.parse(JSON.stringify(cp));
     let ins = newCore.findIndex(n => n.pos > click.pos);
     if (ins < 1) ins = newCore.length - 1;
     newCore.splice(ins, 0, { pos: click.pos, thick: clamp(curveThick, 0.5, 15) });
-    setSki(s => ({ ...s, coreProfile: newCore }));
+    setSki(s => applyFlatZone({ ...s, coreProfile: newCore }));
   }, [cp, cps, findCP3, fromC2, toC2, setSki]);
 
   return (
     <canvas ref={canvasRef}
-      style={{ width, height, cursor: hovered ? (dragging ? "grabbing" : "grab") : "crosshair", display: "block", touchAction: "none" }}
+      style={{ width, height, cursor: hovered === "flatA" || hovered === "flatB" || dragging === "flatA" || dragging === "flatB" ? "ew-resize" : hovered ? (dragging ? "grabbing" : "grab") : "crosshair", display: "block", touchAction: "none" }}
       onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handleDown(e); }}
       onPointerMove={handleMove}
       onPointerUp={handleUp}
@@ -9361,8 +9456,8 @@ const CAM_LEN_KEYS = [
   "stockThick", "stockL", "stockW", "safeZ", "stepdown", "stepover", "cutThrough", "batchGap", "batchBlankW",
   "taperEndOver", "rabbetWidth", "rabbetDepth", "rabbetToolDia", "rabbetFeed", "rabbetPlunge", "chanWidth", "chanSkin", "chanExtra", "channelToolDia", "channelFeed", "channelPlunge", "pourThick",
   "outlineToolDia", "baseToolDia", "baseStockL", "baseStockW", "baseStockThick", "baseCutThrough", "slatStockThick", "slatSheetL", "pocketStockL", "pocketStockW", "pocketStockThick", "taperToolDia", "moldToolDia", "slatToolDia", "boreToolDia", "pocketToolDia", "roughToolDia",
-  "outlineFeed", "baseFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
-  "outlinePlunge", "basePlunge", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
+  "outlineFeed", "baseFeed", "baseBitFeed", "taperFeed", "moldFeed", "slatFeed", "boreFeed", "pocketFeed",
+  "outlinePlunge", "basePlunge", "baseBitPlunge", "baseBitDia", "taperPlunge", "moldPlunge", "slatPlunge", "borePlunge", "pocketPlunge",
   "moldMargin", "slatBase", "slatOverlap", "slatSheetW",
   "slatHoleDia", "slatHoleH", "slatHoleSpacing", "slatHoleEndZone", "slatTopGap", "slatHoleEndIn",
   "boreDia", "boreDepth", "boreSpaceX", "boreSpaceY", "insBarrelDia", "insFlangeDia", "insFlangeDepth", "insConeBotDia", "insConeStep", "insStepover", "insBarrelDepth",
@@ -10422,7 +10517,7 @@ export default function App() {
   // ── CAM (CNC G-code) settings + export ──
   const [camOpt, setCamOpt] = useState(() => {
     const d = { op: "outline", units: "mm", zZero: "bed", stockThick: 13, spindle: 18000, safeZ: 6, stepdown: 3, origin: "corner", spindleCW: true, stockL: 0, stockW: 0, centerInStock: true,
-      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, baseCutThrough: 0.5, slatStockThick: null, slatSheetL: null, pocketStockL: 0, pocketStockW: 0, pocketStockThick: 13, bladeOffset: 1, dragLeadIn: 12,
+      outlineToolNum: 1, outlineToolDia: 6.35, outlineFeed: 2000, outlinePlunge: 600, baseToolNum: 1, baseToolDia: 3.175, baseFeed: 2500, basePlunge: 800, baseStockL: 0, baseStockW: 0, baseStockThick: 1.5, baseCutThrough: 0.5, baseCutter: "knife", baseBitNum: null, baseBitDia: null, baseBitFeed: null, baseBitPlunge: null, slatStockThick: null, slatSheetL: null, pocketStockL: 0, pocketStockW: 0, pocketStockThick: 13, bladeOffset: 1, dragLeadIn: 12,
       taperToolNum: 2, taperToolDia: 12.7, taperFeed: 2500, taperPlunge: 800,
       alignToolNum: 3, alignToolDia: 6.35,   // dowel-hole tool (defaults to a 1/4" endmill; helical-bores the dowel dia)
       moldToolNum: 3, moldToolDia: 12.7, moldFeed: 2500, moldPlunge: 800, moldMargin: 15,
@@ -10595,7 +10690,10 @@ export default function App() {
         : camOpt.op === "bore"
         ? { ...b, bottomSide: true, doProfile: false, doPerimeter: !!camOpt.boreWithProfile && !camAlignOutside(camOpt, ski), borePts, ...(camOpt.boreWithProfile && !camAlignOutside(camOpt, ski) ? { toolNum: camOpt.outlineToolNum, toolDia: camOpt.outlineToolDia, feed: camOpt.outlineFeed, plunge: camOpt.outlinePlunge, perimeterSide: camOpt.perimeterSide, cutThrough: camOpt.cutThrough, tabN: camOpt.tabN, tabPerSide: camOpt.tabPerSide, tabLen: camOpt.tabLen, tabHeight: camOpt.tabHeight, perimDir: camOpt.perimDir, rampEntry: camOpt.rampEntry, rampLen: camOpt.rampLen } : { toolNum: camOpt.boreToolNum, toolDia: camOpt.boreToolDia, feed: camOpt.boreFeed, plunge: camOpt.borePlunge }), insToolNum: camOpt.boreToolNum, insToolDia: camOpt.boreToolDia, insFeed: camOpt.boreFeed, insPlunge: camOpt.borePlunge, insBarrelDia: camOpt.insBarrelDia, insFlangeProfile: camOpt.insFlangeProfile, insFlangeDia: camOpt.insFlangeDia, insFlangeDepth: camOpt.insFlangeDepth, insConeBotDia: camOpt.insConeBotDia, insConeStep: camOpt.insConeStep, insStepover: camOpt.insStepover, insBarrelMode: camOpt.insBarrelMode, insBarrelDepth: camOpt.insBarrelDepth, drillAlign: !!ski.alignMarks && alignDrillOp === "bore", alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia }
         : camOpt.op === "base"
-        ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.baseCutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
+        ? (camOpt.baseCutter === "router"
+          // Router bit: its own tool number, size, feed and plunge (until set, the core cut-out bit's).
+          ? { ...b, doProfile: false, doPerimeter: false, baseOp: true, baseRouter: true, toolNum: camOpt.baseBitNum != null ? camOpt.baseBitNum : camOpt.outlineToolNum, toolDia: camOpt.baseBitDia != null ? camOpt.baseBitDia : camOpt.outlineToolDia, feed: camOpt.baseBitFeed != null ? camOpt.baseBitFeed : camOpt.outlineFeed, plunge: camOpt.baseBitPlunge != null ? camOpt.baseBitPlunge : camOpt.outlinePlunge, cutThrough: camOpt.baseCutThrough, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW }
+          : { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.baseCutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW })
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, stockThick: camOpt.pocketStockThick, stockL: camOpt.pocketStockL, stockW: camOpt.pocketStockW, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
         : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
@@ -10659,14 +10757,17 @@ export default function App() {
     const tK = k => camOpt.op + k, uu = camOpt.units === "inch" ? "in" : "mm", uf = uu + "/min";
     const opName = CAM_STEP_NAMES[camOpt.op] || camOpt.op;
     const post = (POST_PROFILES[camOpt.postKey] || {}).name || camOpt.postKey;
-    const tool = camOpt.op === "base" ? `T${camOpt.baseToolNum} · drag knife` : `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
+    const knife = camOpt.op === "base" && camOpt.baseCutter !== "router", bRouter = camOpt.op === "base" && !knife;
+    const bb = (k, fb) => camOpt["baseBit" + k] != null ? camOpt["baseBit" + k] : camOpt[fb];   // router bit for the base (falls back to the core cut-out bit)
+    const tool = knife ? `T${camOpt.baseToolNum} · drag knife` : bRouter ? `T${bb("Num", "outlineToolNum")} · ${bb("Dia", "outlineToolDia")} ${uu} dia router bit` : `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
     const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
     if (camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper")) rows.push(["Rough tool", `T${camOpt.roughToolNum} · ${camOpt.roughToolDia} ${uu} dia — leaves ${camOpt.finishAllowance} ${uu}`]);
     if (camOpt.op === "slat" && camOpt.slatHoles) rows.push(["Drill tool", `T${camOpt.slatHoleToolNum} · ${camOpt.slatHoleDia} ${uu} dia — rod holes`]);
-    rows.push(["Spindle", camOpt.op === "base" ? "Off (the blade is dragged, not spun)" : `${camOpt.spindle} rpm ${camOpt.spindleCW ? "CW" : "CCW"}`], ["Feed / plunge", `${camOpt[tK("Feed")]} / ${camOpt[tK("Plunge")]} ${uf}`]);
+    rows.push(["Spindle", knife ? "Off (the blade is dragged, not spun)" : `${camOpt.spindle} rpm ${camOpt.spindleCW ? "CW" : "CCW"}`], ["Feed / plunge", bRouter ? `${bb("Feed", "outlineFeed")} / ${bb("Plunge", "outlinePlunge")} ${uf}` : `${camOpt[tK("Feed")]} / ${camOpt[tK("Plunge")]} ${uf}`]);
     const so = camOpt.op === "outline" || camOpt.op === "slat" || camOpt.op === "bore";
-    if (camOpt.op === "base") rows.push(["Blade", `offset ${camOpt.bladeOffset} ${uu} · one pass, ${camOpt.baseCutThrough} ${uu} past the bottom of the sheet`]);
-    rows.push(...(camOpt.op === "base" ? [] : [[so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`]]), ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
+    if (knife) rows.push(["Blade", `offset ${camOpt.bladeOffset} ${uu} · one pass, ${camOpt.baseCutThrough} ${uu} past the bottom of the sheet`]);
+    if (bRouter) rows.push(["Cut", `just outside the base line, ${camOpt.stepdown} ${uu} per pass, ${camOpt.baseCutThrough} ${uu} past the bottom of the sheet; no holding tabs`]);
+    rows.push(...(knife || bRouter ? [] : [[so ? "Stepdown" : "Stepdown / stepover", so ? `${camOpt.stepdown} ${uu}` : `${camOpt.stepdown} / ${camOpt.stepover} ${uu}`]]), ["Deepest cut (Z)", `${s.minZ} ${uu}`], ["Est. run time", `${s.estMin} min · ${s.lines.toLocaleString()} lines${camOpt.arcOut ? " · arcs on" : ""}`]);
     if (camMachine) rows.push(["Machine bed", `${camMachine.fits ? "✓ fits" : "✗ EXCEEDS"} · part ${s.machX}×${s.machY} on ${uu === "in" ? camMachine.short.toFixed(0) + "×" + camMachine.long.toFixed(0) : Math.round(camMachine.short) + "×" + Math.round(camMachine.long)} ${uu} bed`]);
     const pinOn = !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job));
     const pourS = (camOpt.job === "coreInserts" || camOpt.job === "core") && camOpt.sidewallMethod === "pour", rabCnc = camOpt.rabbetHow === "cnc";
@@ -12206,6 +12307,31 @@ export default function App() {
               {[["Straight", "linear"], ["Smooth", "smooth"]].map(([lab, m]) => { const on = (m === "linear") === lin; return (
                 <button key={m} onClick={() => setI(m)} style={{ padding: "4px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", background: on ? C.heading : "transparent", color: on ? C.bgDeep : C.label, border: `1px solid ${on ? C.heading : C.inputBorder}` }}>{lab}</button>); })}
             </div>); })()}
+          {(() => {
+            const z = ski.flatZone || {}, on = !!z.on, sp = flatZoneSpan(ski), mnt = getMount(ski);
+            const defCenter = Math.round(mnt.on ? mnt.centerMm : resolveWaistY(ski));
+            const fld = { width: "100%", boxSizing: "border-box", background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "5px 7px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none" };
+            const lb = { color: C.labelDim, fontSize: 10, marginBottom: 2, fontFamily: "'JetBrains Mono', monospace" };
+            const setZ = patch => setSki(s => applyFlatZone({ ...s, flatZone: { ...(s.flatZone || {}), ...patch } }));
+            return (<div data-wn="core-flat" style={{ border: `1px solid ${on ? C.blue : C.inputBorder}`, borderRadius: 5, padding: "7px 9px", marginBottom: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", color: on ? C.blue : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                <input type="checkbox" checked={on} onChange={e => setZ(e.target.checked ? { on: true, center: z.center != null ? z.center : defCenter, thick: null } : { on: false })} />
+                Keep the core flat under the binding{ski.mode === "snowboard" ? "s" : ""}
+              </label>
+              {on && (<>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginTop: 6 }}>
+                  <div><div style={lb}>Length mm</div><NumberInput value={z.len > 0 ? z.len : ""} step={10} min={20} onCommit={v => setZ({ len: v > 0 ? Math.round(v) : null })} style={fld} /></div>
+                  <div><div style={lb}>Center, from tail mm</div><NumberInput value={z.center != null ? Math.round(sp ? sp.center : z.center) : ""} step={5} min={0} onCommit={v => setZ({ center: Math.round(v) })} style={fld} /></div>
+                  <div><div style={lb}>Thickness mm</div><NumberInput value={z.thick > 0 ? +(+z.thick).toFixed(1) : ""} step={0.1} min={0.5} onCommit={v => setZ({ thick: v > 0 ? v : null })} style={fld} /></div>
+                </div>
+                {!(z.len > 0) && <div style={{ color: C.amber, fontSize: 10.5, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>Enter how long the flat section is.</div>}
+                <button onClick={() => setZ({ center: defCenter })} style={{ marginTop: 6, background: C.inputBg, border: `1px solid ${C.inputBorder}`, color: C.label, borderRadius: 3, padding: "4px 8px", fontSize: 10.5, cursor: "pointer", fontFamily: "'JetBrains Mono', monospace" }}>{mnt.on ? "Center it on the binding mount" : "Center it on the waist"} ({defCenter} mm)</button>
+                <div style={{ color: C.labelDim, fontSize: 10, marginTop: 5, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                  The core stays at one thickness over this length and tapers from its ends to your other points. In the Core view it shows as a plate above the core: drag it to move it, drag its ends to change the length, and drag either flat point up or down to change the thickness. Points inside the flat section are set aside, not deleted: they come back if the section moves off them or you turn this off.{sp && Math.abs(sp.len - z.len) > 0.5 ? " It's shortened to fit between the contact points." : ""}
+                </div>
+              </>)}
+            </div>);
+          })()}
           <div data-wn="core-points" style={{ marginTop: 2, marginBottom: 4, color: C.label, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, outline: coreFlash ? `2px solid ${C.heading}` : "none", outlineOffset: 3, borderRadius: 3 }}>Core thickness points <span style={{ color: C.labelDim }}>(tip at top)</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 5 }}>
             {(ski.coreProfile || []).map((nd, i) => ({ nd, i })).reverse().map(({ nd, i }) => {
@@ -12213,14 +12339,14 @@ export default function App() {
               const end = i === last ? "tip" : i === 0 ? "tail" : "";
               return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                {(() => { const locked = !!(nd.end || nd.contact); const lbl = nd.end ? (i === 0 ? "TAIL END" : "TIP END") : nd.contact ? (nd.contact === "tip" ? "TIP CONTACT" : "TAIL CONTACT") : ""; if (locked) return <span title="Pinned to the ski's end / contact — change the ski dimensions to move it" style={{ color: C.heading, fontSize: 10, width: 118, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{lbl} {Math.round(nd.pos * ski.length)} mm</span>;
+                {(() => { const locked = !!(nd.end || nd.contact || nd.flat); const lbl = nd.end ? (i === 0 ? "TAIL END" : "TIP END") : nd.contact ? (nd.contact === "tip" ? "TIP CONTACT" : "TAIL CONTACT") : nd.flat ? (nd.flat === "a" ? "FLAT START" : "FLAT END") : ""; if (locked) return <span title="Pinned to the ski's end / contact — change the ski dimensions to move it" style={{ color: C.heading, fontSize: 10, width: 118, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" }}>{lbl} {Math.round(nd.pos * ski.length)} mm</span>;
                   return (<span style={{ display: "flex", alignItems: "center", gap: 4, width: 118, justifyContent: "flex-end" }}>
                     <NumberInput value={Math.round(nd.pos * ski.length)} step={5} min={1} max={ski.length - 1}
-                      onCommit={v => setSki(s => { const cp = s.coreProfile, L = s.length, lo = (cp[i - 1].pos * L) + 5, hi = (cp[i + 1].pos * L) - 5; if (hi <= lo) return s; const mm = Math.max(lo, Math.min(hi, v)); return { ...s, coreProfile: cp.map((n, j) => j === i ? { ...n, pos: mm / L } : n) }; })}
+                      onCommit={v => setSki(s => { const cp = s.coreProfile, L = s.length, lo = (cp[i - 1].pos * L) + 5, hi = (cp[i + 1].pos * L) - 5; if (hi <= lo) return s; const mm = Math.max(lo, Math.min(hi, v)); return applyFlatZone({ ...s, coreProfile: cp.map((n, j) => j === i ? { ...n, pos: mm / L } : n) }); })}
                       style={{ width: 62, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 6px", color: C.value, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
                     <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>mm</span></span>); })()}
                 <input type="number" value={Number(nd.thick).toFixed(1)} step={0.1} min={0.5} max={40}
-                  onChange={e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; setSki(s => ({ ...s, coreProfile: s.coreProfile.map((n, j) => j === i ? { ...n, thick: v } : n) })); }}
+                  onChange={e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; setSki(s => nd.flat ? applyFlatZone({ ...s, flatZone: { ...s.flatZone, thick: v } }) : applyFlatZone({ ...s, coreProfile: s.coreProfile.map((n, j) => j === i ? { ...n, thick: v } : n) })); }}
                   style={{ width: 70, background: C.inputBg, border: `1px solid ${C.inputBorder}`, borderRadius: 3, padding: "4px 8px", color: C.value, fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", outline: "none", boxSizing: "border-box" }} />
                 <span style={{ color: C.labelDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>mm thick</span>
               </div>
@@ -13263,6 +13389,27 @@ export default function App() {
               </div>
               <div style={{ ...camSmall, marginBottom: 8, lineHeight: 1.4 }}>Safe height: how high the knife lifts to move between cuts. The spindle stays off for this file.</div>
             </>);
+            // Base sheet: drag knife, or a router bit (knives can break, and a bit is always on hand).
+            const bbv = (k, fb) => camOpt["baseBit" + k] != null ? camOpt["baseBit" + k] : camOpt[fb];
+            const baseCutterRow = (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+                <span style={camSmall}>Cut with</span>
+                {[["knife", "Drag knife"], ["router", "Router bit"]].map(([v, l]) => <button key={v} onClick={() => setCam("baseCutter", v)} style={{ ...camSeg((camOpt.baseCutter || "knife") === v), padding: "5px 8px" }}>{l}</button>)}
+              </div>);
+            const baseBitRow = (<>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 4 }}>
+                {[["Bit tool number", "Num", "outlineToolNum", 1, ""], ["Bit diameter", "Dia", "outlineToolDia", st, " " + uu], ["Feed rate", "Feed", "outlineFeed", stf, " " + uf], ["Plunge rate", "Plunge", "outlinePlunge", stf, " " + uf]].map(([lab, k, fb, step, unit]) => (
+                  <div key={k}><div style={camSmall}>{lab}{unit}</div><input type="number" value={bbv(k, fb)} step={step} onChange={e => setCam("baseBit" + k, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 4 }}>
+                {[["Spindle speed (rpm)", "spindle", 500], ["Safe height " + uu, "safeZ", st], ["Depth per pass " + uu, "stepdown", st]].map(([lab, key, step]) => (
+                  <div key={key}><div style={camSmall}>{lab}</div><input type="number" value={camOpt[key]} step={step} onChange={e => setCam(key, parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                ))}
+              </div>
+              <div style={{ ...camSmall, marginBottom: 6, lineHeight: 1.4 }}>Until you change them, the bit settings match the bit you cut the core out with.</div>
+              <FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (bbv("Dia", "outlineToolDia") || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam("baseBitFeed", fd); setCam("baseBitPlunge", pl); setCam("spindle", rpm); }} />
+            </>);
             const feedsHelper = (<FeedsHelper toolDiaMM={(camOpt.units === "inch" ? 25.4 : 1) * (camOpt[tK("ToolDia")] || 6.35)} C={C} uu={uu} uf={uf} onApply={(fd, pl, rpm) => { setCam(tK("Feed"), fd); setCam(tK("Plunge"), pl); setCam("spindle", rpm); }} />);
             const alignBox = (
                 <div style={{ border: `1px solid ${ski.alignMarks ? C.heading : C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
@@ -13537,17 +13684,17 @@ export default function App() {
                   </div>
                 ) : isBaseOp ? (
                   <div style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 4, padding: 8, marginBottom: 8 }}>
-                    <div style={{ ...camLabel, color: C.heading }}>Cut the base material (drag knife, spindle off)</div>
+                    <div style={{ ...camLabel, color: C.heading }}>{camOpt.baseCutter === "router" ? "Cut the base material (router bit)" : "Cut the base material (drag knife, spindle off)"}</div>
                     <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
                       Cuts the <b style={{ color: C.value }}>base cut line</b> from your design{ski.edgeInset > 0 ? (ski.edgeWrap === "contact" ? ` — contact-wrap: sections along each edge's contacts (${ski.edgeInset}mm inset) with the full outline at the tips and tails.` : ` — full-wrap: the whole outline inset ${ski.edgeInset}mm.`) : " — full outline (no edge inset set)."} Set the inset & wrap mode back in the Dimensions → base/edge controls.
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>
-                      <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>
+                      {camOpt.baseCutter !== "router" && <div><div style={camSmall}>Blade offset {uu}</div><input type="number" value={camOpt.bladeOffset} step={st} min={0.05} onChange={e => setCam("bladeOffset", parseFloat(e.target.value) || 0)} style={camInput} /></div>}
+                      {camOpt.baseCutter !== "router" && <div><div style={camSmall}>Lead-in {uu}</div><input type="number" value={camOpt.dragLeadIn} step={st} min={0} onChange={e => setCam("dragLeadIn", parseFloat(e.target.value) || 0)} style={camInput} /></div>}
                       <div><div style={camSmall}>Past the bottom of the sheet {uu}</div><input type="number" value={camOpt.baseCutThrough} step={st} min={0} onChange={e => setCam("baseCutThrough", parseFloat(e.target.value) || 0)} style={camInput} /></div>
                     </div>
                     <div style={{ color: C.labelDim, fontSize: 10, marginTop: 8, lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
-                      Put the drag knife in the spindle and set the blade offset for your blade. The blade goes through the whole sheet ({camOpt.baseStockThick} {uu}, under Your material sizes) and on into the spoilboard by Past the bottom of the sheet, so it cuts all the way through: {+((camOpt.baseStockThick || 0) + (camOpt.baseCutThrough || 0)).toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} below the top of the sheet in all. The spindle stays off. It plunges in the waste, runs a short lead-in to line the blade up, then follows the base line, swiveling at corners. Tape or vacuum the base down.
+                      {camOpt.baseCutter === "router" ? <>The bit runs just outside the base line, so the base keeps the exact shape of the line (the waste side takes the cut). It cuts in passes of Depth per pass, down through the whole sheet ({camOpt.baseStockThick} {uu}) and on into the spoilboard by Past the bottom of the sheet, using the same milling direction as cutting out the core. There are no holding tabs, so tape or vacuum the sheet down well: small offcuts come loose as it finishes. A smaller bit follows tight corners at the tip and tail more closely.</> : <>Put the drag knife in the spindle and set the blade offset for your blade. The blade goes through the whole sheet ({camOpt.baseStockThick} {uu}, under Your material sizes) and on into the spoilboard by Past the bottom of the sheet, so it cuts all the way through: {+((camOpt.baseStockThick || 0) + (camOpt.baseCutThrough || 0)).toFixed(camOpt.units === "inch" ? 3 : 2)} {uu} below the top of the sheet in all. The spindle stays off. It plunges in the waste, runs a short lead-in to line the blade up, then follows the base line, swiveling at corners. Tape or vacuum the base down.</>}
                     </div>
                   </div>
                 ) : (
@@ -13714,7 +13861,7 @@ export default function App() {
                   </>) : isBaseOp ? (<>
                     <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>① YOUR BASE MATERIAL (P-tex sheet)</div>
                     <div style={{ color: C.labelDim, fontSize: 10.5, marginBottom: 8, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
-                      This is the base sheet you cut with the drag knife, NOT the core blank. It's thin and usually oversized. Enter the sheet you're laying on the bed.{camResult.stats ? ` Min needed ${camResult.stats.stockX}×${camResult.stats.stockY} ${camResult.stats.unit}.` : ""}
+                      This is the base sheet you're cutting, NOT the core blank. It's thin and usually oversized. Enter the sheet you're laying on the bed.{camResult.stats ? ` Min needed ${camResult.stats.stockX}×${camResult.stats.stockY} ${camResult.stats.unit}.` : ""}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                       {[["Length", "baseStockL"], ["Width", "baseStockW"], ["Thickness", "baseStockThick"]].map(([lab, key]) => (
@@ -13832,7 +13979,7 @@ export default function App() {
                   ]) : job === "mold" ? [
                     { op: "slat", slat: "bottom", title: "Bottom mold ribs", sub: "Ribs cut from sheet stock and glued side by side. Their top edge is the ski's base curve (camber and rocker)." },
                     { op: "slat", slat: "top", title: "Top mold ribs", sub: "Full-length ribs for the top half of the mold. Their bottom edge follows the bottom ribs' curve, raised by the gap you set." },
-                  ] : job === "base" ? [{ op: "base", title: "Cut the base material", sub: "Cuts the base sheet with a drag knife. The spindle stays off." }]
+                  ] : job === "base" ? [{ op: "base", title: "Cut the base material", sub: camOpt.baseCutter === "router" ? "Cuts the base sheet with a router bit, just outside the base line." : "Cuts the base sheet with a drag knife. The spindle stays off." }]
                     : [{ op: "pocket", title: "Clear a recess", sub: "Clears a flat pocket to a set depth." }];
                   const isActive = s => !!s.op && s.op === camOpt.op && (!s.side || (camOpt.outlineSide || "top") === s.side) && (!s.slat || (camOpt.slatSide || "bottom") === s.slat);
                   // ── Walk-through: one page per step, with a simple picture of how the part sits and plain instructions,
@@ -14062,7 +14209,7 @@ export default function App() {
                     </details>}
                     {partHead("Get the file")}{outputBody}
                   </>) : isBaseOp ? (<>
-                    {partHead("This file")}{knifeRow}
+                    {partHead("This file")}{baseCutterRow}{camOpt.baseCutter === "router" ? baseBitRow : knifeRow}
                     {opPanel}
                     {partHead("Get the file")}{outputBody}
                   </>) : (<>
