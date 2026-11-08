@@ -699,15 +699,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-11-07e";
+const APP_BUILD = "2026-11-08";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-11-07e",
+  id: "2026-11-08",
   title: "What's new",
   items: [
+    { title: "Ball-end finishing bit for the top face", go: "cam",
+      body: "The top-face file can now finish with a ball-end bit (under Roughing pass, choose Rough + finish, then Finishing bit: Ball end). A flat bit roughs, the ball end skims. The panel shows how high the ridges between passes will be for your bit and stepover, which matters most for a core shaped thinner toward the edges." },
+    { title: "Top face and mold files no longer cut a hair too deep on tapers", go: "cam",
+      body: "The bit's height used to be set from the surface right under its center. On a taper the surface rises under one side of a flat-bottomed bit, so that side cut slightly below the finished surface: up to about 0.1 mm on a typical core taper and 0.2 mm on a rockered mold. The height now comes from the whole circle under the bit." },
     { title: "Core STEP export: no more waves near the ends",
       body: "The STEP core was built as one smooth surface through cross-sections, which bent through the corners of the straight-segment taper and overshot, so the thickness rippled up and down near the tip and tail. It is now built from straight pieces between sections placed on every point of the thickness profile, and matches the core's thickness exactly." },
     { title: "Topsheet print matches the screen",
@@ -4524,7 +4528,37 @@ function buildCoreCAM(ski, opt) {
   // steps on the slopes, each about stepover x slope, to sand or plane off.
   const xc = !isBase && o.doProfile ? coreCrossOn(ski) : null;
   const topH = isBase ? (x => { const b = sideProfileHeightAt(ski, x); return o.moldInvert ? (o.stockThick - (b - baseMin)) : (o.stockThick - (baseMax - b)); }) : (x => getCoreThickAt(prof, Math.min(1, Math.max(0, x / L))));
-  const topHY = (x, y, r) => xc ? coreThickAtXY(ski, x / L, Math.max(0, Math.abs(y) - (r || 0)), xc) : topH(x);
+  // Where the bit's tip goes so no part of the bit dips below the surface. The bit is round, so this looks at
+  // the whole circle under it, along the ski as well as across: on a taper the surface rises under one side of
+  // the bit. Flat-bottomed bit: the highest surface point under its circle. Ball end: the lowest the ball can
+  // sit while touching the surface somewhere and dipping below it nowhere. The surface is checked at 17 points
+  // along the bit's width plus every bend in the thickness profile, and across it at every bend in the
+  // cross-section and where a slope would touch the ball.
+  const _xcCache = new Map();
+  const xcAt = x => { const k = x.toFixed(3); let c = _xcCache.get(k); if (c === undefined) { c = xc ? coreCrossAt(ski, Math.min(1, Math.max(0, x / L)), xc) : null; _xcCache.set(k, c); } return c; };
+  const surfAt = (x, ya) => { if (!xc) return topH(x); const c = xcAt(x); return c ? c.t - c.drop * crossSlopeFrac(c, ya) : topH(x); };
+  const kinkXs = isBase ? [] : (prof || []).map(p => p.pos * L);
+  const _tipCache = new Map();
+  const tipZ = (x, y, R, ball) => {
+    const key = (ball ? "b" : "f") + R + "|" + x.toFixed(3) + "|" + y.toFixed(3);
+    const hit = _tipCache.get(key); if (hit !== undefined) return hit;
+    const ya = Math.abs(y), dxs = [];
+    for (let i = 0; i <= 16; i++) dxs.push(-R + 2 * R * i / 16);
+    for (const kx of kinkXs) if (Math.abs(kx - x) < R) dxs.push(kx - x);
+    let best = -Infinity;
+    for (const dx of dxs) {
+      const r = Math.sqrt(Math.max(0, R * R - dx * dx)), xx = x + dx;
+      if (!ball) { const v = surfAt(xx, Math.max(0, ya - r)); if (v > best) best = v; continue; }
+      const c = xc ? xcAt(xx) : null, cands = [0, r, -r];
+      if (c) {
+        for (const e of [c.bandHW, c.hw, -c.bandHW, -c.hw]) cands.push(e - ya);
+        const run = c.hw - c.bandHW, m = run > 1e-6 ? c.drop / run : 0, tg = r * m / Math.sqrt(1 + m * m); cands.push(tg, -tg);
+      }
+      for (const dy of cands) { if (dy < -r || dy > r) continue; const v = surfAt(xx, Math.abs(ya + dy)) + Math.sqrt(Math.max(0, r * r - dy * dy)) - R; if (v > best) best = v; }
+    }
+    _tipCache.set(key, best);
+    return best;
+  };
   const safeZ = MZ(o.stockThick + o.safeZ), R = o.toolDia / 2;
   const G = [];
   let lineNo = 10;
@@ -4637,11 +4671,15 @@ function buildCoreCAM(ski, opt) {
     if (xc) {
       // Steepest slope across the width, for the step height the flat-bottomed bit leaves on it.
       let sl = 0; for (let x = 0; x <= L; x += 10) { const c = coreCrossAt(ski, x / L, xc); if (c && c.hw - c.bandHW > 1) sl = Math.max(sl, c.drop / (c.hw - c.bandHW)); }
-      PC(`Shaped across the width: flat center band ${Math.round(xc.band * 100)}% of the ski's width, ${f(xc.edge)} ${uu} at the edge where the core is thickest (${f(xc.tMax)} ${uu}). Steps on the slopes up to about ${f(o.stepover * sl)} ${uu} with this stepover; sand them off.`);
+      const Rb = o.toolDia / 2, so = o.stepover, ridge = th => { const half = so / (2 * Math.cos(th)); return half < Rb ? Rb - Math.sqrt(Rb * Rb - half * half) : Rb; };
+      PC(`Shaped across the width: flat center band ${Math.round(xc.band * 100)}% of the ski's width, ${f(xc.edge)} ${uu} at the edge where the core is thickest (${f(xc.tMax)} ${uu}).`);
+      PC(o.ballEnd && o.roughing
+        ? `Ball-end finishing bit: ridges between passes about ${f(ridge(0))} ${uu} on the flat, up to ${f(ridge(Math.atan(sl)))} ${uu} on the slopes, with this stepover.`
+        : `Flat-bottomed finishing bit: steps on the slopes up to about ${f(so * sl)} ${uu} with this stepover; sand them off, or finish with a ball-end bit.`);
     }
     // One surfacing set: lanes spaced by `so`, stepping down by `sd` from `startTop` to `minTop+zOff`,
     // each lane cutting to max(topH(x)+zOff, floor). zOff>0 leaves finish stock; tnum triggers a tool change.
-    const doSurface = (toolR, so, sd, zOff, tnum, startTop, label) => {
+    const doSurface = (toolR, so, sd, zOff, tnum, startTop, label, ball) => {
       let surfPoly = core;
       if (isBase) { const mm2 = Math.max(0, o.moldMargin || 0); if (mm2 > 0) { try { const op2 = offsetPolygonOutward(core, mm2); if (op2 && op2.length >= 3) surfPoly = op2; } catch (e) {} } }
       else {
@@ -4685,10 +4723,10 @@ function buildCoreCAM(ski, opt) {
         for (let k = 1; k <= passes; k++) {
           const floor = startTop - k * sd;
           PC(`-- ${label} pass ${k}/${passes} (loops, outside in) --`);
-          let zAt = x => MZ(Math.max(topH(x) + zOff, floor));
+          let zAt = null;
           let curX = null;
           runs.forEach(([y, plus], ri) => {
-            if (xc) zAt = x => MZ(Math.max(topHY(x, y, toolR) + zOff, floor));
+            zAt = x => MZ(Math.max(tipZ(x, y, toolR, ball) + zOff, floor));
             const xStart = plus ? X0 : X1, xEnd = plus ? X1 : X0, step = (plus ? 1 : -1) * 3;
             if (ri === 0) { g0(xStart, y); g0z(MZ(o.stockThick + 1)); g1z(zAt(xStart)); }
             else { if (Math.abs(curX - xStart) > 1e-6) g1(xStart, y, zAt(xStart)); else { g1(xStart, y, zAt(xStart)); cutDist += 0; } }   // cross over past the end
@@ -4703,9 +4741,9 @@ function buildCoreCAM(ski, opt) {
       for (let k = 1; k <= passes; k++) {
         const floor = startTop - k * sd;
         PC(`-- ${label} pass ${k}/${passes} --`);
-        let zAt = x => MZ(Math.max(topH(x) + zOff, floor));
+        let zAt = null;
         lanes.forEach((y, li) => {
-          if (xc) zAt = x => MZ(Math.max(topHY(x, y, toolR) + zOff, floor));
+          zAt = x => MZ(Math.max(tipZ(x, y, toolR, ball) + zOff, floor));
           if (_camCrossingsX(surfPoly, y).length < 2) return;   // lane never meets the core → skip it entirely
           const isLeft = li === 0, isRight = li === lanes.length - 1;
           let wantPlus;
@@ -4726,7 +4764,7 @@ function buildCoreCAM(ski, opt) {
       const allow = Math.max(0.2, o.finishAllowance || 1), rR = (o.roughToolDia || o.toolDia) / 2;
       PC(`Roughing (leave ${f(allow)} ${uu}) then finishing skim`);
       doSurface(rR, Math.max(1, o.roughStepover || o.toolDia), Math.max(0.5, o.roughStepdown || o.stepdown), allow, o.roughToolNum != null ? o.roughToolNum : o.toolNum, o.stockThick, "rough");
-      doSurface(R, o.stepover, allow + 1, 0, o.toolNum, minTop + allow + 0.5, "finish");
+      doSurface(R, o.stepover, allow + 1, 0, o.toolNum, minTop + allow + 0.5, "finish", !!o.ballEnd);
     } else {
       doSurface(R, o.stepover, o.stepdown, 0, null, o.stockThick, "profile");
     }
@@ -11034,6 +11072,7 @@ export default function App() {
         if (!ski.alignMarks) throw new Error("Turn on Drill alignment holes for this file.");
         if (!b.pinOrigin && !(camOpt.origin === "tailmark" && camOpt.zeroMarkGap > 0)) throw new Error("The alignment-hole file and the file after it have to share one X/Y zero. Turn on Zero every file on the tail alignment hole, or set the origin to Centerline mark under Machine setup.");
       }
+      if (camOpt.op === "taper" && camOpt.taperBitEnd === "ball" && !camOpt.roughing) throw new Error("A ball-end bit only does the finishing skim. Turn on Rough + finish under Roughing pass, so a flat bit takes off the bulk first.");
       const alignInch = camOpt.units === "inch";
       const opt = camOpt.op === "align"
         // Its own file: just the two holes, with their own bit, feed and plunge (until set, the core cut-out bit's feed and plunge).
@@ -11057,7 +11096,7 @@ export default function App() {
           : { ...b, doProfile: false, doPerimeter: false, baseOp: true, toolNum: camOpt.baseToolNum, toolDia: camOpt.baseToolDia, feed: camOpt.baseFeed, plunge: camOpt.basePlunge, cutThrough: camOpt.baseCutThrough, bladeOffset: camOpt.bladeOffset, dragLeadIn: camOpt.dragLeadIn, stockThick: camOpt.baseStockThick, stockL: camOpt.baseStockL, stockW: camOpt.baseStockW })
         : camOpt.op === "pocket"
         ? { ...b, doProfile: false, doPerimeter: false, doPocket: true, stockThick: camOpt.pocketStockThick, stockL: camOpt.pocketStockL, stockW: camOpt.pocketStockW, toolNum: camOpt.pocketToolNum, toolDia: camOpt.pocketToolDia, feed: camOpt.pocketFeed, plunge: camOpt.pocketPlunge, stepover: camOpt.stepover, pocketCenterX: camOpt.pocketCenterX, pocketCenterY: camOpt.pocketCenterY, pocketL: camOpt.pocketL, pocketW: camOpt.pocketW, pocketDepth: camOpt.pocketDepth }
-        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
+        : { ...b, doProfile: true, doPerimeter: false, toolNum: camOpt.taperToolNum, toolDia: camOpt.taperToolDia, feed: camOpt.taperFeed, plunge: camOpt.taperPlunge, stepover: camOpt.stepover, ballEnd: camOpt.taperBitEnd === "ball", profPattern: camOpt.taperPattern || "loops", profDir: camOpt.profDir, sidewallThick: camOpt.sidewallThick, edgeOverlap: camOpt.edgeOverlap, taperEndOver: camOpt.taperEndOver, sidewallEngage: camOpt.sidewallEngage, roughing: camOpt.roughing, roughToolNum: camOpt.roughToolNum, roughToolDia: camOpt.roughToolDia, roughStepover: camOpt.roughStepover, roughStepdown: camOpt.roughStepdown, finishAllowance: camOpt.finishAllowance };
       const bn = camOpt.batchN || 1;
       if (bn > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") && ["align", "outline", "taper", "rabbet", "channel", "bore"].includes(camOpt.op)) {
         // Not worked out yet: which files would need the cores' order reversed when the channel is cut from the bottom.
@@ -11123,7 +11162,7 @@ export default function App() {
     const knife = camOpt.op === "base" && camOpt.baseCutter !== "router", bRouter = camOpt.op === "base" && !knife;
     const bb = (k, fb) => camOpt["baseBit" + k] != null ? camOpt["baseBit" + k] : camOpt[fb];   // router bit for the base (falls back to the core cut-out bit)
     const alOp = camOpt.op === "align", alDia = +((camOpt.alignToolDia || 6.35) / (uu === "in" ? 25.4 : 1)).toFixed(uu === "in" ? 4 : 2);
-    const tool = alOp ? `T${camOpt.alignToolNum} · ${alDia} ${uu} dia` : knife ? `T${camOpt.baseToolNum} · drag knife` : bRouter ? `T${bb("Num", "outlineToolNum")} · ${bb("Dia", "outlineToolDia")} ${uu} dia router bit` : `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia`;
+    const tool = alOp ? `T${camOpt.alignToolNum} · ${alDia} ${uu} dia` : knife ? `T${camOpt.baseToolNum} · drag knife` : bRouter ? `T${bb("Num", "outlineToolNum")} · ${bb("Dia", "outlineToolDia")} ${uu} dia router bit` : `T${camOpt[tK("ToolNum")]} · ${camOpt[tK("ToolDia")]} ${uu} dia${camOpt.op === "taper" && camOpt.taperBitEnd === "ball" ? " ball end" : ""}`;
     const rows = [["Operation", opName], ["Controller / post", post], ["Units", uu], ["Stock needed", `${s.stockX} × ${s.stockY} × ${s.setThick} ${uu} (${s.stockLbl})`], ["Primary tool", tool]];
     if (camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper")) rows.push(["Rough tool", `T${camOpt.roughToolNum} · ${camOpt.roughToolDia} ${uu} dia — leaves ${camOpt.finishAllowance} ${uu}`]);
     if (camOpt.op === "slat" && camOpt.slatHoles) rows.push(["Drill tool", `T${camOpt.slatHoleToolNum} · ${camOpt.slatHoleDia} ${uu} dia — rod holes`]);
@@ -14032,6 +14071,29 @@ export default function App() {
                         One carve with the tool &amp; feeds set above.
                       </div>
                     )}
+                    {camOpt.op === "taper" && (() => {
+                      // Finishing bit end, and the ridges it leaves, from the bit size and stepover set above.
+                      const ball = camOpt.taperBitEnd === "ball", u = camOpt.units === "inch" ? 25.4 : 1;
+                      const R = (camOpt.taperToolDia || 0) / 2, so = camOpt.stepover || 0;   // display units
+                      const cc = coreCrossOn(ski);
+                      let sl = 0; if (cc) for (let x = 0; x <= ski.length; x += 10) { const c = coreCrossAt(ski, x / ski.length, cc); if (c && c.hw - c.bandHW > 1) sl = Math.max(sl, c.drop / (c.hw - c.bandHW)); }
+                      const ridge = th => { const half = so / (2 * Math.cos(th)); return half < R ? R - Math.sqrt(R * R - half * half) : R; };
+                      const fmt = v => (u > 1 ? +v.toFixed(4) : +v.toFixed(2)) + " " + uu;
+                      return (<div style={{ marginTop: 9, paddingTop: 8, borderTop: `1px solid ${C.inputBorder}` }}>
+                        <div style={{ ...camLabel, color: C.heading, marginBottom: 5 }}>Finishing bit</div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {[["flat", "Flat bottom"], ["ball", "Ball end"]].map(([v, l]) => <button key={v} onClick={() => setCam("taperBitEnd", v)} style={camSeg((camOpt.taperBitEnd || "flat") === v)}>{l}</button>)}
+                        </div>
+                        {ball && !camOpt.roughing && <div style={{ color: C.amber, fontSize: 10.5, margin: "6px 0 0", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>A ball-end bit only does the finishing skim. Choose Rough + finish above, so a flat bit takes off the bulk first.</div>}
+                        <div style={{ color: C.labelDim, fontSize: 10, marginTop: 7, lineHeight: 1.45, fontFamily: "'JetBrains Mono', monospace" }}>
+                          {ball
+                            ? <>The finishing bit has a round end. Each pass leaves a shallow ridge beside the next: with this bit and a stepover of {fmt(so)}, about {fmt(ridge(0))} high on flat areas{cc ? <>, up to {fmt(ridge(Math.atan(sl)))} on the edge slopes</> : null}. A smaller stepover makes them lower; halving it makes them about a quarter as high.</>
+                            : cc ? <>The core slopes toward its edges, and a flat-bottomed bit cuts a slope as a staircase: steps up to about {fmt(so * sl)} high with a stepover of {fmt(so)}. A ball-end finishing bit leaves a much smoother slope.</>
+                            : <>A flat-bottomed bit leaves the top face flat across, with no ridges between passes.</>}
+                          {" "}Either way, the bit never dips below the finished surface: its height is set from the whole circle under it, including where the taper rises under one side.
+                        </div>
+                      </div>);
+                    })()}
                   </div>
             ) : null;
             const outlinePanel = (
