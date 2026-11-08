@@ -699,15 +699,17 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-11-07d";
+const APP_BUILD = "2026-11-07e";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-11-07d",
+  id: "2026-11-07e",
   title: "What's new",
   items: [
+    { title: "Core STEP export: no more waves near the ends",
+      body: "The STEP core was built as one smooth surface through cross-sections, which bent through the corners of the straight-segment taper and overshot, so the thickness rippled up and down near the tip and tail. It is now built from straight pieces between sections placed on every point of the thickness profile, and matches the core's thickness exactly." },
     { title: "Topsheet print matches the screen",
       body: "The topsheet print template and the rendered PNG now place the art exactly as the plan view and 3D view show it. Before, they fit the art to a different box, so with Cover the crop could differ between the screen and the print, most of all on a single ski." },
     { title: "Base art",
@@ -3149,7 +3151,9 @@ self.onmessage=async(e)=>{
     const cs=d.taper.map(s=>s.tE!=null
       ? rc.draw([-W,top]).lineTo([W,top]).lineTo([W,s.tE]).lineTo([s.hw,s.tE]).lineTo([s.bhw,s.t]).lineTo([-s.bhw,s.t]).lineTo([-s.hw,s.tE]).lineTo([-W,s.tE]).close().sketchOnPlane("YZ",[s.x,0,0])
       : rc.sketchRectangle(d.wide, top-s.t, {plane:"YZ", origin:[s.x,0,(s.t+top)/2]}));
-    const cutter=cs[0].loftWith(cs.slice(1),{ruled:false});
+    // Ruled: straight between neighboring sections. A smooth loft bends through the corners of a straight-segment
+    // taper and overshoots, which shows as waves near the ends; the sections sit on every corner instead.
+    const cutter=cs[0].loftWith(cs.slice(1),{ruled:true});
     let solid=slab.cut(cutter);
     if(d.rotate) solid=solid.rotate(90,[0,0,0],[0,0,1]);
     const buf=await solid.blobSTEP().arrayBuffer();
@@ -3178,10 +3182,18 @@ async function exportCoreSTEP(ski) {
   const maxHW = Math.max(1, ...poly.map(p => Math.abs(p.y)));
   const th = x => Math.max(0.3, getCoreThickAt(ski.coreProfile, x / L));
   const maxT = Math.max(...(ski.coreProfile || []).map(p => p.thick || 0), 1);
-  const M = 80, taper = [];
+  // Sections every 10 mm or less, plus one on every point of the thickness profile, so the straight (ruled)
+  // pieces between them follow the taper exactly where it bends.
+  const taper = [];
   const ccS = coreCrossOn(ski);
-  for (let i = 0; i <= M; i++) {
-    const x = (minX - 5) + ((maxX + 5) - (minX - 5)) * i / M, xx = Math.max(0, Math.min(L, x)), e = { x: x - cx, t: th(xx) };
+  const x0 = minX - 5, x1 = maxX + 5, M = Math.max(80, Math.ceil((x1 - x0) / 10));
+  const stations = [];
+  for (let i = 0; i <= M; i++) stations.push(x0 + (x1 - x0) * i / M);
+  (ski.coreProfile || []).forEach(p => { const x = p.pos * L; if (x > x0 && x < x1) stations.push(x); });
+  stations.sort((a, b) => a - b);
+  const xsU = []; for (const x of stations) if (!xsU.length || x - xsU[xsU.length - 1] > 0.5) xsU.push(x);
+  for (const x of xsU) {
+    const xx = Math.max(0, Math.min(L, x)), e = { x: x - cx, t: th(xx) };
     if (ccS) {   // cross-section shaping: edge height at the ski's edge, band edge, kept a hair apart so the section never folds
       const c = coreCrossAt(ski, xx / L, ccS), hw = Math.min(c.hw, maxHW + 19), bhw = Math.max(0.5, Math.min(c.bandHW, hw - 1));
       Object.assign(e, { hw: +hw.toFixed(3), bhw: +bhw.toFixed(3), tE: +Math.max(0.3, e.t - c.drop).toFixed(4) });
