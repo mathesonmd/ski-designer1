@@ -712,8 +712,6 @@ const WHATS_NEW = {
       body: "The top-face file can now finish with a ball-end bit (under Roughing pass, choose Rough + finish, then Finishing bit: Ball end). A flat bit roughs, the ball end skims. The panel shows how high the ridges between passes will be for your bit and stepover, which matters most for a core shaped thinner toward the edges." },
     { title: "Top face and mold files no longer cut a hair too deep on tapers", go: "cam",
       body: "The bit's height used to be set from the surface right under its center. On a taper the surface rises under one side of a flat-bottomed bit, so that side cut slightly below the finished surface: up to about 0.1 mm on a typical core taper and 0.2 mm on a rockered mold. The height now comes from the whole circle under the bit." },
-    { title: "Core STEP export: no more waves near the ends",
-      body: "The STEP core was built as one smooth surface through cross-sections, which bent through the corners of the straight-segment taper and overshot, so the thickness rippled up and down near the tip and tail. It is now built from straight pieces between sections placed on every point of the thickness profile, and matches the core's thickness exactly." },
     { title: "Topsheet print matches the screen",
       body: "The topsheet print template and the rendered PNG now place the art exactly as the plan view and 3D view show it. Before, they fit the art to a different box, so with Cover the crop could differ between the screen and the print, most of all on a single ski." },
     { title: "Base art",
