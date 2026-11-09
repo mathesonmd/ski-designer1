@@ -699,15 +699,19 @@ const BCSKI_FORMAT = "bcs.ski-design";
 const BCSKI_FORMAT_VERSION = 1;
 const APP_VERSION = "1.0";
 // Build stamp shown in the side panel footer, so you can tell which upload the live site is running.
-const APP_BUILD = "2026-11-08";
+const APP_BUILD = "2026-11-09";
 // ── What's new ──
 // Shown once to returning users when `id` changes. Each item can take them to the spot: `go` is what to open
 // ("dimensions" = the Dimensions panel, "plan" = the plan view, "cam" = the CAM workspace on Core with inserts),
 // `target` is the data-wn attribute of the element to highlight. Change `id` and the items for each release.
 const WHATS_NEW = {
-  id: "2026-11-08",
+  id: "2026-11-09",
   title: "What's new",
   items: [
+    { title: "Keep the blank on the table", go: "cam",
+      body: "For a blank screwed or clamped down: the core stays in the blank until the last file cuts it out, the top face is shaped before that, and the alignment holes go in the blank past the tip and tail. It works with no sidewalls (an all-ash core, say) or with strips glued or poured into a channel. Anything on the bottom face (insert holes, a CNC edge rabbet) goes in a single turn of the blank, and the steps say how many times it gets turned over. Suggested by Fred Ivar Klemetsen." },
+    { title: "Glued-in strips in the sidewall channel", go: "cam",
+      body: "The sidewall channel can now be filled with glued-in sidewall or hardwood strips instead of poured poly, with the steps worded to match." },
     { title: "Ball-end finishing bit for the top face", go: "cam",
       body: "The top-face file can now finish with a ball-end bit (under Roughing pass, choose Rough + finish, then Finishing bit: Ball end). A flat bit roughs, the ball end skims. The panel shows how high the ridges between passes will be for your bit and stepover, which matters most for a core shaped thinner toward the edges." },
     { title: "Top face and mold files no longer cut a hair too deep on tapers", go: "cam",
@@ -4406,7 +4410,30 @@ function arcFitGcode(gcode, tol, dec, lineNum) {
 }
 
 // CAM jobs: what each "What are you cutting?" choice sets up, and which files (ops) belong to its steps.
+// Keep the blank on the table (Fred Ivar Klemetsen's request): the blank is screwed or clamped down and the core
+// stays in it until the last file cuts it out. The alignment holes go past the tip and tail, in the blank.
+// Sidewalls: none (the core wood runs to the edge), or strips glued or poured into a channel. Anything on the
+// bottom face (insert holes, a CNC edge rabbet) goes in one turn of the blank: first, before anything else, when
+// there's no channel; after the channel is filled and planed when there is one (planing the bottom would take
+// off insert pockets cut before it).
+const camOneSetup = o => !!(o && o.oneSetup && (o.job === "core" || o.job === "coreInserts"));
+// Channel filled with glued-in strips instead of poured poly: the same steps, worded for strips.
+const camFillWords = (o, t) => (!o || o.chanFill !== "strips" || typeof t !== "string") ? t : t
+  .replace(/Fill the channel with poly/g, "Glue the strips into the channel").replace(/fill the channel with poly/g, "glue the strips into the channel")
+  .replace(/Pour, cure, and (level|plane)/g, "Glue in the strips, cure, and $1").replace(/Pour, cure, (level|plane)/g, "Glue, cure, $1")
+  .replace(/Level the poly/g, "Level the strips").replace(/the poly shows/g, "the strips show").replace(/through the poly/g, "through the strips")
+  .replace(/has been poured and the poly leveled/g, "has been filled and the strips leveled").replace(/has been poured/g, "has been filled")
+  .replace(/after the pour/g, "after the fill").replace(/the poly/g, "the strips").replace(/with poly/g, "with strips");
+// Which face is up for a core file: the alignment-hole file shares the face of the file after it.
+const camOpFace = (op, o, ops) => {
+  if (op === "align" && ops) { const nx = ops[ops.indexOf("align") + 1]; return nx ? camOpFace(nx, o, null) : "top"; }
+  return op === "bore" || op === "rabbet" || (op === "channel" && o && o.chanProfiled) ? "bottom" : "top";
+};
 function camJobPatch(j, o) {
+  if (o && o.oneSetup && (j === "core" || j === "coreInserts")) {
+    const oo = { ...o, job: j }, ops = camJobOps(j, oo, { alignMarks: true, alignPlace: "ends" });
+    return { job: j, op: ops[0], outlineSide: "top", pinOrigin: true, alignDrillOp: ops[0] === "align" ? "own" : "channel" };
+  }
   // Poured sidewalls start with the channel cut (top face up), which also drills the alignment holes, and every
   // later file is zeroed on the tail alignment pin so it lines up with the channel.
   const pour = !!(o && o.sidewallMethod === "pour");
@@ -4418,8 +4445,14 @@ function camJobPatch(j, o) {
 }
 // Poured sidewalls with the alignment holes in the blank past the tip and tail: the core can't leave the blank
 // until the very end, so the top face is shaped first and cutting the core out is the last file.
-const camAlignOutside = (o, sk) => !!(o && sk && o.sidewallMethod === "pour" && sk.alignMarks && sk.alignPlace === "ends");
+const camAlignOutside = (o, sk) => !!(o && sk && (o.sidewallMethod === "pour" || camOneSetup(o)) && sk.alignMarks && sk.alignPlace === "ends");
 function camJobOps(j, o, sk) {
+  if ((j === "coreInserts" || j === "core") && o && o.oneSetup && o.sidewallMethod !== "pour") {
+    // Kept on the table, no sidewalls: holes first, then the bottom-face files (if any) in one turn, then the
+    // top face and the cut-out, which comes last.
+    const cnc = o.rabbetHow === "cnc";
+    return ["align", ...(j === "coreInserts" ? ["bore"] : []), ...(cnc ? ["rabbet"] : []), "taper", "outline", ...(cnc ? [] : ["rabbet"])];
+  }
   // Every core job has an edge rabbet step: by hand on a router table (no file) or its own CNC file.
   if ((j === "coreInserts" || j === "core") && camAlignOutside(o, sk)) {
     const cnc = o.rabbetHow === "cnc";
@@ -4659,7 +4692,7 @@ function buildCoreCAM(ski, opt) {
   PC(pinTail ? "Origin: X0 Y0 = center of the TAIL dowel hole, on the ski centerline (two-sided, pin-registered)" : tailMark ? `Origin: X0 Y0 = a mark on the ski centerline, ${f(o.zeroMarkGap)} ${uu} behind the ski's tail end` : `Origin: ${o.origin === "center" ? "part center (X0/Y0 at mid-length centerline)" : "corner"}`);
   PC(`ALWAYS air-cut / dry-run above the stock before committing.`);
   P(inch ? "G20" : "G21"); P("G90"); P("G17"); P("G94");
-  if (o.bottomSide && !o.bandKind) PC("BOTTOM FACE UP. Sections run in order: dowel holes, insert bores, outer profile. Each loads its own tool.");
+  if (o.bottomSide && !o.bandKind) PC("BOTTOM FACE UP. Sections run in order: " + [o.drillAlign ? "dowel holes" : null, o.borePts && o.borePts.length ? "insert bores" : null, o.doPerimeter ? "outer profile" : null].filter(Boolean).join(", ") + ". Each loads its own tool.");
   if (o.alignOnly) PC(`ALIGNMENT HOLES ONLY, ${o.alignFace === "bottom" ? "BOTTOM" : "TOP"} FACE UP. Run this first. Then run the next file in the same setup: don't move the blank or re-zero X and Y.`);
   // The first bit the file uses: with roughing, the surfacing starts with the roughing bit.
   if (!o.bottomSide) { toolChange(o.doProfile && o.roughing && o.roughToolNum != null ? o.roughToolNum : o.toolNum); P((o.baseOp && !o.baseRouter) ? "M5" : `S${o.spindle} M3`); } if ((o.baseOp && !o.baseRouter)) PC("DRAG KNIFE — spindle stays OFF (blade is dragged, not spun)"); P(`G0 Z${f(safeZ)}`);
@@ -11024,7 +11057,8 @@ export default function App() {
   }, [ski]);
   // Where the alignment dowels are drilled: in the first (bottom-side) op when the design has inserts, so the
   // blank can be flipped onto pins; otherwise with the core profile, as before. The builder can override.
-  const alignDrillOp = (camOpt.alignDrillOp === "own" && camOpt.sidewallMethod === "pour") ? "channel" : (camOpt.alignDrillOp || (designInsertPts.length ? "bore" : "outline"));
+  const alignDrillOp = camOneSetup(camOpt) ? (camOpt.sidewallMethod === "pour" ? "channel" : "own")
+    : (camOpt.alignDrillOp === "own" && camOpt.sidewallMethod === "pour") ? "channel" : (camOpt.alignDrillOp || (designInsertPts.length ? "bore" : "outline"));
   // Never leave the CAM steps with nothing open. If no job has been chosen yet, set up the one that fits the
   // design (same as clicking it). If the current file isn't one of the job's steps, open the job's first step.
   useEffect(() => {
@@ -11055,8 +11089,12 @@ export default function App() {
       if (camOpt.op === "slat" && slatPolys && slatPolys._error) throw new Error(slatPolys._error);
       if (camOpt.op === "slat" && !(camOpt.slatStockThick > 0)) throw new Error("Enter the thickness of the sheet you are cutting the ribs from, under Your material sizes.");
       const coreJob = camOpt.job === "coreInserts" || camOpt.job === "core";
+      // Kept on the table with no sidewalls: the core is cut on the ski outline, like poured walls, but the blank
+      // keeps its thickness throughout.
+      const noWalls = camOneSetup(camOpt) && camOpt.sidewallMethod !== "pour";
+      if (camOneSetup(camOpt) && !(ski.alignMarks && ski.alignPlace === "ends")) throw new Error("Keeping the blank on the table needs the alignment holes in the blank past the tip and tail, so the blank goes back in the same place after it's turned over or taken off. Turn Keep the blank on the table off and on again to set them, or set them under Alignment holes.");
       if (coreJob && ski.alignMarks && ski.alignPlace === "ends") {
-        if (!pour) throw new Error("Alignment holes past the tip and tail only work with poured sidewalls: with glued-on sidewalls the core is cut out of the blank early, so it has to carry its own holes. Under Alignment holes, put them back inside the core.");
+        if (!pour && !noWalls) throw new Error("Alignment holes past the tip and tail only work with poured sidewalls: with glued-on sidewalls the core is cut out of the blank early, so it has to carry its own holes. Under Alignment holes, put them back inside the core.");
         if (!(ski.alignEndGap > 0)) throw new Error("Enter how far past the tip and tail the alignment holes go (under Alignment holes).");
         // Clear of the channel (it runs past the outline at the ends of a full-length core) and of the cut-out bit.
         const uLm = camOpt.units === "inch" ? 25.4 : 1, hr = (ski.alignDowelDia || 12.7) / 2;
@@ -11065,7 +11103,7 @@ export default function App() {
         if (ski.alignEndGap <= needGap) throw new Error("The alignment holes are too close to the ends of the ski: the " + (chanOut > 0 ? "channel or the cut-out bit" : "cut-out bit") + " would run into them. Put them at least " + (Math.ceil(needGap / uLm * 10) / 10) + " " + (camOpt.units === "inch" ? "in" : "mm") + " past the ends.");
       }
       if ((camOpt.op === "rabbet" || camOpt.op === "channel") && !ski.alignMarks) throw new Error((camOpt.op === "rabbet" ? "The edge rabbet" : "The sidewall channel") + " needs the alignment holes, so the core goes back on the pins in the same place. Turn on Drill alignment holes.");
-      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: (pour && camOpt.op !== "channel") ? postThick : camOpt.stockThick, pouredSidewalls: pour, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, zeroMarkGap: camOpt.zeroMarkGap, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job)), alignPinDepth: camOpt.alignPinDepth };
+      const b = { units: camOpt.units, zZero: camOpt.zZero, stockThick: (pour && camOpt.op !== "channel") ? postThick : camOpt.stockThick, pouredSidewalls: pour || noWalls, spindle: camOpt.spindle, safeZ: camOpt.safeZ, origin: camOpt.origin, zeroMarkGap: camOpt.zeroMarkGap, spindleCW: camOpt.spindleCW, stepdown: camOpt.stepdown, stockL: camOpt.stockL, stockW: camOpt.stockW, centerInStock: camOpt.centerInStock, postKey: camOpt.postKey, postOverride: camOpt.postOverride, arcOut: camOpt.arcOut, partAxis: camOpt.partAxis, offsetX: camOpt.offsetX, offsetY: camOpt.offsetY, pinOrigin: !!((camOpt.pinOrigin || camOpt.op === "rabbet") && ski.alignMarks && (camOpt.job === "core" || camOpt.job === "coreInserts" || !camOpt.job)), alignPinDepth: camOpt.alignPinDepth };
       if (camOpt.op === "align") {
         if (!ski.alignMarks) throw new Error("Turn on Drill alignment holes for this file.");
         if (!b.pinOrigin && !(camOpt.origin === "tailmark" && camOpt.zeroMarkGap > 0)) throw new Error("The alignment-hole file and the file after it have to share one X/Y zero. Turn on Zero every file on the tail alignment hole, or set the origin to Centerline mark under Machine setup.");
@@ -11074,7 +11112,7 @@ export default function App() {
       const alignInch = camOpt.units === "inch";
       const opt = camOpt.op === "align"
         // Its own file: just the two holes, with their own bit, feed and plunge (until set, the core cut-out bit's feed and plunge).
-        ? { ...b, bottomSide: false, alignOnly: true, alignFace: camOpt.job === "coreInserts" ? "bottom" : "top", doProfile: false, doPerimeter: false, drillAlign: true, toolNum: camOpt.alignToolNum, toolDia: alignInch ? +((camOpt.alignToolDia || 6.35) / 25.4).toFixed(4) : (camOpt.alignToolDia || 6.35), alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia, feed: camOpt.alignFeed != null ? camOpt.alignFeed : camOpt.outlineFeed, plunge: camOpt.alignPlunge != null ? camOpt.alignPlunge : camOpt.outlinePlunge }
+        ? { ...b, bottomSide: false, alignOnly: true, alignFace: (() => { const ops = camJobOps(camOpt.job, camOpt, ski), nx = ops[ops.indexOf("align") + 1]; return nx === "bore" || nx === "rabbet" ? "bottom" : "top"; })(), doProfile: false, doPerimeter: false, drillAlign: true, toolNum: camOpt.alignToolNum, toolDia: alignInch ? +((camOpt.alignToolDia || 6.35) / 25.4).toFixed(4) : (camOpt.alignToolDia || 6.35), alignToolNum: camOpt.alignToolNum, alignToolDia: camOpt.alignToolDia, feed: camOpt.alignFeed != null ? camOpt.alignFeed : camOpt.outlineFeed, plunge: camOpt.alignPlunge != null ? camOpt.alignPlunge : camOpt.outlinePlunge }
         : camOpt.op === "rabbet"
         ? { ...b, bottomSide: true, doProfile: false, doPerimeter: false, bandKind: "rabbet", rabbetWidth: camOpt.rabbetWidth, rabbetDepth: camOpt.rabbetDepth, toolNum: camOpt.rabbetToolNum, toolDia: camOpt.rabbetToolDia, feed: camOpt.rabbetFeed, plunge: camOpt.rabbetPlunge, stepover: camOpt.stepover, edgeOverlap: camOpt.edgeOverlap }
         : camOpt.op === "channel"
@@ -11175,7 +11213,8 @@ export default function App() {
     const firstZeroed = !(camOpt.op === "rabbet" && camOpt.job === "core" && !camOpt.pinOrigin);   // core job, glued walls: the first file was zeroed on the stock corner
     // Alignment holes in their own file: it is the first file, and the next one runs in the same setup.
     const ownS = !!ski.alignMarks && alignDrillOp === "own" && !pourS && (camOpt.job === "core" || camOpt.job === "coreInserts");
-    const afterAlign = ownS && camJobOps(camOpt.job, camOpt, ski)[1] === camOpt.op && camOpt.op !== "align";
+    const opsA = camJobOps(camOpt.job, camOpt, ski);
+    const afterAlign = ownS && opsA[1] === camOpt.op && camOpt.op !== "align" && camOpFace("align", camOpt, opsA) === camOpFace(camOpt.op, camOpt, opsA);
     const steps = [`Clamp the ${s.stockKind} down — confirm clamps clear the entire toolpath.`, `Load ${tool}${camOpt.roughing && (camOpt.op === "mold" || camOpt.op === "taper") ? " and the rough tool" : ""} (or set up the ATC tools).`, (afterAlign ? `Keep the X and Y zero from the alignment-hole file. Don't move the blank and don't re-zero X and Y: this file runs in the same setup.` : pinOn ? (camOpt.op === "align" || (!ownS && ((camOpt.op === "bore" && !pourS) || (camOpt.op === "outline" && camOpt.job === "core" && !pourS))) || camOpt.op === "channel" ? `Before anything else: jog to where you want the TAIL-side alignment hole${(camOpt.batchN || 1) > 1 && (camOpt.job === "core" || camOpt.job === "coreInserts") ? " of core 1, on the lengthwise centerline of core 1's blank (the one at the " + (camOpt.partAxis === "x" ? "front" : "left") + " end of the row)" : ", on the lengthwise centerline of the blank"}, and zero X and Y there. The toolpath is laid out from that point. WRITE DOWN the machine coordinates of this point (your controller shows them as machine position): every later file for this ski starts from the same point.` : (firstZeroed ? `Keep the X and Y zero from the first file: the center of the TAIL-side alignment hole. Do not re-zero anywhere else. If the zero was lost (power cut, re-homing, or a cleared offset), jog to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there.` : `Zero X and Y on the center of the TAIL-side alignment pin (an edge finder or centering pin helps). This file is laid out from that point.`)) : camOpt.origin === "tailmark" && camOpt.op !== "slat" && camOpt.op !== "pocket" ? `Draw the ski's centerline on the ${s.stockKind}. Jog to the point on that line ${camOpt.zeroMarkGap} ${uu} behind where the ski's tail end will be, and zero X and Y there. The ski runs from there along the line, so leave room for the whole ski in front of it.` : camOpt.origin === "center" ? `Zero X and Y at the middle of the part: the lengthwise centerline at mid-length.` : `Jog to the FRONT-LEFT corner of the stock and zero X and Y there (corner origin, every move is positive).`), `Zero Z on ${camOpt.zZero === "bed" ? "the machine bed / spoilboard" : "the top of the stock"}.`, `Air-cut once above the stock to confirm the program stays on the part and nothing goes negative.`, `Run it — keep a hand near feed-hold, especially on the first pass.`];
     // Two-sided sequence notes. Op 1 = Bore (bottom face up); op 2 = Core Taper (top face up, on the pins).
     const inchS = camOpt.units === "inch", cvS = v => inchS ? +(v / 25.4).toFixed(3) : +v.toFixed(1);
@@ -11189,25 +11228,31 @@ export default function App() {
     if (outS && ["bore", "rabbet", "taper", "outline"].includes(camOpt.op)) {
       // Holes past the tip and tail: the core stays in the blank until the last file cuts it out.
       const prof = !!camOpt.chanProfiled, ops = camJobOps(camOpt.job, camOpt, ski), i = ops.indexOf(camOpt.op), prev = ops[i - 1];
-      const prevBottom = prev === "bore" || prev === "rabbet" || (prev === "channel" && prof);
-      const seatBottom = prevBottom ? "Seat the blank BOTTOM FACE UP on the pins, the same way as the last file (don't turn it over). Hold it down." : "Turn the blank over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it BOTTOM FACE UP on the pins. Hold it down.";
-      const seatTop = prevBottom ? "Turn the blank over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it TOP FACE UP on the pins. Hold it down." : "Seat the blank TOP FACE UP on the pins, the same way as the last file (don't turn it over). Hold it down.";
+      const prevBottom = camOpFace(prev, camOpt, ops) === "bottom";
+      // The file before this one ran in the same setup (no channel fill in between): nothing moves.
+      const same = (prev === "align" || prev === "bore" || prev === "rabbet") && camOpFace(prev, camOpt, ops) === camOpFace(camOpt.op, camOpt, ops);
+      const sameTxt = "Same setup as the last file: don't move the blank.";
+      const seatBottom = same ? sameTxt : prevBottom ? "Seat the blank BOTTOM FACE UP on the pins, the same way as the last file (don't turn it over). Hold it down." : "Turn the blank over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it BOTTOM FACE UP on the pins. Hold it down.";
+      const seatTop = same ? sameTxt : prevBottom ? "Turn the blank over sideways, about its long axis, so the tail and tip stay at the same ends, and seat it TOP FACE UP on the pins. Hold it down." : "Seat the blank TOP FACE UP on the pins, the same way as the last file (don't turn it over). Hold it down.";
+      const pinL = same ? [] : [pinLine];
       if (camOpt.op === "bore") {
         rows.push(["Tools in this file", `T${camOpt.boreToolNum} insert holes and flange pockets`]);
-        steps.splice(0, 1, "Machine the bottom face. The core stays in the blank.", pinLine, seatBottom);
+        steps.splice(0, 1, "Machine the bottom face. The core stays in the blank.", ...pinL, seatBottom);
         steps.push("What this file cuts: insert holes and flange pockets. The core is cut out later, in the last file.");
       } else if (camOpt.op === "rabbet") {
         rows.push(["Rabbet", `${camOpt.rabbetWidth} ${uu} in from the outside edge × ${camOpt.rabbetDepth} ${uu} deep, sides only`]);
-        steps.splice(0, 1, "Edge rabbet, with the core still in the blank.", pinLine, seatBottom);
+        steps.splice(0, 1, "Edge rabbet, with the core still in the blank.", ...pinL, seatBottom);
       } else if (camOpt.op === "taper") {
-        steps.splice(0, 1, "Shape the top face, with the core still in the blank.", pinLine, seatTop);
+        steps.splice(0, 1, "Shape the top face, with the core still in the blank.", ...pinL, seatTop);
       } else {
-        steps.splice(0, 1, "Last file: cut out the core shape. Same setup as the top face, nothing moved.", pinLine);
-        steps.push("It cuts the core out through the poly on the ski outline, which frees it.");
+        // Pins only matter if the blank has been off the table or turned over by now.
+        const reseated = ops.slice(0, i + 1).some((op, k) => k > 0 && (ops[k - 1] === "channel" || camOpFace(op, camOpt, ops) !== camOpFace(ops[k - 1], camOpt, ops)));
+        steps.splice(0, 1, "Last file: cut out the core shape. Same setup as the top face, nothing moved.", ...(reseated ? [pinLine] : []));
+        steps.push(pourS ? "It cuts the core out through the poly on the ski outline, which frees it." : "It cuts the core out of the blank on the ski outline, which frees it.");
       }
       steps.push(`Stock thickness in this file: ${s.setThick} ${uu}.`);
     } else if (camOpt.op === "align") {
-      const aFace = camOpt.job === "coreInserts" ? "BOTTOM" : "TOP", nxt = CAM_STEP_NAMES[camJobOps(camOpt.job, camOpt, ski)[1]] || "next";
+      const aFace = camOpFace("align", camOpt, camJobOps(camOpt.job, camOpt, ski)).toUpperCase(), nxt = CAM_STEP_NAMES[camJobOps(camOpt.job, camOpt, ski)[1]] || "next";
       rows.push(["Holes", `${ahS.length} on the centerline, ${cvS(ski.alignDowelDia || 12.7)} ${uu} across, ${cvS(camOpt.alignPinDepth != null ? camOpt.alignPinDepth : 1)} ${uu} into the spoilboard`]);
       steps.splice(0, 0, `Step 1: drill the alignment holes. Lay the FLAT blank with the core's ${aFace} face up, its length along the machine's long axis.`);
       steps.push("What this file cuts: the two alignment holes, through the blank and into the spoilboard. Nothing else.");
@@ -11270,6 +11315,9 @@ export default function App() {
       steps.splice(1, 0, `This file cuts ${s.batch.n} cores, one in each of ${s.batch.n} blanks laid side by side ${s.batch.gap} ${uu} apart, each core centered in its own blank. Core 1's blank is at X0 Y0; each next blank is ${bp} ${uu} further over in +${camOpt.partAxis === "x" ? "Y" : "X"}, corner to corner. Each core has its own pair of alignment holes on its blank's centerline and goes back on its own pins, in the same place it was cut.`);
     }
     const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Channel filled with glued-in strips: word the poured-sidewall lines for strips.
+    for (let k = 0; k < steps.length; k++) steps[k] = camFillWords(camOpt, steps[k]);
+    for (const r of rows) r[1] = camFillWords(camOpt, r[1]);
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Setup Sheet — ${esc(ski.designName || "Ski")} ${esc(CAM_STEP_NAMES[camOpt.op] || camOpt.op)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#1a1a1a}h1{font-size:20px;letter-spacing:2px;margin:0 0 2px}.sub{color:#777;font-size:12px;margin-bottom:22px}table{width:100%;border-collapse:collapse;margin-bottom:22px}td{padding:7px 6px;border-bottom:1px solid #e8e8e8;font-size:13px;vertical-align:top}td:first-child{color:#888;width:38%}h3{font-size:12px;letter-spacing:2px;color:#555}ol{font-size:13px;line-height:1.75;padding-left:20px}.warn{background:#fdf1ec;border:1px solid #e8552a;border-radius:6px;padding:10px 14px;font-size:12px;color:#b5391a;margin-top:16px}.foot{color:#bbb;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}@media print{.np{display:none}}</style></head><body><h1>CNC SETUP SHEET</h1><div class="sub">${esc(ski.designName || "Ski")} · ${esc(opName)} · ${new Date().toLocaleDateString()}</div><table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table><h3>SET UP &amp; RUN</h3><ol>${steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${camMachine && !camMachine.fits ? `<div class="warn">⚠ This job EXCEEDS the machine bed as set. Re-orient, tile it, or use a larger machine before running.</div>` : ""}<div class="foot">Black Chapel Studios ski designer · designer.blackchapelstudios.com</div><button class="np" onclick="window.print()" style="margin-top:20px;padding:8px 16px;font-size:13px;cursor:pointer">${t("study.print", "Print / Save PDF")}</button></body></html>`;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); } else downloadFile(html, `setup-${CAM_FILE_SLUGS[camOpt.op] || camOpt.op}-${ski.length}mm.html`, "text/html");
@@ -13973,7 +14021,8 @@ export default function App() {
                     const dowelDisp = inchU ? +(dowelMm / 25.4).toFixed(4) : dowelMm;
                     const bitMm = camOpt.alignToolDia != null ? camOpt.alignToolDia : 6.35;
                     const bitDisp = inchU ? +(bitMm / 25.4).toFixed(4) : bitMm;
-                    const ends = isPour && ski.alignPlace === "ends";
+                    const one = camOneSetup(camOpt);   // blank kept on the table: holes always past the tip and tail
+                    const ends = (isPour || one) && ski.alignPlace === "ends";
                     const job0 = camOpt.job || (designInsertPts.length ? "coreInserts" : "core");
                     const hereOp = alignDrillOp === "own" ? "align" : alignDrillOp;   // the file that drills them
                     // Suggested distance past each end: halfway between the ski's end and the blank's end, with the ski
@@ -13981,11 +14030,12 @@ export default function App() {
                     const blankMm = (camOpt.stockL || 0) * (inchU ? 25.4 : 1), sugGap = blankMm > ski.length ? Math.round((blankMm - ski.length) / 4) : null;
                     const gapDisp = ski.alignEndGap > 0 ? (inchU ? +(ski.alignEndGap / 25.4).toFixed(3) : ski.alignEndGap) : "";
                     return (<>
-                      {isPour && (<>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
+                      {(isPour || one) && (<>
+                        {!one && <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
                           <span style={camSmall}>Where</span>
                           {[["core", "Inside the core"], ["ends", "Past the tip and tail"]].map(([v, l]) => <button key={v} onClick={() => setSki(sk => v === "ends" ? { ...sk, alignPlace: "ends", alignEndGap: sk.alignEndGap > 0 ? sk.alignEndGap : sugGap } : { ...sk, alignPlace: "core" })} style={{ ...camSeg((ski.alignPlace === "ends" ? "ends" : "core") === v), flex: "none", padding: "4px 8px" }}>{l}</button>)}
-                        </div>
+                        </div>}
+                        {one && <div style={{ ...camSmall, margin: "6px 0 2px", lineHeight: 1.45 }}>With the blank kept on the table, the holes go in the blank past the tip and tail, so it goes back in the same place after it's turned over or taken off.</div>}
                         {ends && (<>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                             <div style={camSmall}>Distance past each end {uu}</div>
@@ -13995,10 +14045,10 @@ export default function App() {
                           <div style={{ ...camSmall, marginTop: 3, lineHeight: 1.45 }}>On the centerline, in the blank beyond the ski's tail and tip ends, so the core itself has no holes. The core stays in the blank, held by tabs, until the last file cuts it out, so the top face is shaped before the core is cut out.{sugGap ? " Suggested: " + (inchU ? +(sugGap / 25.4).toFixed(2) : sugGap) + " " + uu + ", halfway between the ski's end and the blank's end with the ski centered in the blank." : ""}</div>
                         </>)}
                       </>)}
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
+                      {!one && <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "6px 0 4px", flexWrap: "wrap" }}>
                         <span style={camSmall}>Drill them in</span>
                         {(isPour ? [["channel", "Sidewall channel file"]] : [[job0 === "coreInserts" ? "bore" : "outline", job0 === "coreInserts" ? "Bottom-face file" : "Core shape file"], ["own", "Their own file"]]).map(([v, l]) => <button key={v} onClick={() => setCamMany(v === "own" ? { alignDrillOp: "own", op: "align" } : { alignDrillOp: v, ...(camOpt.op === "align" ? { op: v, ...(v === "outline" ? { outlineSide: "top" } : {}) } : {}) })} style={{ ...camSeg(alignDrillOp === v), flex: "none", padding: "4px 8px" }}>{l}</button>)}
-                      </div>
+                      </div>}
                       <div style={{ color: camOpt.op === hereOp ? C.labelDim : C.heading, fontSize: 10, margin: "2px 0 6px", lineHeight: 1.4, fontFamily: "'JetBrains Mono', monospace" }}>
                         {camOpt.op === hereOp
                           ? "Drilled in this file, through the blank and into the spoilboard so pins can go in later. A bit smaller than the hole cuts it in a spiral; a bit the same size plunges straight down."
@@ -14521,9 +14571,9 @@ export default function App() {
                   if (pf === "cone") { if (!(camOpt.insConeBotDia > 0)) insMissing.push("D"); if (!(camOpt.insConeStep > 0)) insMissing.push("step height"); }
                   if (camOpt.insBarrelMode === "depth" && !(camOpt.insBarrelDepth > 0)) insMissing.push("hole depth");
                   const JOBS = [["core", "Core without inserts", "Top face only"], ["coreInserts", "Core with inserts", "Cut on both faces"], ["mold", "Press mold", "Ribs, bottom and top"], ["base", "Base material", "Drag knife cut"], ["pocket", "Clear a recess", "Flat pocket"]];
-                  const pickJob = j => setCamMany(camJobPatch(j));
+                  const pickJob = j => setCamMany(camJobPatch(j, camOpt.oneSetup ? camOpt : undefined));
                   const pinsTxt = "put pins into the two alignment holes in the spoilboard" + (pinMax != null ? ", standing no taller than " + cvG(pinMax) + " " + uu + (pinsOut ? " (the top of the blank; past the ends the bit stays above it)" : " (the finished core thickness at the holes, so the bit can't reach them)") : "");
-                  const holdTxt = " Hold it down with clamps, vacuum, or tape; the pins only keep it from sliding.";
+                  const holdTxt = " Hold it down with screws outside the cut, clamps, vacuum, or tape; the pins only keep it from sliding.";
                   const flatTxt = " The core has to sit flat, so nothing can stand proud of the face that rests on the table.";
                   // Edge rabbet and channel: where the core's sides end (tip/tail fill line), for the instructions.
                   const lim = coreSideLimits(ski), cvL = v => cvG(v) + " " + uu;
@@ -14543,8 +14593,19 @@ export default function App() {
                     ? { pour: true, title: "Pour, cure, and level", sub: "Fill the channel with poly and let it cure. Level the poly flush with the bottom face; don't plane the blank thinner. It stays " + cvG(pourPlaned * (camOpt.units === "inch" ? 25.4 : 1)) + " " + uu + " thick. If it ends up a different thickness, enter it as Blank thickness after the pour in the next step so the remaining files are right." }
                     : { pour: true, title: "Pour, cure, and plane", sub: "Fill the channel with poly and let it cure. Plane the bottom face until the poly shows full depth along the whole channel. The blank should then be " + cvG(pourPlaned * (camOpt.units === "inch" ? 25.4 : 1)) + " " + uu + " thick (the channel depth). If you end up with a different thickness, enter it as Thickness after planing in the next step so the remaining files are right." };
                   // Holes in the blank past the tip and tail: the core stays in the blank until the last file cuts it out.
+                  const oneNone = camOneSetup(camOpt) && !isPour;   // kept on the table, no sidewalls
                   const outSteps = (() => {
                     if (!pinsOut) return null;
+                    if (oneNone) {
+                      const opsN = camJobOps(job, camOpt, ski), af = camOpFace("align", camOpt, opsN), out = [];
+                      out.push({ op: "align", title: "Drill the alignment holes", sub: "Flat blank, " + af + " face up, held down with screws outside the cut, clamps, vacuum, or tape. Drills the two alignment holes in the blank past the tip and tail, through into the spoilboard. Every later file is zeroed on the tail hole." });
+                      if (job === "coreInserts") out.push({ op: "bore", title: "Machine the bottom face", sub: "Same setup, nothing moved. Don't re-zero X and Y. One file cuts:", parts: [["Insert holes", nIns > 0 && insMissing.length === 0, nIns === 0 ? "no inserts in the design" : (insMissing.length ? insMissing.length + (insMissing.length > 1 ? " sizes" : " size") + " needed" : nIns + " holes")]] });
+                      if (rabCnc) out.push(rabbetStep("Same setup, nothing moved. Don't re-zero X and Y. The core is still in the blank.", ""));
+                      out.push({ op: "taper", title: "Shape the top face", sub: (af === "bottom" ? Pins + ". Turn the blank over sideways, so the tail and tip stay at the same ends, and seat it top face up on the pins." + holdTxt : "Same setup, nothing moved.") + " Don't re-zero X and Y. Carves the thickness taper into the top of the core while it's still in the blank." });
+                      out.push({ op: "outline", side: "top", title: "Cut out the core shape", sub: "Same setup, top face still up, nothing moved. Don't re-zero X and Y. Cuts the core out of the blank on the ski's outline. This is the last file: the core comes free." });
+                      if (!rabCnc) out.push(rabbetStep("", "Remove the core from the blank and clean up the tabs. "));
+                      return out;
+                    }
                     let face = chanProf ? "bottom" : "top";   // which face is up after the channel file
                     const seat = (want, what) => { const s0 = face === want ? "Seat the " + what + " " + want + " face up on the pins, the same way as before (don't turn it over)." : "Turn the " + what + " over sideways, so the tail and tip stay at the same ends, and seat it " + want + " face up on the pins."; face = want; return s0; };
                     const out = [channelStep, pourStep];
@@ -14556,7 +14617,7 @@ export default function App() {
                     return out;
                   })();
                   // Alignment holes in their own file (glued sidewalls): a first step in the same setup as the next file.
-                  const ownW = !isPour && !!ski.alignMarks && alignDrillOp === "own";
+                  const ownW = !isPour && !oneNone && !!ski.alignMarks && alignDrillOp === "own";
                   const alignStep = { op: "align", title: "Drill the alignment holes", sub: "Flat blank, " + (job === "coreInserts" ? "bottom" : "top") + " face up. Drills only the two alignment holes, through the blank into the spoilboard, with their own bit. Then run the next file without moving the blank or re-zeroing X and Y." };
                   const stepsBase = outSteps ? outSteps : job === "coreInserts" ? (isPour ? [
                     channelStep, pourStep,
@@ -14586,7 +14647,7 @@ export default function App() {
                     { op: "slat", slat: "top", title: "Top mold ribs", sub: "Full-length ribs for the top half of the mold. Their bottom edge follows the bottom ribs' curve, raised by the gap you set." },
                   ] : job === "base" ? [{ op: "base", title: "Cut the base material", sub: camOpt.baseCutter === "router" ? "Cuts the base sheet with a router bit, just outside the base line." : "Cuts the base sheet with a drag knife. The spindle stays off." }]
                     : [{ op: "pocket", title: "Clear a recess", sub: "Clears a flat pocket to a set depth." }];
-                  const steps = ownW && (job === "core" || job === "coreInserts") ? [alignStep, ...stepsBase] : stepsBase;
+                  const steps = (ownW && (job === "core" || job === "coreInserts") ? [alignStep, ...stepsBase] : stepsBase).map(st => ({ ...st, title: camFillWords(camOpt, st.title), sub: camFillWords(camOpt, st.sub) }));
                   const isActive = s => !!s.op && s.op === camOpt.op && (!s.side || (camOpt.outlineSide || "top") === s.side) && (!s.slat || (camOpt.slatSide || "bottom") === s.slat);
                   // ── Walk-through: one page per step, with a simple picture of how the part sits and plain instructions,
                   // including how the X/Y zero carries from one file to the next. ──
@@ -14609,11 +14670,14 @@ export default function App() {
                       "If the zero was lost (power cut, re-homing, or a cleared offset), jog back to the machine coordinates you wrote down, or put a pin in the tail hole and center the spindle on it with an edge finder or centering pin, then set X0 Y0 there again.",
                     ];
                     let cutFree = false;   // the core was just cut out of the blank: free it before seating it on the pins
-                    const onPins = (face, flip, what) => [
+                    let offTable = false;  // the blank came off the machine (to fill the channel): it goes back on the pins
+                    let seated = false;    // the part has been put back on the pins at least once
+                    const opsW = camJobOps(job, camOpt, ski);
+                    const onPins = (face, flip, what) => (seated = true) && [
                       ...(cutFree ? ["Take the core out of the blank and clean up the small tabs that held it."] : []),
                       "Put pins in the two alignment holes in the table." + pinsH,
                       flip ? "Turn the " + what + " over sideways, so the tail and tip stay at the same ends, and set it " + face + " face up on the pins." : "Set the " + what + " " + face + " face up on the pins, facing the same way as before (tail at the same end).",
-                      "Hold it down with clamps, vacuum, or tape. The pins only stop it sliding. Nothing can stand proud of the face resting on the table.",
+                      "Hold it down with screws outside the cut, clamps, vacuum, or tape. The pins only stop it sliding. Nothing can stand proud of the face resting on the table.",
                     ];
                     const pages = [];
                     let lastFace = null;
@@ -14621,7 +14685,7 @@ export default function App() {
                       if (s.alt) continue;
                       const pg = { title: s.title, scene: { kind: "bench" }, points: [] };
                       if (s.op === "align") {
-                        const af = job === "coreInserts" ? "bottom" : "top";
+                        const af = camOpFace("align", camOpt, opsW);
                         pg.scene = { kind: "machine", part: "blank", face: af, drill: true, zero: pinJob ? "set" : "corner" };
                         pg.points = [...(pinJob ? setZero(af) : ["Lay the flat blank on the table, " + af + " face up, and hold it down clear of the cut.", "Draw the ski's centerline on the blank and zero X and Y on it, " + camOpt.zeroMarkGap + " " + uu + " behind where the ski's tail end will be. Zero Z as the setup sheet says."]), "Load the alignment-hole bit and run the file. It drills both alignment holes through the blank and into the table, and nothing else.", "Don't move the blank. The next file runs in this same setup."];
                         lastFace = af;
@@ -14630,7 +14694,12 @@ export default function App() {
                         pg.scene = { kind: "machine", part: "blank", face: cf, drill: true, zero: "set", channel: true };
                         pg.points = [...setZero(cf), "Run the file. It drills both alignment holes through the blank and into the table, then cuts the channel along the core's sides, " + (chanProf ? "as deep as the core will be thick at each point plus " + cvG((camOpt.chanExtra || 0) * (camOpt.units === "inch" ? 25.4 : 1)) + " " + uu + "." : "leaving " + cvG((camOpt.chanSkin || 0) * (camOpt.units === "inch" ? 25.4 : 1)) + " " + uu + " of wood under it."), "The holes in the table now mark this setup. Leave them alone until the ski is finished."];
                         lastFace = cf;
+                      } else if (oneNone && s.op === "bore") {
+                        pg.scene = { kind: "machine", part: "blank", face: "bottom", zero: "keep" };
+                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Change to the insert-hole bit and run the file. It cuts the insert holes. The core stays in the blank."];
+                        lastFace = "bottom";
                       } else if (s.pour) {
+                        offTable = true;
                         pg.scene = { kind: "bench", label: chanProf ? "Pour, cure, level" : "Pour, cure, plane" };
                         pg.points = chanProf
                           ? ["Take the blank off the machine. Leave the machine's X/Y zero as it is.", "Fill the channel with poly and let it cure fully.", "Level the poly flush with the bottom face. Don't plane the blank thinner: it stays " + cvG(pourPlaned * (camOpt.units === "inch" ? 25.4 : 1)) + " " + uu + " thick.", "Measure it. If it's a different thickness, enter that as Blank thickness after the pour in the next step."]
@@ -14647,19 +14716,25 @@ export default function App() {
                         pg.scene = { kind: "machine", part: "blank", face: "bottom", pins: true, flip: !chanProf, zero: "keep" };
                         pg.points = [...onPins("bottom", !chanProf, chanProf ? "blank" : "planed blank"), ...keepZero, "Run the file. It cuts the insert holes" + (camOpt.boreWithProfile && !pinsOut ? ", then cuts the core out through the poly on the ski's outline." : ".")];
                         lastFace = "bottom"; cutFree = !!camOpt.boreWithProfile && !pinsOut;
+                      } else if (pinsOut && s.op === "rabbet" && rabCnc && lastFace === "bottom" && !offTable) {
+                        pg.scene = { kind: "machine", part: "blank", face: "bottom", zero: "keep" };
+                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Change to the rabbet bit and run the file. It cuts the rabbet along the sides of the core's bottom, with the core still in the blank."];
                       } else if (pinsOut && s.op === "rabbet" && rabCnc) {
-                        const flip = lastFace !== "bottom";
+                        const flip = lastFace !== "bottom"; offTable = false;
                         pg.scene = { kind: "machine", part: "blank", face: "bottom", pins: true, flip, zero: "keep" };
                         pg.points = [...onPins("bottom", flip, "blank"), ...keepZero, "Run the file. It cuts the rabbet along the sides of the core's bottom, with the core still in the blank."];
                         lastFace = "bottom";
+                      } else if (pinsOut && s.op === "taper" && lastFace === "top" && !offTable) {
+                        pg.scene = { kind: "machine", part: "blank", face: "top", zero: "keep" };
+                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Change to the surfacing bit and run the file. It carves the thickness taper into the top of the core, still in the blank."];
                       } else if (pinsOut && s.op === "taper") {
-                        const flip = lastFace !== "top";
+                        const flip = lastFace !== "top"; offTable = false;
                         pg.scene = { kind: "machine", part: "blank", face: "top", pins: true, flip, zero: "keep" };
                         pg.points = [...onPins("top", flip, "blank"), ...keepZero, "Run the file. It carves the thickness taper into the top of the core, still in the blank."];
                         lastFace = "top";
                       } else if (pinsOut && s.op === "outline") {
-                        pg.scene = { kind: "machine", part: "blank", face: "top", pins: true, zero: "keep" };
-                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Run the file. It cuts the core out through the poly on the ski's outline. That's the last file: the core comes free."];
+                        pg.scene = { kind: "machine", part: "blank", face: "top", pins: seated, zero: "keep" };
+                        pg.points = ["Same setup as the last step: nothing moves.", ...keepZero, "Run the file. It cuts the core out " + (isPour ? "through the poly on" : "of the blank on") + " the ski's outline. That's the last file: the core comes free."];
                         cutFree = true;
                       } else if (s.op === "outline" && s.side === "bottom") {
                         pg.scene = { kind: "machine", part: "blank", face: "bottom", pins: isPour, zero: "keep" };
@@ -14689,7 +14764,7 @@ export default function App() {
                       } else if (s.op === "rabbet" && !rabCnc) {
                         pg.scene = { kind: "bench", label: "Router table" };
                         cutFree = false;
-                        pg.points = ["Done by hand, with no file.", "On a router table, usually with a pattern bit, cut a shallow step along each side of the core's bottom face: as deep as the edge tangs are thick, reaching in from the finished outer edge (the outside of the sidewall) as far as the edges reach.", "Sides only, not the ends: " + (lim.full ? "stop at the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "stop where the tip and tail filler starts (" + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end)."), "It gives the edge tangs room where they lap over the base, so the base and edges sit flat against the core."];
+                        pg.points = ["Done by hand, with no file.", "On a router table, usually with a pattern bit, cut a shallow step along each side of the core's bottom face: as deep as the edge tangs are thick, reaching in from the finished outer edge (" + (oneNone ? "the ski's edge" : "the outside of the sidewall") + ") as far as the edges reach.", "Sides only, not the ends: " + (lim.full ? "stop at the contact points (" + cvL(lim.tailC) + " and " + cvL(lim.tipC) + " from the tail end)." : "stop where the tip and tail filler starts (" + cvL(lim.xa) + " and " + cvL(lim.xb) + " from the tail end)."), "It gives the edge tangs room where they lap over the base, so the base and edges sit flat against the core."];
                       } else if (s.op === "rabbet") {
                         const flip = lastFace !== "bottom";
                         const zeroFresh = job === "core" && !isPour && !camOpt.pinOrigin;
@@ -14706,6 +14781,8 @@ export default function App() {
                         pg.points = ["Lay the assembled core (sidewalls on) top face up, centered on the table's long axis, and hold it down.", "Measure its length and its width at the tip, and enter them under Your material sizes for this step.", "Zero X and Y at the front-left corner of the box around the core's widest points, as the setup sheet says.", "Run the file. It carves the thickness taper into the top face."];
                         lastFace = "top";
                       } else continue;
+                      pg.title = camFillWords(camOpt, pg.title); pg.points = pg.points.map(t => camFillWords(camOpt, t));
+                      if (pg.scene && pg.scene.label) pg.scene.label = camFillWords(camOpt, pg.scene.label);
                       pages.push(pg);
                     }
                     const bnW = camOpt.batchN || 1;
@@ -14855,15 +14932,46 @@ export default function App() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
                       {JOBS.map(([k, t, d]) => (<button key={k} onClick={() => pickJob(k)} style={{ textAlign: "left", padding: "8px 9px", borderRadius: 5, cursor: "pointer", background: C.inputBg, border: job === k ? `2px solid ${C.heading}` : `1px solid ${C.inputBorder}`, color: C.label, fontFamily: "'JetBrains Mono', monospace" }}><div style={{ fontSize: 12, fontWeight: 700, color: job === k ? C.heading : C.label }}>{t}</div><div style={{ fontSize: 10, color: C.labelDim, marginTop: 2 }}>{d}</div></button>))}
                     </div>
-                    {(job === "coreInserts" || job === "core") && (
-                      <div data-wn="cam-sidewalls" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
-                        <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Sidewalls</div>
-                        <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
-                          {[["glue", "Glued-on strips"], ["pour", "Poured (channel)"]].map(([m, l]) => <button key={m} onClick={() => { if (m === "pour" && !ski.alignMarks) setSki(s => ({ ...s, alignMarks: true })); setCamMany({ sidewallMethod: m, ...camJobPatch(job, { ...camOpt, sidewallMethod: m }) }); }} style={{ ...camSeg(m === "pour" ? isPour : !isPour), padding: "4px 8px" }}>{l}</button>)}
+                    {(job === "coreInserts" || job === "core") && (() => {
+                      const one = camOneSetup(camOpt), inchK = camOpt.units === "inch";
+                      const blankMm = (camOpt.stockL || 0) * (inchK ? 25.4 : 1), sugGap = blankMm > ski.length ? Math.round((blankMm - ski.length) / 4) : null;
+                      const setOne = on => {
+                        const method = on ? (camOpt.sidewallMethod === "pour" ? "pour" : "none") : (camOpt.sidewallMethod === "pour" ? "pour" : "glue");
+                        if (on) setSki(sk => ({ ...sk, alignMarks: true, alignPlace: "ends", alignEndGap: sk.alignEndGap > 0 ? sk.alignEndGap : sugGap }));
+                        else if (method !== "pour") setSki(sk => ({ ...sk, alignPlace: "core" }));
+                        const nx = { ...camOpt, oneSetup: on, sidewallMethod: method };
+                        setCamMany({ oneSetup: on, sidewallMethod: method, ...camJobPatch(job, nx) });
+                      };
+                      const pickWalls = m => { if (m === "pour" && !ski.alignMarks) setSki(sk => ({ ...sk, alignMarks: true })); setCamMany({ sidewallMethod: m, ...camJobPatch(job, { ...camOpt, sidewallMethod: m }) }); };
+                      // How many times the blank is turned over in this order, for the summary.
+                      const faceOf = op => op === "bore" || op === "rabbet" || (op === "channel" && camOpt.chanProfiled) ? "bottom" : "top";
+                      const opsK = camJobOps(job, camOpt, ski).filter(op => !(op === "rabbet" && camOpt.rabbetHow !== "cnc"));
+                      let turns = 0; for (let i = 1; i < opsK.length; i++) { const a = opsK[i - 1] === "align" ? faceOf(opsK[i]) : faceOf(opsK[i - 1]); if (faceOf(opsK[i]) !== a) turns++; }
+                      const turnTxt = turns === 0 ? "The blank is never turned over." : "The blank is turned over " + (turns === 1 ? "once" : turns === 2 ? "twice" : turns + " times") + (isPour && turns === 2 ? ": the bottom-face work has to wait until the channel is filled and the bottom planed, since planing would take off anything cut into the bottom before it." : turns === 1 ? ", for the bottom-face work, which comes first." : ".");
+                      return (<>
+                        <div data-wn="cam-onesetup" style={{ border: `1px solid ${one ? C.heading : C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
+                          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", color: one ? C.heading : C.label, fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                            <input type="checkbox" checked={one} onChange={e => setOne(e.target.checked)} style={{ marginTop: 2 }} />
+                            <span>Keep the blank on the table<span style={{ display: "block", color: C.labelDim, fontSize: 10, marginTop: 2, lineHeight: 1.45 }}>For a blank screwed or clamped down (no vacuum table). The core stays in the blank, held by tabs, until the last file cuts it out, and the top face is shaped before that. The alignment holes go in the blank past the tip and tail.{one ? " " + turnTxt : ""}</span></span>
+                          </label>
+                          {one && (job === "coreInserts" || camOpt.rabbetHow === "cnc") && <div style={{ ...camSmall, marginTop: 6, lineHeight: 1.45 }}>{[job === "coreInserts" ? "The insert holes" : null, camOpt.rabbetHow === "cnc" ? "the CNC edge rabbet" : null].filter(Boolean).join(" and ").replace(/^t/, "T")} {job === "coreInserts" && camOpt.rabbetHow === "cnc" ? "are" : "is"} cut into the bottom face, so {job === "coreInserts" && camOpt.rabbetHow === "cnc" ? "they need" : "it needs"} the blank turned over.{camOpt.rabbetHow === "cnc" ? " Routing the rabbet by hand instead takes it off the CNC." : ""}</div>}
+                          {one && !(ski.alignEndGap > 0) && <div style={{ color: C.amber, fontSize: 10.5, marginTop: 6, fontFamily: "'JetBrains Mono', monospace" }}>Enter how far past the tip and tail the alignment holes go, under Alignment holes{blankMm > 0 ? "" : " (or enter the blank's length under Your material sizes for a suggestion)"}.</div>}
                         </div>
-                        <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour ? (camOpt.chanProfiled ? "A channel is cut into the bottom of the blank first, as deep as the core will be thick plus a little, and filled with poly. After it cures you level the poly flush, and the core is later cut out through the poly on the ski's outline." : "A channel is cut into the blank first and filled with poly. After it cures you plane the bottom, then cut the core out through the poly on the ski's outline.") + " Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them. The channel step sets its depth, and Alignment holes sets where the holes go." : "Sidewall strips are glued to the core after it's cut out."}</div>
-                      </div>
-                    )}
+                        <div data-wn="cam-sidewalls" style={{ border: `1px solid ${C.inputBorder}`, borderRadius: 6, padding: 10, marginBottom: 10 }}>
+                          <div style={{ ...camLabel, color: C.heading, marginBottom: 4 }}>Sidewalls</div>
+                          <div style={{ display: "flex", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
+                            {(one ? [["none", "No sidewalls"], ["pour", "In a channel"]] : [["glue", "Glued-on strips"], ["pour", "In a channel"]]).map(([m, l]) => <button key={m} onClick={() => pickWalls(m)} style={{ ...camSeg(m === "pour" ? isPour : !isPour), padding: "4px 8px" }}>{l}</button>)}
+                          </div>
+                          {isPour && <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+                            <span style={camSmall}>Filled with</span>
+                            {[["pour", "Poured poly"], ["strips", "Glued-in strips"]].map(([m, l]) => <button key={m} onClick={() => setCam("chanFill", m)} style={{ ...camSeg((camOpt.chanFill || "pour") === m), flex: "none", padding: "4px 8px" }}>{l}</button>)}
+                          </div>}
+                          <div style={{ ...camSmall, lineHeight: 1.4 }}>{isPour
+                            ? (camOpt.chanProfiled ? "A channel is cut into the bottom of the blank first, as deep as the core will be thick plus a little, and filled. After it cures you level the fill flush, and the core is later cut out through it on the ski's outline." : "A channel is cut into the blank first and filled. After it cures you plane the bottom, then the core is cut out through the fill on the ski's outline.") + ((camOpt.chanFill || "pour") === "strips" ? " Glue sidewall or hardwood strips into the channel instead of pouring." : "") + " Every file is lined up on alignment pins, so this turns on Drill alignment holes; the first file drills them. The channel step sets its depth" + (one ? "." : ", and Alignment holes sets where the holes go.")
+                            : one ? "The core wood runs out to the ski's edge, with no separate sidewall (an all-ash core, for example). The core is cut out on the ski's outline." : "Sidewall strips are glued to the core after it's cut out."}</div>
+                        </div>
+                      </>);
+                    })()}
                     {(job === "coreInserts" || job === "core") && (() => {
                       const bn = camOpt.batchN || 1, inchB = camOpt.units === "inch";
                       const gap = camOpt.batchGap != null ? camOpt.batchGap : (inchB ? 1 : 25.4);
